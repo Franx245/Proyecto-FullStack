@@ -3,6 +3,8 @@ import cors from "cors";
 import ExcelJS from "exceljs";
 import express from "express";
 import prismaPkg from "@prisma/client";
+import path from "path";
+import { fileURLToPath } from "url";
 import { prisma } from "./src/lib/prisma.js";
 import {
   createPasswordResetToken,
@@ -17,24 +19,48 @@ import {
 } from "./src/lib/auth.js";
 
 const { OrderStatus, ShippingZone, UserRole } = prismaPkg;
+const __filename = fileURLToPath(import.meta.url);
+const isDirectExecution = process.argv[1]
+  ? path.resolve(process.argv[1]) === __filename
+  : false;
 
 const app = express();
 const PORT = Number(process.env.PORT || 3001);
 const localHosts = new Set(["localhost", "127.0.0.1"]);
+const configuredOrigins = new Set(
+  [
+    process.env.FRONTEND_URL,
+    process.env.ADMIN_URL,
+    ...(process.env.CORS_ALLOWED_ORIGINS || "").split(","),
+  ]
+    .map((value) => String(value || "").trim().replace(/\/$/, ""))
+    .filter(Boolean)
+);
 const allowedPorts = new Set([
   String(process.env.STORE_PORT || 5173),
   String(process.env.ADMIN_PORT || 5174),
   "5173",
   "5174",
 ]);
+const allowVercelPreviewOrigins = process.env.ALLOW_VERCEL_PREVIEWS === "true";
 
 function isAllowedOrigin(origin) {
   if (!origin) {
     return true;
   }
 
+  const normalizedOrigin = String(origin).replace(/\/$/, "");
+  if (configuredOrigins.has(normalizedOrigin)) {
+    return true;
+  }
+
   try {
     const parsed = new URL(origin);
+
+    if (allowVercelPreviewOrigins && parsed.hostname.endsWith(".vercel.app")) {
+      return true;
+    }
+
     return localHosts.has(parsed.hostname) && allowedPorts.has(parsed.port);
   } catch {
     return false;
@@ -2623,6 +2649,11 @@ app.delete("/api/admin/orders", requireAdminAuth, requireAdminRole([UserRole.ADM
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`DuelVault API running at http://localhost:${PORT}`);
-});
+if (isDirectExecution) {
+  app.listen(PORT, () => {
+    console.log(`DuelVault API running at http://localhost:${PORT}`);
+  });
+}
+
+export { app };
+export default app;

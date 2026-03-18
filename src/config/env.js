@@ -1,15 +1,17 @@
-const required = (value, name) => {
-  if (!value) {
-    throw new Error(`❌ Missing env variable: ${name}`);
+const resolveApiBaseUrl = () => {
+  const configured = import.meta.env.VITE_API_BASE_URL;
+  if (configured) {
+    return configured.replace(/\/$/, "");
   }
-  return value;
+
+  return "";
 };
 
 export const ENV = {
   APP_NAME: import.meta.env.VITE_APP_NAME || "DuelVault",
   ENV: import.meta.env.VITE_APP_ENV || "development",
 
-  API_BASE_URL: required(import.meta.env.VITE_API_BASE_URL, "VITE_API_BASE_URL"),
+  API_BASE_URL: resolveApiBaseUrl(),
   API_TIMEOUT: Number(import.meta.env.VITE_API_TIMEOUT || 10000),
 
   AUTH_PROVIDER: import.meta.env.VITE_AUTH_PROVIDER || "base44",

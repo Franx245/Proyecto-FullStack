@@ -3,6 +3,19 @@ import {
   getStoredUserSession,
   setStoredUserSession,
 } from "@/lib/userSession";
+import { ENV } from "@/config/env";
+
+function buildApiUrl(path) {
+  if (/^https?:\/\//i.test(path)) {
+    return path;
+  }
+
+  if (!ENV.API_BASE_URL) {
+    return path;
+  }
+
+  return `${ENV.API_BASE_URL}${path}`;
+}
 
 function buildQuery(params) {
   const searchParams = new URLSearchParams();
@@ -17,7 +30,7 @@ function buildQuery(params) {
 }
 
 async function request(path, options = {}) {
-  const response = await fetch(path, {
+  const response = await fetch(buildApiUrl(path), {
     headers: {
       "Content-Type": "application/json",
     },
@@ -56,7 +69,7 @@ async function refreshUserAccessToken() {
 
 async function authRequest(path, { method = "GET", body, retryOnAuthError = true } = {}) {
   const session = getStoredUserSession();
-  const response = await fetch(path, {
+  const response = await fetch(buildApiUrl(path), {
     method,
     headers: {
       "Content-Type": "application/json",

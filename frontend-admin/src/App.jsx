@@ -206,6 +206,12 @@ function getBootstrapSession() {
 }
 
 async function resolveStorefrontLoginUrl() {
+  const configuredStorefrontUrl = (import.meta.env.VITE_STOREFRONT_URL || "").replace(/\/$/, "");
+
+  if (configuredStorefrontUrl) {
+    return `${configuredStorefrontUrl}/auth?mode=login`;
+  }
+
   const fallbackPort = 5173;
 
   try {

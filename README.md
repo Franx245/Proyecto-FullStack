@@ -16,16 +16,16 @@ La separación entre frontend público y backend permite exponer una experiencia
 Arquitectura recomendada para producción:
 
 - Frontend público: Vercel
-- Panel admin: Vercel o despliegue separado bajo la misma API
-- Backend API: Railway o ejecución local con Node.js
-- Base de datos: SQLite con Prisma
+- Panel admin: Vercel como proyecto separado
+- Backend API: Vercel Functions sobre Express
+- Base de datos: Supabase Postgres con Prisma
 
 Flujo general:
 
 1. El storefront en React consulta la API para catálogo, destacados, productos custom y órdenes.
 2. El panel admin autentica usuarios con JWT y refresh tokens.
 3. El backend Express centraliza validaciones, permisos, stock, estados de órdenes y persistencia.
-4. Prisma actúa como capa de acceso a datos y mantiene el esquema.
+4. Prisma actúa como capa de acceso a datos y mantiene el esquema sobre Supabase Postgres.
 
 ## Tech Stack
 
@@ -33,7 +33,7 @@ Flujo general:
 - Node.js
 - Express
 - Prisma
-- SQLite
+- Supabase Postgres
 - JWT
 - TanStack Query
 - Tailwind CSS
@@ -103,29 +103,39 @@ npm run build --workspace frontend-admin
 Ejemplo recomendado para producción o para inyectar variables desde Railway, Render o tu shell:
 
 ```env
-DATABASE_URL=file:./dev.db
+DATABASE_URL=postgresql://postgres.xxxxx:password@aws-0-us-east-1.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1
+DIRECT_URL=postgresql://postgres.xxxxx:password@db.xxxxx.supabase.co:5432/postgres
 JWT_SECRET=replace-with-a-long-random-secret
 ACCESS_TOKEN_SECRET=replace-with-a-different-access-secret
 REFRESH_TOKEN_SECRET=replace-with-a-different-refresh-secret
 MP_ACCESS_TOKEN=
 PORT=3001
 NODE_ENV=development
+FRONTEND_URL=https://tu-storefront.vercel.app
+ADMIN_URL=https://tu-admin.vercel.app
+CORS_ALLOWED_ORIGINS=
+ALLOW_VERCEL_PREVIEWS=true
 ```
 
 Qué hace cada variable:
 
-- DATABASE_URL: URL de conexión de Prisma. En este repo el esquema local usa SQLite; para producción conviene externalizarlo si cambias de proveedor o almacenamiento.
+- DATABASE_URL: URL pooled de Supabase para runtime Prisma.
+- DIRECT_URL: URL directa de Supabase para operaciones de schema y Prisma CLI.
 - JWT_SECRET: secreto general de JWT. El proyecto lo usa como fallback si no definís secretos separados.
 - ACCESS_TOKEN_SECRET: firma de access tokens del admin.
 - REFRESH_TOKEN_SECRET: firma de refresh tokens del admin.
 - MP_ACCESS_TOKEN: token privado de Mercado Pago para una futura integración de pagos.
 - PORT: puerto del backend Express.
 - NODE_ENV: ajusta logging y comportamiento de entorno.
+- FRONTEND_URL: URL pública del storefront en Vercel.
+- ADMIN_URL: URL pública del panel admin en Vercel.
+- CORS_ALLOWED_ORIGINS: lista separada por comas para orígenes extra.
+- ALLOW_VERCEL_PREVIEWS: permite previews de Vercel durante QA.
 
 Nota importante:
 
-- El backend actual puede correr en local sin secretos explícitos porque tiene defaults de desarrollo para JWT y SQLite embebido.
-- En producción no deberías usar esos defaults.
+- El backend puede correr en local con defaults de JWT, pero ya no debe usar SQLite como base productiva.
+- En producción no deberías usar secretos por defecto ni ejecutar seeds automáticamente.
 
 ### Frontend (.env)
 
@@ -140,6 +150,7 @@ VITE_MP_PUBLIC_KEY=
 VITE_ENABLE_CART=true
 VITE_ENABLE_ORDERS=true
 VITE_ENABLE_ANALYTICS=false
+VITE_STOREFRONT_URL=http://127.0.0.1:5173
 ```
 
 Qué hace cada variable:
@@ -152,6 +163,7 @@ Qué hace cada variable:
 - VITE_ENABLE_CART: habilita la experiencia de carrito.
 - VITE_ENABLE_ORDERS: habilita flujo de órdenes.
 - VITE_ENABLE_ANALYTICS: activa banderas de analítica del frontend.
+- VITE_STOREFRONT_URL: URL del storefront usada por el admin para redirigir al login público.
 
 ## Deployment Guide
 
@@ -181,7 +193,7 @@ dist
 
 ### Panel admin
 
-Podés desplegar el admin como proyecto separado en Vercel usando frontend-admin como directorio raíz.
+Desplegá el admin como proyecto separado en Vercel usando frontend-admin como directorio raíz.
 
 Configuración sugerida:
 
@@ -189,26 +201,64 @@ Configuración sugerida:
 - Build Command: npm run build
 - Output Directory: dist
 
-Si lo servís detrás del mismo dominio o proxy, asegurate de que /api apunte al backend productivo.
+Variables mínimas del admin:
 
-## Backend en Railway
+- VITE_API_BASE_URL=https://tu-api-produccion.com
+- VITE_STOREFRONT_URL=https://tu-storefront.vercel.app
 
-1. Crear un nuevo servicio en Railway y conectar el repositorio.
-2. Configurar el start command del backend:
+## Backend API en Vercel + Supabase
 
-```bash
-node backend/server.js
-```
+La raíz del repo ya puede desplegar el backend como función serverless desde api/index.js reutilizando Express.
 
-3. Configurar las variables del servicio:
+Configuración recomendada del proyecto API/store en Vercel:
 
+- Root Directory: raíz del repo
+- Build Command: npm run build:store
+- Output Directory: dist
+
+Variables mínimas del proyecto:
+
+- DATABASE_URL
+- DIRECT_URL
 - JWT_SECRET
 - ACCESS_TOKEN_SECRET
 - REFRESH_TOKEN_SECRET
-- MP_ACCESS_TOKEN si implementás pagos
-- PORT si tu plataforma lo requiere explícitamente
+- FRONTEND_URL
+- ADMIN_URL
+- ALLOW_VERCEL_PREVIEWS=true
 
-4. Si mantenés SQLite en Railway, necesitás asegurar persistencia del archivo o migrar a un storage adecuado. Para producción real, evaluá mover Prisma a una base persistente administrada.
+Antes de apuntar producción, aplicá el esquema en Supabase con Prisma:
+
+```bash
+npm run db:push
+```
+
+Si además necesitás datos iniciales:
+
+```bash
+npm run db:seed
+```
+
+## Supabase Setup
+
+1. Crear un proyecto en Supabase.
+2. Obtener dos cadenas de conexión:
+
+- Session pooler para DATABASE_URL.
+- Direct connection para DIRECT_URL.
+
+3. Ejecutar desde este repo:
+
+```bash
+npm install
+npm run db:push
+```
+
+4. Opcionalmente cargar seed:
+
+```bash
+npm run db:seed
+```
 
 ## Features
 

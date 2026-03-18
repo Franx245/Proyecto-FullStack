@@ -1,4 +1,13 @@
 const SESSION_KEY = "duelvault_admin_session";
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+
+function buildApiUrl(path) {
+  if (/^https?:\/\//i.test(path)) {
+    return path;
+  }
+
+  return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
+}
 
 export function getStoredSession() {
   try {
@@ -23,7 +32,7 @@ async function refreshAccessToken() {
     throw new Error("Session expired");
   }
 
-  const response = await fetch("/api/admin/refresh", {
+  const response = await fetch(buildApiUrl("/api/admin/refresh"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -50,7 +59,7 @@ async function refreshAccessToken() {
 
 async function request(path, { method = "GET", body, retryOnAuthError = true } = {}) {
   const session = getStoredSession();
-  const response = await fetch(path, {
+  const response = await fetch(buildApiUrl(path), {
     method,
     headers: {
       "Content-Type": "application/json",
@@ -75,7 +84,7 @@ async function request(path, { method = "GET", body, retryOnAuthError = true } =
 
 async function requestBlob(path, { method = "GET", retryOnAuthError = true } = {}) {
   const session = getStoredSession();
-  const response = await fetch(path, {
+  const response = await fetch(buildApiUrl(path), {
     method,
     headers: {
       ...(session?.accessToken ? { Authorization: `Bearer ${session.accessToken}` } : {}),
