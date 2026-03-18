@@ -692,10 +692,8 @@ export default function CartPage() {
                 disabled={
                   checkoutMutation.isPending ||
                   isBootstrapping ||
-                  !isAuthenticated ||
-                  !phone ||
-                  !accepted ||
-                  addressesQuery.isLoading
+                  addressesQuery.isLoading ||
+                  items.length === 0
                 }
                 className="w-full h-11 rounded-xl bg-primary font-bold text-primary-foreground flex items-center justify-center gap-2 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
               >

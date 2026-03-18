@@ -100,8 +100,8 @@ function SectionNav({ section, onSectionChange, className = "" }) {
 }
 
 function LoginScreen({ onLoggedIn }) {
-  const [email, setEmail] = useState("admin");
-  const [password, setPassword] = useState("admin");
+  const [email, setEmail] = useState("admin@test.com");
+  const [password, setPassword] = useState("admin123");
   const [error, setError] = useState("");
 
   const loginMutation = useMutation({
