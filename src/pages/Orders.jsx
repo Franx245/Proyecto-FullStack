@@ -16,6 +16,8 @@ import { getTrackedOrderIds } from "@/lib/orderTracking";
 import { toast } from "sonner";
 
 /**
+ * @typedef {"pending_payment" | "paid" | "shipped" | "completed" | "cancelled"} OrderStatus
+ *
  * @typedef {{
  *  version_id: string | number,
  *  name: string,
@@ -32,8 +34,16 @@ import { toast } from "sonner";
  * @typedef {{
  *  id: string,
  *  created_at: string,
- *  status: string,
+ *  status: OrderStatus,
  *  total: number,
+ *  subtotal: number,
+ *  shipping_cost: number,
+ *  shipping_label?: string,
+ *  shipping_zone?: string,
+ *  shipping_address?: string | null,
+ *  tracking_code?: string | null,
+ *  customer_name?: string | null,
+ *  customer_email?: string | null,
  *  customer_phone?: string,
  *  items: Array<{
  *    id: string | number,
@@ -63,6 +73,7 @@ function buildWhatsAppMessage(order) {
   );
 }
 
+/** @param {unknown} value */
 function normalizeWhatsappNumber(value) {
   return typeof value === "string" ? value.replace(/[^\d]/g, "") : "";
 }
@@ -91,8 +102,8 @@ export default function Orders() {
 
   const orders = useMemo(() => {
     const merged = new Map();
-    const publicOrders = isAuthenticated ? trackedOrdersQuery.data?.orders ?? [] : [];
-    const myOrders = isAuthenticated ? myOrdersQuery.data?.orders ?? [] : [];
+    const publicOrders = /** @type {Order[]} */ (isAuthenticated ? trackedOrdersQuery.data?.orders ?? [] : []);
+    const myOrders = /** @type {Order[]} */ (isAuthenticated ? myOrdersQuery.data?.orders ?? [] : []);
 
     for (const order of publicOrders) {
       merged.set(String(order.id), order);
@@ -110,6 +121,7 @@ export default function Orders() {
   const isLoading = trackedOrdersQuery.isLoading || myOrdersQuery.isLoading;
   const supportWhatsappNumber = normalizeWhatsappNumber(storefrontConfigQuery.data?.storefront?.support_whatsapp_number || "");
 
+  /** @type {Record<string, string>} */
   const statusClasses = {
     pending_payment: "bg-slate-500/15 text-slate-200 border-slate-400/20",
     paid: "bg-sky-500/15 text-sky-300 border-sky-400/20",

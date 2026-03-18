@@ -30,6 +30,44 @@ import { toast } from "sonner";
  *  price: number,
  *  quantity: number
  * }} CartItem
+ *
+ * @typedef {{
+ *  id?: number,
+ *  label: string,
+ *  recipient_name: string,
+ *  phone: string,
+ *  line1: string,
+ *  line2: string,
+ *  city: string,
+ *  state: string,
+ *  postal_code: string,
+ *  zone: string,
+ *  notes: string,
+ *  is_default: boolean
+ * }} CheckoutAddress
+ *
+ * @typedef {{
+ *  auth?: string,
+ *  customer_name?: string,
+ *  phone?: string,
+ *  addressId?: string,
+ *  recipient_name?: string,
+ *  line1?: string,
+ *  city?: string,
+ *  state?: string,
+ *  accepted?: string
+ * }} CheckoutErrors
+ *
+ * @typedef {{
+ *  items: Array<{ cardId: number, quantity: number }>,
+ *  customer_name: string,
+ *  phone: string,
+ *  shipping_zone: string,
+ *  notes: string,
+ *  addressId?: number,
+ *  address?: CheckoutAddress,
+ *  save_address?: boolean
+ * }} CheckoutPayload
  */
 
 // 🧩 Row
@@ -112,6 +150,7 @@ function CartRow({ item }) {
   );
 }
 
+/** @returns {CheckoutAddress} */
 function emptyCheckoutAddress() {
   return {
     label: "Casa",
@@ -139,11 +178,11 @@ export default function CartPage() {
   const [shippingZone, setShippingZone] = useState("pickup");
   const [deliveryMode, setDeliveryMode] = useState("saved");
   const [selectedAddressId, setSelectedAddressId] = useState("");
-  const [newAddress, setNewAddress] = useState(emptyCheckoutAddress());
+  const [newAddress, setNewAddress] = useState(/** @type {CheckoutAddress} */ (emptyCheckoutAddress()));
   const [saveAddress, setSaveAddress] = useState(true);
   const [notes, setNotes] = useState("");
   const [accepted, setAccepted] = useState(false);
-  const [errors, setErrors] = useState({});
+  const [errors, setErrors] = useState(/** @type {CheckoutErrors} */ ({}));
 
   const addressesQuery = useQuery({
     queryKey: ["my-addresses", "checkout"],
@@ -152,10 +191,10 @@ export default function CartPage() {
     staleTime: 1000 * 30,
   });
 
-  const addresses = useMemo(
+  const addresses = /** @type {CheckoutAddress[]} */ (useMemo(
     () => addressesQuery.data?.addresses ?? [],
     [addressesQuery.data?.addresses]
-  );
+  ));
 
   useEffect(() => {
     if (user) {
@@ -165,7 +204,10 @@ export default function CartPage() {
   }, [user]);
 
   useEffect(() => {
-    const defaultAddress = addresses.find((address) => address.is_default) || addresses[0];
+    const defaultAddress = addresses.find(
+      /** @param {CheckoutAddress} address */
+      (address) => address.is_default
+    ) || addresses[0];
     if (!defaultAddress) {
       setDeliveryMode("new");
       return;
@@ -183,10 +225,13 @@ export default function CartPage() {
     }));
   }, [shippingZone]);
 
-  const selectedAddress = useMemo(
-    () => addresses.find((address) => String(address.id) === selectedAddressId) || null,
+  const selectedAddress = /** @type {CheckoutAddress | null} */ (useMemo(
+    () => addresses.find(
+      /** @param {CheckoutAddress} address */
+      (address) => String(address.id) === selectedAddressId
+    ) || null,
     [addresses, selectedAddressId]
-  );
+  ));
 
   const effectiveZone = selectedAddress?.zone || shippingZone;
   const shippingOption = getShippingOption(effectiveZone);
@@ -235,6 +280,7 @@ export default function CartPage() {
   const handleConfirm = async () => {
     if (!validate()) return;
 
+    /** @type {CheckoutPayload} */
     const payload = {
       items: items.map((item) => ({
         cardId: Number(item.version_id),
@@ -417,7 +463,10 @@ export default function CartPage() {
                             value={selectedAddressId}
                             onChange={(e) => {
                               const nextAddressId = e.target.value;
-                              const nextAddress = addresses.find((address) => String(address.id) === nextAddressId);
+                              const nextAddress = addresses.find(
+                                /** @param {CheckoutAddress} address */
+                                (address) => String(address.id) === nextAddressId
+                              );
                               setSelectedAddressId(nextAddressId);
                               if (nextAddress?.zone) {
                                 setShippingZone(nextAddress.zone);

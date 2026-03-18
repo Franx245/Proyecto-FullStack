@@ -12,11 +12,44 @@ import {
 } from "@/lib/userSession";
 import { clearTrackedOrderIds } from "@/lib/orderTracking";
 
+/**
+ * @typedef {{
+ *   id: number,
+ *   email?: string | null,
+ *   username?: string | null,
+ *   full_name?: string | null,
+ *   avatar_url?: string | null,
+ *   phone?: string | null,
+ *   role?: string | null,
+ * }} AuthUser
+ *
+ * @typedef {{
+ *   accessToken: string,
+ *   refreshToken: string,
+ *   user: AuthUser,
+ * }} UserSession
+ *
+ * @typedef {{
+ *   session: UserSession | null,
+ *   user: AuthUser | null,
+ *   isAuthenticated: boolean,
+ *   isBootstrapping: boolean,
+ *   isAdmin: boolean,
+ *   isStaff: boolean,
+ *   login: (credentials: Record<string, unknown>) => Promise<UserSession>,
+ *   register: (payload: Record<string, unknown>) => Promise<UserSession>,
+ *   refreshProfile: () => Promise<AuthUser>,
+ *   logout: () => Promise<void>,
+ *   setSession: (nextSession: UserSession | null) => void,
+ * }} AuthContextValue
+ */
+
+/** @type {import("react").Context<AuthContextValue | null>} */
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [session, setSessionState] = useState(() => getStoredUserSession());
-  const [user, setUserState] = useState(() => getStoredUserSession()?.user ?? null);
+  const [session, setSessionState] = useState(/** @type {UserSession | null} */ (getStoredUserSession()));
+  const [user, setUserState] = useState(/** @type {AuthUser | null} */ (getStoredUserSession()?.user ?? null));
   const [isBootstrapping, setIsBootstrapping] = useState(true);
 
   useEffect(() => {
@@ -118,6 +151,7 @@ export function AuthProvider({ children }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
+/** @returns {AuthContextValue} */
 export function useAuth() {
   const context = useContext(AuthContext);
   if (!context) {
