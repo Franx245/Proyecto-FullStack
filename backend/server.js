@@ -680,6 +680,46 @@ function buildCardFilters(query) {
   };
 }
 
+  const PUBLIC_CARD_FILTERS_CACHE_TTL_MS = 1000 * 60 * 10;
+  let publicCardFiltersCache = {
+    value: null,
+    expiresAt: 0,
+  };
+
+  async function getPublicCardFilters() {
+    const now = Date.now();
+    if (publicCardFiltersCache.value && publicCardFiltersCache.expiresAt > now) {
+      return publicCardFiltersCache.value;
+    }
+
+    const [rarityRows, setRows] = await Promise.all([
+      prisma.card.findMany({
+        where: { isVisible: true },
+        select: { rarity: true },
+        distinct: ["rarity"],
+        orderBy: { rarity: "asc" },
+      }),
+      prisma.card.findMany({
+        where: { isVisible: true },
+        select: { setName: true },
+        distinct: ["setName"],
+        orderBy: { setName: "asc" },
+      }),
+    ]);
+
+    const nextValue = {
+      rarities: rarityRows.map((card) => card.rarity).filter(Boolean),
+      sets: setRows.map((card) => card.setName).filter(Boolean),
+    };
+
+    publicCardFiltersCache = {
+      value: nextValue,
+      expiresAt: now + PUBLIC_CARD_FILTERS_CACHE_TTL_MS,
+    };
+
+    return nextValue;
+  }
+
 async function listPublicCards(req, res, searchOverride) {
   const page = Math.max(1, Number(req.query.page || 1));
   const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize || 20)));
@@ -687,6 +727,8 @@ async function listPublicCards(req, res, searchOverride) {
     ...req.query,
     ...(searchOverride !== undefined ? { q: searchOverride } : {}),
   });
+
+  const includeFilterMetadata = req.query.featured !== "true" && req.query.latest !== "true";
 
   const [total, cards, filterOptions] = await Promise.all([
     prisma.card.count({ where: filters.where }),
@@ -696,14 +738,7 @@ async function listPublicCards(req, res, searchOverride) {
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),
-    prisma.card.findMany({
-      where: filters.where,
-      select: {
-        rarity: true,
-        setName: true,
-      },
-      orderBy: { name: "asc" },
-    }),
+    includeFilterMetadata ? getPublicCardFilters() : Promise.resolve({ rarities: [], sets: [] }),
   ]);
 
   res.json({
@@ -712,10 +747,7 @@ async function listPublicCards(req, res, searchOverride) {
     page,
     pageSize,
     totalPages: Math.ceil(total / pageSize),
-    filters: {
-      rarities: [...new Set(filterOptions.map((card) => card.rarity).filter(Boolean))].sort(),
-      sets: [...new Set(filterOptions.map((card) => card.setName).filter(Boolean))].sort(),
-    },
+    filters: filterOptions,
   });
 }
 
@@ -1259,6 +1291,15 @@ app.get("/api/cards", async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Failed to load cards" });
+  }
+});
+
+app.get("/api/cards/filters", async (_req, res) => {
+  try {
+    res.json({ filters: await getPublicCardFilters() });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to load card filters" });
   }
 });
 
@@ -1860,6 +1901,7 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
       });
 
       const cardMap = new Map(cards.map((card) => [card.id, card]));
+      const cardsById = new Map(attachMetadata(cards).map((card) => [card.id, card]));
       let subtotal = 0;
 
       for (const item of normalizedItems) {
@@ -1912,19 +1954,16 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
         include: { items: true, user: true, address: true },
       });
 
-      for (const item of normalizedItems) {
-        await tx.card.update({
-          where: { id: item.cardId },
-          data: { stock: { decrement: item.quantity } },
-        });
-      }
+      await Promise.all(normalizedItems.map((item) => tx.card.update({
+        where: { id: item.cardId },
+        data: { stock: { decrement: item.quantity } },
+      })));
 
-      return order;
+      return { order, cardsById };
     });
 
-    await recordActivity(userId, "CHECKOUT_CREATED", req, { orderId: result.id });
-    const cardsById = await getOrderCardsMap([result]);
-    res.status(201).json({ order: toOrderResponse(result, cardsById) });
+    await recordActivity(userId, "CHECKOUT_CREATED", req, { orderId: result.order.id });
+    res.status(201).json({ order: toOrderResponse(result.order, result.cardsById) });
   } catch (error) {
     if (error?.code === "INSUFFICIENT_STOCK") {
       res.status(409).json({ error: error.message });

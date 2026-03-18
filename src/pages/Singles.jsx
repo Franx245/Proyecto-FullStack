@@ -61,13 +61,14 @@ export default function Singles() {
   const [page, setPage] = useState(1);
 
   const debouncedSearch = useDebounce(searchQuery, 300);
+  const debouncedFilters = useDebounce(filters, 150);
 
   useEffect(() => {
     setPage(1);
   }, [debouncedSearch, category, filters]);
 
   const queryResult = useQuery({
-    queryKey: ["cards", page, debouncedSearch, category, filters],
+    queryKey: ["cards", page, debouncedSearch, category, debouncedFilters],
     placeholderData: (previousData) => previousData,
     staleTime: 1000 * 30,
     /** @returns {Promise<{ cards: CardVersion[], totalPages: number, totalRows: number, filters: { rarities: string[], sets: string[] } }>} */
@@ -77,11 +78,11 @@ export default function Singles() {
         pageSize: PAGE_SIZE,
         search: debouncedSearch,
         category,
-        rarities: filters.rarities,
-        cardTypes: filters.cardTypes,
-        conditions: filters.conditions,
-        sets: filters.sets,
-        priceRange: filters.priceRange,
+        rarities: debouncedFilters.rarities,
+        cardTypes: debouncedFilters.cardTypes,
+        conditions: debouncedFilters.conditions,
+        sets: debouncedFilters.sets,
+        priceRange: debouncedFilters.priceRange,
       });
     },
   });
@@ -134,6 +135,7 @@ export default function Singles() {
               ? `Resultados para "${debouncedSearch}" · ${totalRows}`
               : `${totalRows} resultados disponibles`}
           </p>
+          {isFetching && !isLoading ? <p className="mt-1 text-xs font-medium text-emerald-300">Actualizando resultados...</p> : null}
         </div>
 
         <MobileFilters

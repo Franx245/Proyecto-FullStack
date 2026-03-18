@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -68,6 +68,10 @@ import { toast } from "sonner";
  *  address?: CheckoutAddress,
  *  save_address?: boolean
  * }} CheckoutPayload
+ *
+ * @typedef {{ id: string | number }} CheckoutOrderSummary
+ *
+ * @typedef {{ orders?: CheckoutOrderSummary[] }} OrdersCacheShape
  */
 
 // 🧩 Row
@@ -172,6 +176,7 @@ export default function CartPage() {
   const { items, totalPrice, totalItems, clearCart } = useCart();
   const { user, isAuthenticated, isBootstrapping } = useAuth();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const [phone, setPhone] = useState("");
   const [customerName, setCustomerName] = useState("");
@@ -242,13 +247,22 @@ export default function CartPage() {
     mutationFn: checkoutCart,
     onSuccess: ({ order }) => {
       trackOrderId(order.id);
+      queryClient.setQueryData(["my-orders"], (current) => {
+        const currentData = /** @type {OrdersCacheShape | undefined} */ (current);
+        const currentOrders = Array.isArray(currentData?.orders) ? currentData.orders : [];
+        return {
+          ...(currentData && typeof currentData === "object" ? currentData : {}),
+          orders: [order, ...currentOrders.filter((existing) => String(existing.id) !== String(order.id))],
+        };
+      });
+      queryClient.invalidateQueries({ queryKey: ["my-orders"] });
       clearCart();
 
       toast.success("¡Pedido confirmado!", {
         description: `Orden ${order.id}`,
       });
 
-      navigate("/orders");
+      navigate("/orders", { replace: true });
     },
     onError: (error) => {
       toast.error("No se pudo completar el checkout", {

@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { SlidersHorizontal, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import FiltersSidebar from "./FiltersSidebar";
@@ -32,6 +32,7 @@ export default function MobileFilters({
   sets,
 }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [draftFilters, setDraftFilters] = useState(filters);
 
   const hasFilters =
     filters.rarities?.length ||
@@ -42,17 +43,42 @@ export default function MobileFilters({
 
   const close = useCallback(() => setIsOpen(false), []);
 
+  useEffect(() => {
+    if (!isOpen) {
+      setDraftFilters(filters);
+    }
+  }, [filters, isOpen]);
+
   const handleChange = useCallback(
     /** @param {Filters} newFilters */
     (newFilters) => {
-      onFilterChange(newFilters);
+      setDraftFilters(newFilters);
     },
-    [onFilterChange]
+    []
   );
 
   const handleClear = useCallback(() => {
+    setDraftFilters({
+      rarities: [],
+      cardTypes: [],
+      conditions: [],
+      sets: [],
+      priceRange: null,
+    });
+  }, []);
+
+  const handleApply = useCallback(() => {
+    const changed = JSON.stringify(draftFilters) !== JSON.stringify(filters);
+    if (changed) {
+      onFilterChange(draftFilters);
+    }
+    close();
+  }, [close, draftFilters, filters, onFilterChange]);
+
+  const handleResetAndApply = useCallback(() => {
     onClearFilters();
-  }, [onClearFilters]);
+    close();
+  }, [close, onClearFilters]);
 
   return (
     <>
@@ -103,7 +129,7 @@ export default function MobileFilters({
               {/* Content */}
               <div className="flex-1 overflow-y-auto p-4">
                 <FiltersSidebar
-                  filters={filters}
+                  filters={draftFilters}
                   onFilterChange={handleChange}
                   onClearFilters={handleClear}
                   sets={sets}
@@ -111,9 +137,15 @@ export default function MobileFilters({
               </div>
 
               {/* Footer (pro UX) */}
-              <div className="p-4 border-t border-border">
+              <div className="flex gap-3 p-4 border-t border-border">
                 <button
-                  onClick={close}
+                  onClick={handleResetAndApply}
+                  className="h-10 rounded-lg border border-border px-4 text-sm font-semibold"
+                >
+                  Limpiar
+                </button>
+                <button
+                  onClick={handleApply}
                   className="w-full h-10 rounded-lg bg-primary text-primary-foreground font-semibold text-sm"
                 >
                   Aplicar filtros

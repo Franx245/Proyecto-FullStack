@@ -124,7 +124,7 @@ export async function fetchCatalogCards(options = {}) {
 }
 
 export async function fetchCardSets() {
-  const payload = await request("/api/cards?page=1&pageSize=100");
+  const payload = await request("/api/cards/filters");
   return payload.filters?.sets ?? [];
 }
 
