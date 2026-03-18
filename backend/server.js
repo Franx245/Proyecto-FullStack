@@ -549,12 +549,12 @@ function buildSearchWhere(query) {
 
   return {
     OR: [
-      { name: { contains: trimmedQuery } },
-      { cardType: { contains: trimmedQuery } },
-      { rarity: { contains: trimmedQuery } },
-      { name: { startsWith: trimmedQuery } },
-      { cardType: { startsWith: trimmedQuery } },
-      { rarity: { startsWith: trimmedQuery } },
+      { name: { contains: trimmedQuery, mode: "insensitive" } },
+      { cardType: { contains: trimmedQuery, mode: "insensitive" } },
+      { rarity: { contains: trimmedQuery, mode: "insensitive" } },
+      { name: { startsWith: trimmedQuery, mode: "insensitive" } },
+      { cardType: { startsWith: trimmedQuery, mode: "insensitive" } },
+      { rarity: { startsWith: trimmedQuery, mode: "insensitive" } },
     ],
   };
 }
@@ -585,15 +585,15 @@ function buildCategoryWhere(category) {
   const normalized = category.toLowerCase();
 
   if (normalized.includes("monster") || normalized.includes("monstruo")) {
-    return { cardType: { contains: "Monster" } };
+    return { cardType: { contains: "Monster", mode: "insensitive" } };
   }
 
   if (normalized.includes("spell") || normalized.includes("magia")) {
-    return { cardType: { contains: "Spell" } };
+    return { cardType: { contains: "Spell", mode: "insensitive" } };
   }
 
   if (normalized.includes("trap") || normalized.includes("trampa")) {
-    return { cardType: { contains: "Trap" } };
+    return { cardType: { contains: "Trap", mode: "insensitive" } };
   }
 
   return null;
@@ -643,7 +643,7 @@ function buildCardFilters(query) {
     cardTypes.length
       ? {
           OR: cardTypes.map((cardType) => ({
-            cardType: { contains: cardType },
+            cardType: { contains: cardType, mode: "insensitive" },
           })),
         }
       : null,

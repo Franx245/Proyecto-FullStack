@@ -1,11 +1,13 @@
 import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import StatBlock from "./StatBlock";
+import CardImage from "./CardImage";
 
 /**
  * @typedef {{
  *  name?: string,
  *  image?: string,
+ *  ygopro_id?: number,
  *  attribute?: string,
  *  card_type?: string,
  *  race?: string,
@@ -20,12 +22,14 @@ import StatBlock from "./StatBlock";
  *  race?: string,
  *  desc?: string,
  *  description?: string,
+ *  id?: number,
  *  level?: number,
  *  rank?: number,
  *  link_val?: number,
  *  linkval?: number,
  *  atk?: number,
  *  def?: number,
+ *  ygopro_id?: number,
  *  card_images?: { image_url: string }[]
  * }} YgoProData
  */
@@ -52,6 +56,7 @@ export default function CardInfo({ card = {}, ygoproData = {} }) {
       name: ygoproData.name || card.name || "Unknown Card",
       image:
         ygoproData.card_images?.[0]?.image_url || card.image || null,
+      imageId: ygoproData.id || card.ygopro_id || null,
       attribute: ygoproData.attribute || card.attribute || null,
       type: ygoproData.type || ygoproData.cardType || card.card_type || null,
       race: ygoproData.race || card.race || null,
@@ -94,10 +99,12 @@ export default function CardInfo({ card = {}, ygoproData = {} }) {
             onMouseLeave={() => setZoom(false)}
           >
             {data.image ? (
-              <img
-                src={data.image}
-                alt={data.name}
-                loading="lazy"
+              <CardImage
+                id={data.imageId}
+                name={data.name}
+                priority={true}
+                fallbackSrc={data.image}
+                sizes="(max-width: 768px) 280px, 320px"
                 className="w-[280px] md:w-[320px] rounded-xl shadow-2xl shadow-black/60 ring-1 ring-border"
               />
             ) : (

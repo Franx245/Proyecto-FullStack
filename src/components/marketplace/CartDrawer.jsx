@@ -2,10 +2,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Minus, Plus, Trash2, ShoppingCart } from "lucide-react";
 import { useCart } from "@/lib/cartStore";
 import { useNavigate } from "react-router-dom";
+import CardImage from "./CardImage";
 
 /**
  * @typedef {{
  *  version_id: string | number,
+ *  ygopro_id?: string | number,
  *  name: string,
  *  image?: string,
  *  price: number,
@@ -48,10 +50,12 @@ function CartItem({ item }) {
       {/* IMAGE */}
       <div className="w-14 h-[72px] rounded-md bg-secondary overflow-hidden shrink-0">
         {item.image ? (
-          <img
-            src={item.image}
-            alt={item.name}
-            className="w-full h-full object-cover"
+          <CardImage
+            id={item.ygopro_id}
+            name={item.name}
+            fallbackSrc={item.image}
+            sizes="56px"
+            className="h-full w-full object-cover"
           />
         ) : (
           <div className="flex items-center justify-center h-full text-muted-foreground/30">

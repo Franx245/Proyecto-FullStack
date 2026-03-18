@@ -5,10 +5,12 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import QuantitySelector from "./QuantitySelector";
+import CardImage from "./CardImage";
 
 /**
  * @typedef {{
  *  version_id: string | number,
+ *  ygopro_id?: string | number,
  *  name?: string,
  *  image?: string,
  *  price?: number,
@@ -18,9 +20,9 @@ import QuantitySelector from "./QuantitySelector";
  */
 
 /**
- * @param {{ card: Card }} props
+ * @param {{ card: Card, priorityImage?: boolean }} props
  */
-export default function CardItem({ card }) {
+export default function CardItem({ card, priorityImage = false }) {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
 
@@ -72,10 +74,12 @@ export default function CardItem({ card }) {
 
       <div className="relative aspect-[3/4] overflow-hidden bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.08),transparent_35%),linear-gradient(180deg,rgba(15,23,42,0.16),rgba(2,6,23,0.58))]">
         {card?.image ? (
-          <img
-            src={card.image}
-            alt={card.name ?? "card"}
-            loading="lazy"
+          <CardImage
+            id={card.ygopro_id}
+            name={card.name}
+            priority={priorityImage}
+            fallbackSrc={card.image}
+            sizes="(max-width: 640px) 50vw, (max-width: 1280px) 25vw, 20vw"
             className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.06] group-hover:saturate-[1.08]"
           />
         ) : (

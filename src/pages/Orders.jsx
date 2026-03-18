@@ -14,6 +14,7 @@ import { useAuth } from "@/lib/auth";
 import { getOrderProgress, getShippingOption, orderStatusLabel } from "@/lib/shipping";
 import { getTrackedOrderIds } from "@/lib/orderTracking";
 import { toast } from "sonner";
+import CardImage from "@/components/marketplace/CardImage";
 
 /**
  * @typedef {"pending_payment" | "paid" | "shipped" | "completed" | "cancelled"} OrderStatus
@@ -25,6 +26,7 @@ import { toast } from "sonner";
  *  price: number,
  *  rarity?: string,
  *  image?: string,
+ *  ygopro_id?: string | number,
  *  set_code?: string,
  *  set_name?: string
  * }} OrderItem
@@ -258,17 +260,21 @@ export default function Orders() {
               </div>
 
               <div className="space-y-2 mb-4">
-                {order.items.map((item) => (
+                {order.items.map(
+                  /** @param {{ id: string | number, quantity: number, subtotal: number, card: OrderItem }} item */
+                  (item) => (
                   <div
                     key={item.id}
                     className="flex items-center gap-3"
                   >
                     <div className="w-10 h-14 rounded-md bg-secondary overflow-hidden shrink-0">
                       {item.card?.image ? (
-                        <img
-                          src={item.card.image}
-                          alt={item.card.name}
-                          className="w-full h-full object-cover"
+                        <CardImage
+                          id={item.card.ygopro_id}
+                          name={item.card.name}
+                          fallbackSrc={item.card.image}
+                          sizes="40px"
+                          className="h-full w-full object-cover"
                         />
                       ) : (
                         <div className="w-full h-full bg-secondary" />

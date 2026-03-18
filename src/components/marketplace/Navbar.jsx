@@ -113,7 +113,7 @@ export default function Navbar({ searchQuery, onSearchChange }) {
                 onClick={() => navigate("/account")}
                 className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-slate-200 transition duration-300 hover:border-emerald-400/20 hover:bg-white/[0.06] hover:text-white"
               >
-                {user?.avatar_url ? <img src={user.avatar_url} alt={user.full_name || user.username} className="h-7 w-7 rounded-full object-cover" /> : <UserCircle2 className="h-4 w-4" />}
+                {user?.avatar_url ? <img src={user.avatar_url} alt={user.full_name || user.username || "Usuario"} className="h-7 w-7 rounded-full object-cover" /> : <UserCircle2 className="h-4 w-4" />}
                 <span className="max-w-[140px] truncate">{user?.full_name || user?.username}</span>
               </button>
               <button

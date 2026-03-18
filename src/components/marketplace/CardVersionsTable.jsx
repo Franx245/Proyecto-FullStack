@@ -7,10 +7,12 @@ import { toast } from "sonner";
 
 import RarityBadge from "./RarityBadge";
 import QuantitySelector from "./QuantitySelector";
+import CardImage from "./CardImage";
 
 /**
  * @typedef {{
  *  version_id: string | number,
+ *  ygopro_id?: string | number,
  *  name?: string,
  *  image?: string,
  *  set_name?: string,
@@ -136,11 +138,12 @@ export default function CardVersionsTable({ versions = [], isLoading }) {
               <div className="flex items-start gap-4 md:block">
               <div className="flex h-20 w-14 shrink-0 items-center justify-center overflow-hidden rounded-md bg-secondary md:h-20 md:w-14">
                 {version.image ? (
-                  <img
-                    src={version.image}
-                    alt={version.name}
-                    loading="lazy"
-                    className="w-full h-full object-cover"
+                  <CardImage
+                    id={version.ygopro_id}
+                    name={version.name}
+                    fallbackSrc={version.image}
+                    sizes="56px"
+                    className="h-full w-full object-cover"
                   />
                 ) : (
                   <span className="text-[10px] text-muted-foreground">

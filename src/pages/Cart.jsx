@@ -19,11 +19,13 @@ import { trackOrderId } from "@/lib/orderTracking";
 import { useAuth } from "@/lib/auth";
 import { SHIPPING_OPTIONS, getShippingOption } from "@/lib/shipping";
 import { toast } from "sonner";
+import CardImage from "@/components/marketplace/CardImage";
 
 /**
  * @typedef {{
  *  version_id: string | number,
  *  name: string,
+ *  ygopro_id?: string | number,
  *  image?: string,
  *  rarity?: string,
  *  set_name?: string,
@@ -90,11 +92,12 @@ function CartRow({ item }) {
       {/* Image */}
       <div className="w-16 h-[84px] rounded-lg bg-secondary overflow-hidden shrink-0">
         {item.image ? (
-          <img
-            src={item.image}
-            alt={item.name}
-            className="w-full h-full object-cover"
-            loading="lazy"
+          <CardImage
+            id={item.ygopro_id}
+            name={item.name}
+            fallbackSrc={item.image}
+            sizes="64px"
+            className="h-full w-full object-cover"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center">

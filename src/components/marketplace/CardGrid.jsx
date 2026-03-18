@@ -44,8 +44,8 @@ export default function CardGrid({
 
         <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4">
         <AnimatePresence mode="popLayout">
-          {cards.map((card) => (
-            <CardItem key={card?.version_id ?? Math.random()} card={card} />
+          {cards.map((card, index) => (
+            <CardItem key={card?.version_id ?? Math.random()} card={card} priorityImage={index < 3} />
           ))}
         </AnimatePresence>
 
