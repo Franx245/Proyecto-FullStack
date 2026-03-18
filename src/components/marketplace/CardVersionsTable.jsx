@@ -94,7 +94,7 @@ export default function CardVersionsTable({ versions = [], isLoading }) {
       <div className="bg-card border border-border rounded-2xl overflow-hidden">
 
         {/* Desktop header */}
-        <div className="hidden md:grid grid-cols-[80px_1fr_140px_120px_120px_140px] gap-4 px-5 py-3 border-b border-border bg-secondary/30">
+        <div className="hidden md:grid grid-cols-[80px_minmax(0,1fr)_140px_120px_120px_230px] gap-4 px-5 py-3 border-b border-border bg-secondary/30">
           {["Imagen", "Set", "Rareza", "Precio", "Stock", "Acción"].map((h) => (
             <span
               key={h}
@@ -130,7 +130,7 @@ export default function CardVersionsTable({ versions = [], isLoading }) {
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: idx * 0.04 }}
-              className="group grid grid-cols-1 gap-4 border-b border-border px-4 py-4 transition-colors last:border-0 hover:bg-secondary/30 md:grid-cols-[80px_1fr_140px_120px_120px_140px] md:items-center md:px-5"
+              className="group grid grid-cols-1 gap-4 border-b border-border px-4 py-4 transition-colors last:border-0 hover:bg-secondary/30 md:grid-cols-[80px_minmax(0,1fr)_140px_120px_120px_230px] md:items-center md:px-5"
             >
               {/* Image */}
               <div className="flex items-start gap-4 md:block">
@@ -206,7 +206,7 @@ export default function CardVersionsTable({ versions = [], isLoading }) {
               </div>
 
               {/* Action */}
-              <div className={isMobile ? "md:col-auto" : ""}>
+              <div className={isMobile ? "md:col-auto" : "min-w-0 md:justify-self-end"}>
                 <QuantitySelector
                   onConfirm={(qty) => handleAdd(version, qty)}
                   maxStock={version.stock ?? 0}
