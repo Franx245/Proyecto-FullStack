@@ -47,8 +47,32 @@ function spawnService(label, command, env = process.env) {
   return child;
 }
 
-function isPortFree(port) {
+function canConnect(port, hostname) {
   return new Promise((resolve) => {
+    const socket = new net.Socket();
+
+    const finish = (result) => {
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(result);
+    };
+
+    socket.setTimeout(250);
+    socket.once("connect", () => finish(true));
+    socket.once("timeout", () => finish(false));
+    socket.once("error", () => finish(false));
+    socket.connect(port, hostname);
+  });
+}
+
+function isPortFree(port) {
+  return new Promise(async (resolve) => {
+    const localhostOccupied = await canConnect(port, "127.0.0.1");
+    if (localhostOccupied) {
+      resolve(false);
+      return;
+    }
+
     const server = net.createServer();
 
     server.once("error", () => resolve(false));
@@ -56,7 +80,7 @@ function isPortFree(port) {
       server.close(() => resolve(true));
     });
 
-    server.listen(port, host);
+    server.listen(port);
   });
 }
 
@@ -88,7 +112,7 @@ async function waitForUrl(url, label, timeoutMs = 45000) {
       // Keep polling until timeout.
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    await new Promise((resolve) => setTimeout(resolve, 250));
   }
 
   throw new Error(`Timed out waiting for ${label} at ${url}`);
@@ -134,8 +158,8 @@ async function main() {
   const adminPort = await findPort(Number(process.env.ADMIN_PORT || 5174), reservedPorts);
 
   console.log(`[boot] Using ports api=${apiPort} store=${storePort} admin=${adminPort}`);
-  console.log("[boot] Preparing database and seed data...");
-  await runCommand("prepare", "npm run setup:dev", {
+  console.log("[boot] Syncing schema...");
+  await runCommand("prepare:schema", "prisma db push --skip-generate --schema backend/prisma/schema.prisma", {
     ...process.env,
     API_PORT: String(apiPort),
     STORE_PORT: String(storePort),
@@ -147,22 +171,32 @@ async function main() {
     API_PORT: String(apiPort),
     STORE_PORT: String(storePort),
     ADMIN_PORT: String(adminPort),
+    SKIP_FULL_SEED_IF_READY: "1",
   };
+
+  console.log("[boot] Starting services while seed finishes...");
 
   const api = spawnService("api", "npm run dev:api", {
     ...sharedEnv,
     PORT: String(apiPort),
   });
+  const seedPromise = runCommand("prepare:seed", "prisma db seed", sharedEnv);
+  const apiHealthUrl = `http://${host}:${apiPort}/api/health`;
+
+  children.push(api);
+
+  await waitForUrl(apiHealthUrl, "api");
+
   const store = spawnService("store", "npm run dev:store", sharedEnv);
   const admin = spawnService("admin", "npm run dev:admin", sharedEnv);
 
   const serviceHealthChecks = new Map([
-    [api, { label: "api", url: `http://${host}:${apiPort}/api/health` }],
+    [api, { label: "api", url: apiHealthUrl }],
     [store, { label: "store", url: `http://${host}:${storePort}` }],
     [admin, { label: "admin", url: `http://${host}:${adminPort}` }],
   ]);
 
-  children.push(api, store, admin);
+  children.push(store, admin);
 
   for (const child of children) {
     child.on("exit", async (code) => {
@@ -187,7 +221,7 @@ async function main() {
   }
 
   await Promise.all([
-    waitForUrl(`http://${host}:${apiPort}/api/health`, "api"),
+    seedPromise,
     waitForUrl(`http://${host}:${storePort}`, "store"),
     waitForUrl(`http://${host}:${adminPort}`, "admin"),
   ]);

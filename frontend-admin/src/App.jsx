@@ -5,16 +5,19 @@ import {
   BarChart3,
   Boxes,
   LogOut,
+  MessageCircle,
   PackageSearch,
   ReceiptText,
   ShieldAlert,
   Star,
   TrendingUp,
+  Users,
 } from "lucide-react";
 import {
   clearStoredSession,
   createCustomCategory,
   createCustomProduct,
+  exportOrdersWorkbook,
   getCards,
   getCustomCategories,
   getCustomProducts,
@@ -22,13 +25,19 @@ import {
   deleteOrder,
   getDashboard,
   getOrders,
+  getWhatsappSettings,
+  getUsers,
   getStoredSession,
   loginAdmin,
   updateCustomCategory,
   updateCustomProduct,
   updateCard,
   updateCardsBulk,
+  updateOrderShipping,
   updateOrderStatus,
+  updateWhatsappSettings,
+  updateUserRole,
+  setStoredSession,
 } from "./lib/api";
 
 const DashboardView = lazy(() => import("./views/DashboardView"));
@@ -37,6 +46,8 @@ const AnalyticsView = lazy(() => import("./views/AnalyticsView"));
 const HomeMerchandisingView = lazy(() => import("./views/HomeMerchandisingView"));
 const CustomContentView = lazy(() => import("./views/CustomContentView"));
 const OrdersView = lazy(() => import("./views/OrdersView"));
+const UsersView = lazy(() => import("./views/UsersView"));
+const WhatsappSettingsView = lazy(() => import("./views/WhatsappSettingsView"));
 
 const sections = [
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
@@ -45,6 +56,8 @@ const sections = [
   { key: "custom", label: "Custom", icon: PackageSearch },
   { key: "analytics", label: "Analytics", icon: TrendingUp },
   { key: "orders", label: "Pedidos", icon: ReceiptText },
+  { key: "whatsapp", label: "WhatsApp", icon: MessageCircle },
+  { key: "users", label: "Usuarios", icon: Users },
 ];
 
 const SECTION_REQUIREMENTS = {
@@ -53,6 +66,8 @@ const SECTION_REQUIREMENTS = {
   inventory: { dashboard: true, cards: true },
   home: { dashboard: true, cards: true },
   orders: { dashboard: true, orders: true },
+  whatsapp: { dashboard: true, whatsapp: true },
+  users: { dashboard: true, users: true },
   custom: { dashboard: true, custom: true },
 };
 
@@ -163,6 +178,46 @@ function LoginScreen({ onLoggedIn }) {
   );
 }
 
+function getBootstrapSession() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const bootstrap = params.get("bootstrap");
+  if (!bootstrap) {
+    return null;
+  }
+
+  try {
+    const session = JSON.parse(window.atob(bootstrap));
+    if (!session?.accessToken || !session?.refreshToken || !session?.admin) {
+      return null;
+    }
+
+    setStoredSession(session);
+    params.delete("bootstrap");
+    const nextUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}${window.location.hash}`;
+    window.history.replaceState({}, document.title, nextUrl);
+    return session;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveStorefrontLoginUrl() {
+  const fallbackPort = 5173;
+
+  try {
+    const response = await fetch("/api/health");
+    const payload = await response.json().catch(() => ({}));
+    const storePort = payload?.runtime?.store_port || fallbackPort;
+    return `${window.location.protocol}//${window.location.hostname}:${storePort}/auth?mode=login`;
+  } catch {
+    return `${window.location.protocol}//${window.location.hostname}:${fallbackPort}/auth?mode=login`;
+  }
+}
+
 function AdminLoadingShell() {
   return (
     <div className="min-h-screen px-4 py-4 md:px-6">
@@ -206,12 +261,27 @@ function AdminShell({ session, onLogout }) {
   const [updatingOrderId, setUpdatingOrderId] = useState(null);
   const [deletingOrderId, setDeletingOrderId] = useState(null);
   const [isClearingOrders, setIsClearingOrders] = useState(false);
+  const [updatingUserId, setUpdatingUserId] = useState(null);
+  const [isExportingOrders, setIsExportingOrders] = useState(false);
+  const [savingShippingOrderId, setSavingShippingOrderId] = useState(null);
+  const [completedOrderActionKey, setCompletedOrderActionKey] = useState(null);
+  const [completedShippingOrderId, setCompletedShippingOrderId] = useState(null);
+  const [whatsappSavedToken, setWhatsappSavedToken] = useState(0);
+
+  const pulseSuccess = (setter, value) => {
+    setter(value);
+    window.setTimeout(() => {
+      setter((current) => (current === value ? null : current));
+    }, 1600);
+  };
 
   const sectionRequirements = SECTION_REQUIREMENTS[section] || SECTION_REQUIREMENTS.dashboard;
 
   const dashboardQuery = useQuery({ queryKey: ["dashboard", session.admin.id], queryFn: getDashboard, staleTime: 1000 * 30, enabled: Boolean(sectionRequirements.dashboard) });
   const cardsQuery = useQuery({ queryKey: ["cards", session.admin.id], queryFn: getCards, staleTime: 1000 * 30, enabled: Boolean(sectionRequirements.cards) });
   const ordersQuery = useQuery({ queryKey: ["orders", session.admin.id], queryFn: getOrders, staleTime: 1000 * 15, enabled: Boolean(sectionRequirements.orders) });
+  const usersQuery = useQuery({ queryKey: ["users", session.admin.id], queryFn: getUsers, staleTime: 1000 * 30, enabled: Boolean(sectionRequirements.users) });
+  const whatsappSettingsQuery = useQuery({ queryKey: ["whatsapp-settings", session.admin.id], queryFn: getWhatsappSettings, staleTime: 1000 * 30, enabled: Boolean(sectionRequirements.whatsapp) });
   const customCategoriesQuery = useQuery({ queryKey: ["custom-categories", session.admin.id], queryFn: getCustomCategories, staleTime: 1000 * 30, enabled: Boolean(sectionRequirements.custom) });
   const customProductsQuery = useQuery({ queryKey: ["custom-products", session.admin.id], queryFn: getCustomProducts, staleTime: 1000 * 30, enabled: Boolean(sectionRequirements.custom) });
 
@@ -242,12 +312,13 @@ function AdminShell({ session, onLogout }) {
   const updateOrderMutation = useMutation({
     mutationFn: ({ orderId, status }) => updateOrderStatus(orderId, status),
     onMutate: ({ orderId }) => setUpdatingOrderId(orderId),
-    onSuccess: async () => {
+    onSuccess: async (_data, variables) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["orders", session.admin.id] }),
         queryClient.invalidateQueries({ queryKey: ["dashboard", session.admin.id] }),
         queryClient.invalidateQueries({ queryKey: ["cards", session.admin.id] }),
       ]);
+      pulseSuccess(setCompletedOrderActionKey, `${variables.orderId}:${variables.status}`);
     },
     onSettled: () => setUpdatingOrderId(null),
   });
@@ -278,6 +349,49 @@ function AdminShell({ session, onLogout }) {
     onSettled: () => setIsClearingOrders(false),
   });
 
+  const exportOrdersMutation = useMutation({
+    mutationFn: exportOrdersWorkbook,
+    onMutate: () => setIsExportingOrders(true),
+    onSettled: () => setIsExportingOrders(false),
+  });
+
+  const updateOrderShippingMutation = useMutation({
+    mutationFn: ({ orderId, payload }) => updateOrderShipping(orderId, payload),
+    onMutate: ({ orderId }) => setSavingShippingOrderId(orderId),
+    onSuccess: async (_data, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["orders", session.admin.id] }),
+        queryClient.invalidateQueries({ queryKey: ["dashboard", session.admin.id] }),
+      ]);
+      pulseSuccess(setCompletedShippingOrderId, variables.orderId);
+    },
+    onSettled: () => setSavingShippingOrderId(null),
+  });
+
+  const updateUserRoleMutation = useMutation({
+    mutationFn: ({ userId, role }) => updateUserRole(userId, role),
+    onMutate: ({ userId }) => setUpdatingUserId(userId),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["users", session.admin.id] }),
+        queryClient.invalidateQueries({ queryKey: ["dashboard", session.admin.id] }),
+      ]);
+    },
+    onSettled: () => setUpdatingUserId(null),
+  });
+
+  const updateWhatsappSettingsMutation = useMutation({
+    mutationFn: updateWhatsappSettings,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["whatsapp-settings", session.admin.id] });
+      const token = Date.now();
+      setWhatsappSavedToken(token);
+      window.setTimeout(() => {
+        setWhatsappSavedToken((current) => (current === token ? 0 : current));
+      }, 1600);
+    },
+  });
+
   const categoryMutation = useMutation({
     mutationFn: ({ mode, categoryId, payload }) => (mode === "update" ? updateCustomCategory(categoryId, payload) : createCustomCategory(payload)),
     onSuccess: async () => {
@@ -298,8 +412,8 @@ function AdminShell({ session, onLogout }) {
     },
   });
 
-  const loading = dashboardQuery.isLoading || cardsQuery.isLoading || ordersQuery.isLoading || customCategoriesQuery.isLoading || customProductsQuery.isLoading;
-  const error = dashboardQuery.error || cardsQuery.error || ordersQuery.error || customCategoriesQuery.error || customProductsQuery.error;
+  const loading = dashboardQuery.isLoading || cardsQuery.isLoading || ordersQuery.isLoading || usersQuery.isLoading || whatsappSettingsQuery.isLoading || customCategoriesQuery.isLoading || customProductsQuery.isLoading;
+  const error = dashboardQuery.error || cardsQuery.error || ordersQuery.error || usersQuery.error || whatsappSettingsQuery.error || customCategoriesQuery.error || customProductsQuery.error;
 
   if (loading) {
     return <AdminLoadingShell />;
@@ -318,6 +432,8 @@ function AdminShell({ session, onLogout }) {
   const dashboard = dashboardQuery.data;
   const cards = cardsQuery.data?.cards || [];
   const orders = ordersQuery.data?.orders || [];
+  const users = usersQuery.data?.users || [];
+  const whatsappSettings = whatsappSettingsQuery.data?.settings || null;
   const customCategories = customCategoriesQuery.data?.categories || [];
   const customCategoryTree = customCategoriesQuery.data?.tree || [];
   const customProducts = customProductsQuery.data?.products || [];
@@ -390,13 +506,41 @@ function AdminShell({ session, onLogout }) {
         <OrdersView
           orders={orders}
           updatingOrderId={updatingOrderId}
+          completedOrderActionKey={completedOrderActionKey}
+          savingShippingOrderId={savingShippingOrderId}
+          completedShippingOrderId={completedShippingOrderId}
           deletingOrderId={deletingOrderId}
           isClearingOrders={isClearingOrders}
+          isExportingOrders={isExportingOrders}
           canCancelOrders={isAdmin}
           canDeleteOrders={isAdmin}
+          onExportOrders={() => exportOrdersMutation.mutate()}
           onClearOrders={() => clearOrdersMutation.mutate()}
           onDeleteOrder={(orderId) => deleteOrderMutation.mutate(orderId)}
           onStatusChange={(orderId, status) => updateOrderMutation.mutate({ orderId, status })}
+          onShippingSave={(orderId, payload) => updateOrderShippingMutation.mutate({ orderId, payload })}
+        />
+      );
+    }
+
+    if (section === "whatsapp") {
+      return (
+        <WhatsappSettingsView
+          settings={whatsappSettings}
+          canEditWhatsapp={isAdmin}
+          settingsMutation={updateWhatsappSettingsMutation}
+          whatsappSavedToken={whatsappSavedToken}
+        />
+      );
+    }
+
+    if (section === "users") {
+      return (
+        <UsersView
+          users={users}
+          canEditRoles={isAdmin}
+          updatingUserId={updatingUserId}
+          onRoleChange={(userId, role) => updateUserRoleMutation.mutate({ userId, role })}
         />
       );
     }
@@ -468,7 +612,7 @@ function AdminShell({ session, onLogout }) {
                 API + SQLite activos
               </div>
             </div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:hidden">
+            <div className="mt-4 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))] xl:hidden">
               <StatCard title="Low stock" value={dashboard.metrics.lowStockCount} tone="warn" />
               <StatCard title="Out of stock" value={dashboard.metrics.outOfStockCount} tone="danger" />
             </div>
@@ -490,7 +634,7 @@ function AdminShell({ session, onLogout }) {
 }
 
 export default function App() {
-  const [session, setSession] = useState(() => getStoredSession());
+  const [session, setSession] = useState(() => getBootstrapSession() || getStoredSession());
 
   if (!session) {
     return <LoginScreen onLoggedIn={setSession} />;
@@ -499,9 +643,10 @@ export default function App() {
   return (
     <AdminShell
       session={session}
-      onLogout={() => {
+      onLogout={async () => {
         clearStoredSession();
-        setSession(null);
+        const storefrontLoginUrl = await resolveStorefrontLoginUrl();
+        window.location.assign(storefrontLoginUrl);
       }}
     />
   );

@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { motion } from "framer-motion";
 import { ShieldCheck } from "lucide-react";
 import { useCart } from "@/lib/cartStore";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "sonner";
 
 import RarityBadge from "./RarityBadge";
@@ -55,6 +56,7 @@ function StockBadge({ stock }) {
  */
 export default function CardVersionsTable({ versions = [], isLoading }) {
   const { addItem } = useCart();
+  const isMobile = useIsMobile();
 
   const handleAdd = useCallback(
     /** @param {CardVersion} version @param {number} qty */
@@ -128,10 +130,11 @@ export default function CardVersionsTable({ versions = [], isLoading }) {
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: idx * 0.04 }}
-              className="group grid grid-cols-1 md:grid-cols-[80px_1fr_140px_120px_120px_140px] gap-4 items-center px-5 py-4 border-b border-border last:border-0 hover:bg-secondary/30 transition-colors"
+              className="group grid grid-cols-1 gap-4 border-b border-border px-4 py-4 transition-colors last:border-0 hover:bg-secondary/30 md:grid-cols-[80px_1fr_140px_120px_120px_140px] md:items-center md:px-5"
             >
               {/* Image */}
-              <div className="w-14 h-20 rounded-md overflow-hidden bg-secondary flex items-center justify-center">
+              <div className="flex items-start gap-4 md:block">
+              <div className="flex h-20 w-14 shrink-0 items-center justify-center overflow-hidden rounded-md bg-secondary md:h-20 md:w-14">
                 {version.image ? (
                   <img
                     src={version.image}
@@ -147,7 +150,31 @@ export default function CardVersionsTable({ versions = [], isLoading }) {
               </div>
 
               {/* Info */}
-              <div>
+              <div className="min-w-0 flex-1 md:hidden">
+                <p className="text-sm font-semibold leading-5 text-white">
+                  {version.set_name || "—"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {version.set_code || "—"}
+                </p>
+                {version.condition && (
+                  <p className="text-[10px] text-muted-foreground/60 mt-1">
+                    {version.condition}
+                  </p>
+                )}
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <RarityBadge rarity={version.rarity} />
+                  <StockBadge stock={version.stock} />
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <span className="text-lg font-bold text-primary">
+                    ${version.price?.toFixed(2) ?? "—"}
+                  </span>
+                </div>
+              </div>
+              </div>
+
+              <div className="hidden md:block">
                 <p className="font-semibold text-sm">
                   {version.set_name || "—"}
                 </p>
@@ -162,24 +189,24 @@ export default function CardVersionsTable({ versions = [], isLoading }) {
               </div>
 
               {/* Rarity */}
-              <div>
+              <div className="hidden md:block">
                 <RarityBadge rarity={version.rarity} />
               </div>
 
               {/* Price */}
-              <div>
+              <div className="hidden md:block">
                 <span className="text-lg font-bold text-primary">
                   ${version.price?.toFixed(2) ?? "—"}
                 </span>
               </div>
 
               {/* Stock */}
-              <div>
+              <div className="hidden md:block">
                 <StockBadge stock={version.stock} />
               </div>
 
               {/* Action */}
-              <div>
+              <div className={isMobile ? "md:col-auto" : ""}>
                 <QuantitySelector
                   onConfirm={(qty) => handleAdd(version, qty)}
                   maxStock={version.stock ?? 0}

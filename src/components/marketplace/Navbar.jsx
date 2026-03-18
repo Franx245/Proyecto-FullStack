@@ -1,19 +1,15 @@
-import { useState, useCallback, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useCallback } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { ShoppingCart, Search, Menu, X } from "lucide-react";
+import { ShoppingCart, Search, Menu, X, UserCircle2, LogOut, Sparkles } from "lucide-react";
 import { useCart } from "@/lib/cartStore";
-import { fetchVisibleCustomCategoryTree } from "@/api/store";
-
-/**
- * @typedef {{ id: number, name: string, slug: string }} VisibleCustomCategory
- */
+import { useAuth } from "@/lib/auth";
 
 /**
  * @param {{ searchQuery?: string, onSearchChange?: (value: string) => void }} props
  */
 export default function Navbar({ searchQuery, onSearchChange }) {
   const { totalItems } = useCart();
+  const { user, isAuthenticated, logout } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const navigate = useNavigate();
@@ -22,23 +18,8 @@ export default function Navbar({ searchQuery, onSearchChange }) {
   const navLinks = [
     { label: "Inicio", to: "/" },
     { label: "Cartas", to: "/singles" },
-    { label: "Contacto", to: "/contact" },
+    { label: "Pedidos", to: "/orders" },
   ];
-
-  const customCategoriesQuery = useQuery({
-    queryKey: ["visible-custom-categories"],
-    staleTime: 1000 * 60 * 5,
-    queryFn: fetchVisibleCustomCategoryTree,
-  });
-
-  const customLinks = useMemo(() => {
-    return /** @type {VisibleCustomCategory[]} */ (customCategoriesQuery.data ?? []).map((category) => ({
-      label: category.name,
-      to: `/custom/${category.slug}`,
-    }));
-  }, [customCategoriesQuery.data]);
-
-  const mergedLinks = [...navLinks.slice(0, 2), ...customLinks, navLinks[2]];
 
   const isActive = useCallback(
     /** @param {string} path */
@@ -63,28 +44,33 @@ export default function Navbar({ searchQuery, onSearchChange }) {
   );
 
   return (
-    <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl">
-      <div className="mx-auto max-w-[1400px] px-4 py-3 md:h-16 md:py-0">
-        <div className="flex min-w-0 items-center gap-2 sm:gap-3 md:gap-4">
-
-          {/* 🧠 LOGO */}
-          <Link to="/" className="flex shrink-0 items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-              <span className="text-sm font-black text-primary-foreground">YG</span>
+    <header className="sticky top-0 z-50 border-b border-emerald-400/10 bg-slate-950/65 backdrop-blur-2xl supports-[backdrop-filter]:bg-slate-950/45">
+      <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-emerald-400/35 to-transparent" />
+      <div className="mx-auto max-w-[1400px] px-4 py-3 md:px-6">
+        <div className="flex min-w-0 items-center gap-3 lg:gap-5">
+          <Link to="/" className="group flex shrink-0 items-center gap-3">
+            <div className="relative flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl border border-emerald-400/25 bg-gradient-to-br from-emerald-400/30 via-emerald-300/10 to-transparent shadow-[0_0_24px_rgba(74,222,128,0.22)] transition duration-300 group-hover:scale-105 group-hover:shadow-[0_0_34px_rgba(74,222,128,0.35)]">
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.22),transparent_38%)]" />
+              <span className="relative text-sm font-black tracking-[0.24em] text-emerald-100">YG</span>
             </div>
-            <span className="hidden text-lg font-bold sm:block">DuelVault</span>
+            <div className="hidden min-w-0 sm:block">
+              <p className="font-display text-xl font-bold leading-none text-white">DuelVault</p>
+              <p className="mt-1 flex items-center gap-1.5 text-[11px] uppercase tracking-[0.28em] text-emerald-300/80">
+                <Sparkles className="h-3 w-3" />
+                Marketplace premium
+              </p>
+            </div>
           </Link>
 
-          {/* 🧭 NAV DESKTOP */}
-          <nav className="ml-4 hidden items-center gap-1 md:flex">
-            {mergedLinks.map((link) => (
+          <nav className="ml-2 hidden items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-2 py-2 md:flex">
+            {navLinks.map((link) => (
               <Link
                 key={link.to}
                 to={link.to}
-                className={`rounded-md px-3 py-1.5 text-sm transition ${
+                className={`rounded-full px-4 py-2 text-sm font-medium transition duration-300 ${
                   isActive(link.to)
-                    ? "bg-primary/10 font-medium text-primary"
-                    : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                    ? "bg-emerald-400/15 text-emerald-300 shadow-[inset_0_0_0_1px_rgba(74,222,128,0.22)]"
+                    : "text-slate-300 hover:bg-white/[0.06] hover:text-white"
                 }`}
               >
                 {link.label}
@@ -92,10 +78,10 @@ export default function Navbar({ searchQuery, onSearchChange }) {
             ))}
           </nav>
 
-          {/* 🔍 SEARCH DESKTOP */}
-          <div className="ml-auto hidden max-w-md flex-1 md:block">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <div className="ml-auto hidden max-w-xl flex-1 md:block">
+            <div className="group relative">
+              <div className="pointer-events-none absolute inset-0 rounded-full bg-emerald-400/0 blur-xl transition duration-300 group-focus-within:bg-emerald-400/15" />
+              <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 transition group-focus-within:text-emerald-300" />
 
               <input
                 type="text"
@@ -103,29 +89,50 @@ export default function Navbar({ searchQuery, onSearchChange }) {
                 value={searchQuery || ""}
                 onChange={handleSearch}
                 aria-label="Buscar cartas por nombre, tipo o rareza"
-                className="h-10 w-full rounded-xl border border-border bg-secondary/90 pl-9 pr-3 text-sm shadow-inner transition placeholder:text-muted-foreground/70 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/30"
+                className="h-12 w-full rounded-full border border-white/10 bg-white/[0.04] pl-11 pr-4 text-sm text-slate-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition placeholder:text-slate-500 focus:border-emerald-400/35 focus:outline-none focus:ring-4 focus:ring-emerald-400/10"
               />
             </div>
           </div>
 
-          {/* 🛒 CART */}
           <button
             onClick={() => navigate("/cart")}
-            className="relative shrink-0 rounded-lg p-2 transition hover:bg-secondary"
+            className="relative shrink-0 rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-slate-200 transition duration-300 hover:border-emerald-400/20 hover:bg-white/[0.06] hover:text-white"
           >
             <ShoppingCart className="h-5 w-5" />
 
             {totalItems > 0 && (
-              <span className="absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">
+              <span className="absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-emerald-400 px-1 text-[10px] font-bold text-slate-950 shadow-[0_0_18px_rgba(74,222,128,0.6)]">
                 {totalItems}
               </span>
             )}
           </button>
 
-          {/* 📱 MENU MOBILE */}
+          {isAuthenticated ? (
+            <div className="hidden items-center gap-2 md:flex">
+              <button
+                onClick={() => navigate("/account")}
+                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-slate-200 transition duration-300 hover:border-emerald-400/20 hover:bg-white/[0.06] hover:text-white"
+              >
+                {user?.avatar_url ? <img src={user.avatar_url} alt={user.full_name || user.username} className="h-7 w-7 rounded-full object-cover" /> : <UserCircle2 className="h-4 w-4" />}
+                <span className="max-w-[140px] truncate">{user?.full_name || user?.username}</span>
+              </button>
+              <button
+                onClick={() => logout()}
+                className="rounded-full border border-white/10 bg-white/[0.03] p-3 text-slate-400 transition duration-300 hover:border-white/15 hover:bg-white/[0.06] hover:text-white"
+                aria-label="Cerrar sesión"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
+            </div>
+          ) : (
+            <Link to="/auth?redirect=/cart" className="hidden rounded-full border border-emerald-400/20 bg-gradient-to-r from-emerald-400/90 via-lime-400/80 to-emerald-300/90 px-5 py-2.5 text-sm font-semibold text-slate-950 shadow-[0_0_24px_rgba(74,222,128,0.25)] transition duration-300 hover:-translate-y-0.5 hover:shadow-[0_0_34px_rgba(74,222,128,0.35)] md:inline-flex">
+              Ingresar
+            </Link>
+          )}
+
           <button
             onClick={() => setMobileOpen((p) => !p)}
-            className="rounded-lg p-2 transition hover:bg-secondary md:hidden"
+            className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-slate-200 transition duration-300 hover:bg-white/[0.06] md:hidden"
           >
             {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
@@ -133,36 +140,55 @@ export default function Navbar({ searchQuery, onSearchChange }) {
 
         <div className="mt-3 md:hidden">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
             <input
               type="text"
               placeholder="Buscar cartas..."
               value={searchQuery || ""}
               onChange={handleSearch}
               aria-label="Buscar cartas por nombre, tipo o rareza"
-              className="h-10 w-full rounded-xl border border-border bg-secondary/90 pl-9 pr-3 text-sm shadow-inner transition placeholder:text-muted-foreground/70 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/30"
+              className="h-11 w-full rounded-full border border-white/10 bg-white/[0.04] pl-11 pr-4 text-sm text-slate-100 transition placeholder:text-slate-500 focus:border-emerald-400/35 focus:outline-none focus:ring-4 focus:ring-emerald-400/10"
             />
           </div>
         </div>
       </div>
 
-      {/* 📱 MOBILE MENU */}
       {mobileOpen && (
-        <nav className="space-y-1 border-t border-border bg-background px-4 py-3 md:hidden">
-          {mergedLinks.map((link) => (
+        <nav className="space-y-2 border-t border-white/10 bg-slate-950/95 px-4 py-4 md:hidden">
+          {navLinks.map((link) => (
             <Link
               key={link.to}
               to={link.to}
               onClick={() => setMobileOpen(false)}
-              className={`block rounded-md px-3 py-2 text-sm transition ${
+              className={`block rounded-2xl px-4 py-3 text-sm transition ${
                 isActive(link.to)
-                  ? "bg-primary/10 font-medium text-primary"
-                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                  ? "bg-emerald-400/15 font-medium text-emerald-300"
+                  : "text-slate-300 hover:bg-white/[0.06] hover:text-white"
               }`}
             >
               {link.label}
             </Link>
           ))}
+          {isAuthenticated ? (
+            <>
+              <Link to="/account" onClick={() => setMobileOpen(false)} className="block rounded-2xl px-4 py-3 text-sm text-slate-300 transition hover:bg-white/[0.06] hover:text-white">
+                Mi cuenta
+              </Link>
+              <button
+                onClick={async () => {
+                  await logout();
+                  setMobileOpen(false);
+                }}
+                className="block w-full rounded-2xl px-4 py-3 text-left text-sm text-slate-300 transition hover:bg-white/[0.06] hover:text-white"
+              >
+                Cerrar sesión
+              </button>
+            </>
+          ) : (
+            <Link to="/auth?redirect=/cart" onClick={() => setMobileOpen(false)} className="block rounded-2xl bg-gradient-to-r from-emerald-400/90 to-lime-400/80 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:opacity-95">
+              Ingresar / registrarme
+            </Link>
+          )}
         </nav>
       )}
     </header>

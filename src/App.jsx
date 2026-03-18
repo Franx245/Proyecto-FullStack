@@ -7,6 +7,7 @@ import {
 } from "react-router-dom";
 
 import { CartProvider } from "@/lib/cartStore";
+import { AuthProvider } from "@/lib/auth";
 
 import MarketplaceLayout from "@/components/marketplace/MarketplaceLayout";
 import PageNotFound from "@/lib/PageNotFound";
@@ -19,16 +20,19 @@ import CartPage from "@/pages/Cart";
 import CustomCatalog from "@/pages/CustomCatalog";
 import CustomProductDetail from "@/pages/CustomProductDetail";
 import Orders from "@/pages/Orders";
+import AuthPage from "@/pages/Auth";
+import Account from "@/pages/Account";
 import Privacy from "@/pages/Privacy";
 import Contact from "@/pages/Contact";
 
 function App() {
   return (
       <QueryClientProvider client={queryClientInstance}>
-        <CartProvider>
-            <Router>
-              <Routes>
-                <Route element={<MarketplaceLayout />}>
+        <AuthProvider>
+          <CartProvider>
+              <Router>
+                <Routes>
+                  <Route element={<MarketplaceLayout />}>
                   
                   {/* Home */}
                   <Route path="/" element={<Home />} />
@@ -46,6 +50,8 @@ function App() {
                   {/* Cart & Orders */}
                   <Route path="/cart" element={<CartPage />} />
                   <Route path="/orders" element={<Orders />} />
+                  <Route path="/auth" element={<AuthPage />} />
+                  <Route path="/account" element={<Account />} />
 
                   {/* Static pages */}
                   <Route path="/privacy" element={<Privacy />} />
@@ -55,9 +61,10 @@ function App() {
 
                 {/* 404 */}
                 <Route path="*" element={<PageNotFound />} />
-              </Routes>
-            </Router>
-        </CartProvider>
+                </Routes>
+              </Router>
+          </CartProvider>
+        </AuthProvider>
       </QueryClientProvider>
   
   );

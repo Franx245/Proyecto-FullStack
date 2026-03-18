@@ -7,12 +7,13 @@ const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || process.env.JWT
 const ACCESS_TOKEN_EXPIRES_IN = "15m";
 const REFRESH_TOKEN_EXPIRES_IN = "30d";
 
-export function signAccessToken(admin) {
+export function signAccessToken(user) {
   return jwt.sign(
     {
-      sub: admin.id,
-      email: admin.email,
-      role: admin.role,
+      sub: user.id,
+      email: user.email,
+      username: user.username,
+      role: user.role,
       type: "access",
     },
     ACCESS_TOKEN_SECRET,
@@ -20,11 +21,11 @@ export function signAccessToken(admin) {
   );
 }
 
-export function signRefreshToken(admin, tokenId) {
+export function signRefreshToken(user, tokenId) {
   return jwt.sign(
     {
-      sub: admin.id,
-      role: admin.role,
+      sub: user.id,
+      role: user.role,
       type: "refresh",
       tokenId,
     },
@@ -47,7 +48,7 @@ export function getRefreshTokenExpiryDate() {
   return expiresAt;
 }
 
-export function requireAdminAuth(req, res, next) {
+export function requireAuth(req, res, next) {
   const header = req.headers.authorization;
 
   if (!header?.startsWith("Bearer ")) {
@@ -65,20 +66,40 @@ export function requireAdminAuth(req, res, next) {
       return;
     }
 
-    req.admin = payload;
+    req.user = payload;
     next();
   } catch {
     res.status(401).json({ error: "Invalid token" });
   }
 }
 
-export function requireAdminRole(roles) {
+export function requireRole(roles) {
   return (req, res, next) => {
-    if (!req.admin || !roles.includes(req.admin.role)) {
+    if (!req.user || !roles.includes(req.user.role)) {
       res.status(403).json({ error: "Forbidden" });
       return;
     }
 
     next();
   };
+}
+
+export function requireAdminAuth(req, res, next) {
+  return requireAuth(req, res, () => {
+    if (!req.user || !["ADMIN", "STAFF"].includes(req.user.role)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+
+    req.admin = req.user;
+    next();
+  });
+}
+
+export function requireAdminRole(roles) {
+  return requireRole(roles);
+}
+
+export function createPasswordResetToken() {
+  return crypto.randomBytes(24).toString("hex");
 }

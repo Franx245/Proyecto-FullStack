@@ -59,7 +59,7 @@ export default function MobileFilters({
       {/* 🔘 BUTTON */}
       <button
         onClick={() => setIsOpen(true)}
-        className="lg:hidden flex items-center gap-2 px-3 py-2 rounded-lg bg-secondary border border-border text-sm hover:bg-secondary/80 transition"
+        className="flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-secondary px-3 py-2.5 text-sm transition hover:bg-secondary/80 min-[420px]:w-auto lg:hidden"
       >
         <SlidersHorizontal className="w-4 h-4" />
         Filtros
@@ -87,7 +87,7 @@ export default function MobileFilters({
               animate={{ x: 0 }}
               exit={{ x: "-100%" }}
               transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed top-0 left-0 bottom-0 w-[280px] bg-background border-r border-border z-50 flex flex-col"
+              className="fixed bottom-0 left-0 top-0 z-50 flex w-[min(88vw,320px)] flex-col border-r border-border bg-background"
             >
               {/* Header */}
               <div className="flex items-center justify-between p-4 border-b border-border">

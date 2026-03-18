@@ -5,10 +5,13 @@ import {
   ClipboardList,
   Loader2,
   Copy,
+  MapPin,
   MessageCircle,
   CheckCircle,
 } from "lucide-react";
-import { fetchOrdersByIds } from "@/api/store";
+import { fetchMyOrders, fetchOrdersByIds, fetchStorefrontConfig } from "@/api/store";
+import { useAuth } from "@/lib/auth";
+import { getOrderProgress, getShippingOption, orderStatusLabel } from "@/lib/shipping";
 import { getTrackedOrderIds } from "@/lib/orderTracking";
 import { toast } from "sonner";
 
@@ -60,19 +63,58 @@ function buildWhatsAppMessage(order) {
   );
 }
 
+function normalizeWhatsappNumber(value) {
+  return typeof value === "string" ? value.replace(/[^\d]/g, "") : "";
+}
+
 export default function Orders() {
-  const trackedOrderIds = useMemo(() => getTrackedOrderIds(), []);
-  const { data, isLoading } = useQuery({
+  const { isAuthenticated } = useAuth();
+  const trackedOrderIds = useMemo(() => (isAuthenticated ? getTrackedOrderIds() : []), [isAuthenticated]);
+  const storefrontConfigQuery = useQuery({
+    queryKey: ["storefront-config"],
+    queryFn: fetchStorefrontConfig,
+    staleTime: 1000 * 60,
+  });
+  const trackedOrdersQuery = useQuery({
     queryKey: ["public-orders", trackedOrderIds],
     queryFn: () => fetchOrdersByIds(trackedOrderIds),
     staleTime: 1000 * 30,
+    enabled: trackedOrderIds.length > 0,
   });
 
-  const orders = /** @type {Order[]} */ (data?.orders ?? []);
+  const myOrdersQuery = useQuery({
+    queryKey: ["my-orders"],
+    queryFn: fetchMyOrders,
+    staleTime: 1000 * 30,
+    enabled: isAuthenticated,
+  });
+
+  const orders = useMemo(() => {
+    const merged = new Map();
+    const publicOrders = isAuthenticated ? trackedOrdersQuery.data?.orders ?? [] : [];
+    const myOrders = isAuthenticated ? myOrdersQuery.data?.orders ?? [] : [];
+
+    for (const order of publicOrders) {
+      merged.set(String(order.id), order);
+    }
+
+    for (const order of myOrders) {
+      merged.set(String(order.id), order);
+    }
+
+    return Array.from(merged.values()).sort(
+      (left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime()
+    );
+  }, [isAuthenticated, myOrdersQuery.data?.orders, trackedOrdersQuery.data?.orders]);
+
+  const isLoading = trackedOrdersQuery.isLoading || myOrdersQuery.isLoading;
+  const supportWhatsappNumber = normalizeWhatsappNumber(storefrontConfigQuery.data?.storefront?.support_whatsapp_number || "");
+
   const statusClasses = {
-    pending: "bg-slate-500/15 text-slate-200 border-slate-400/20",
+    pending_payment: "bg-slate-500/15 text-slate-200 border-slate-400/20",
     paid: "bg-sky-500/15 text-sky-300 border-sky-400/20",
     shipped: "bg-emerald-500/15 text-emerald-300 border-emerald-400/20",
+    completed: "bg-amber-500/15 text-amber-300 border-amber-400/20",
     cancelled: "bg-rose-500/15 text-rose-300 border-rose-400/20",
   };
 
@@ -90,6 +132,8 @@ export default function Orders() {
       `Pedido #${order.id}\n` +
       `Fecha: ${new Date(order.created_at).toLocaleString("es-AR")}\n\n` +
       `${lines.join("\n")}\n\n` +
+      `Estado: ${orderStatusLabel(order.status)}\n` +
+      `Envío: ${order.shipping_label || getShippingOption(order.shipping_zone).label}\n` +
       `Total: $${order.total.toFixed(2)}`;
 
     navigator.clipboard.writeText(text);
@@ -98,9 +142,13 @@ export default function Orders() {
 
   /** @param {Order} order */
   const handleWhatsApp = (order) => {
-    const phone = order.customer_phone?.replace(/\D/g, "") || "";
+    if (!supportWhatsappNumber) {
+      toast.error("WhatsApp de soporte no configurado");
+      return;
+    }
+
     window.open(
-      `https://wa.me/${phone}?text=${buildWhatsAppMessage(order)}`,
+      `https://wa.me/${supportWhatsappNumber}?text=${buildWhatsAppMessage(order)}`,
       "_blank"
     );
   };
@@ -156,9 +204,9 @@ export default function Orders() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-semibold ${statusClasses[order.status] || statusClasses.pending}`}>
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-semibold ${statusClasses[order.status] || statusClasses.pending_payment}`}>
                     <CheckCircle className="w-3 h-3" />
-                    {order.status}
+                    {orderStatusLabel(order.status)}
                   </span>
 
                   <span className="text-lg font-black text-primary">
@@ -167,14 +215,42 @@ export default function Orders() {
                 </div>
               </div>
 
-              {/* Items */}
+              <div className="mb-4 rounded-2xl border border-border bg-background/40 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Seguimiento</p>
+                    <p className="mt-1 text-sm font-semibold">{order.shipping_label || getShippingOption(order.shipping_zone).label}</p>
+                    {order.tracking_code ? <p className="mt-2 text-sm text-primary">Tracking: {order.tracking_code}</p> : null}
+                  </div>
+                  {order.shipping_address ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <MapPin className="w-4 h-4" />
+                      {order.shipping_address}
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-4">
+                  {getOrderProgress(order.status).map((step) => (
+                    <div key={step.key} className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className={`h-2.5 w-2.5 rounded-full ${step.state === "done" ? "bg-primary" : step.state === "current" ? "bg-yellow-400" : step.state === "cancelled" ? "bg-destructive" : "bg-border"}`} />
+                        <span className={`text-xs font-semibold ${step.state === "upcoming" ? "text-muted-foreground" : "text-foreground"}`}>
+                          {step.label}
+                        </span>
+                      </div>
+                      <div className={`h-1 rounded-full ${step.state === "done" ? "bg-primary/70" : step.state === "current" ? "bg-yellow-400/70" : step.state === "cancelled" ? "bg-destructive/70" : "bg-border"}`} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               <div className="space-y-2 mb-4">
                 {order.items.map((item) => (
                   <div
                     key={item.id}
                     className="flex items-center gap-3"
                   >
-                    {/* Image */}
                     <div className="w-10 h-14 rounded-md bg-secondary overflow-hidden shrink-0">
                       {item.card?.image ? (
                         <img
@@ -187,7 +263,6 @@ export default function Orders() {
                       )}
                     </div>
 
-                    {/* Info */}
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">
                         {item.card?.name}
@@ -203,8 +278,7 @@ export default function Orders() {
                     {/* Price */}
                     <div className="text-right shrink-0">
                       <p className="text-sm font-bold text-primary">
-                        $
-                        {item.subtotal.toFixed(2)}
+                        ${item.subtotal.toFixed(2)}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         x{item.quantity}
@@ -214,7 +288,19 @@ export default function Orders() {
                 ))}
               </div>
 
-              {/* Actions */}
+              <div className="mb-4 grid gap-2 rounded-2xl border border-border bg-background/40 p-4 text-sm sm:grid-cols-2">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Cliente</p>
+                  <p className="mt-1 font-medium">{order.customer_name || "Sin nombre"}</p>
+                  <p className="text-muted-foreground">{order.customer_email || order.customer_phone || "Sin contacto"}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Montos</p>
+                  <p className="mt-1 text-muted-foreground">Subtotal: ${order.subtotal.toFixed(2)}</p>
+                  <p className="text-muted-foreground">Envío: ${order.shipping_cost.toFixed(2)}</p>
+                </div>
+              </div>
+
               <div className="flex gap-2 border-t border-border pt-4">
                 <button
                   onClick={() => handleCopy(order)}
@@ -229,7 +315,7 @@ export default function Orders() {
                   className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/10 text-primary text-sm font-medium hover:bg-primary/20 transition"
                 >
                   <MessageCircle className="w-3.5 h-3.5" />
-                  Enviar WhatsApp
+                  Consultar por WhatsApp
                 </button>
               </div>
             </motion.div>

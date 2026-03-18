@@ -6,12 +6,9 @@
   "workspaces": [
     "frontend-admin"
   ],
-  "prisma": {
-    "seed": "node backend/prisma/seed.js"
-  },
   "scripts": {
-    "setup": "prisma generate --schema backend/prisma/schema.prisma && prisma db push --schema backend/prisma/schema.prisma && prisma db seed --schema backend/prisma/schema.prisma",
-    "setup:dev": "prisma db push --skip-generate --schema backend/prisma/schema.prisma && prisma db seed --schema backend/prisma/schema.prisma",
+    "setup": "prisma generate && prisma db push && prisma db seed",
+    "setup:dev": "prisma db push --skip-generate && prisma db seed",
     "postinstall": "npm run setup",
     "dev": "node scripts/dev-stack.mjs",
     "dev:api": "node backend/server.js",
@@ -46,6 +43,7 @@
     "concurrently": "^9.1.2",
     "cors": "^2.8.5",
     "embla-carousel-react": "^8.6.0",
+    "exceljs": "^4.4.0",
     "express": "^5.1.0",
     "framer-motion": "^12.38.0",
     "jsonwebtoken": "^9.0.2",

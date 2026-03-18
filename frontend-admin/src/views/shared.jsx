@@ -1,3 +1,5 @@
+import { Check, LoaderCircle } from "lucide-react";
+
 export function cn(...classes) {
   return classes.filter(Boolean).join(" ");
 }
@@ -18,7 +20,15 @@ export function formatDay(value) {
 }
 
 export function orderStatusLabel(status) {
-  return status.toUpperCase();
+  const labels = {
+    pending_payment: "Pendiente de pago",
+    paid: "Pagado",
+    shipped: "Enviado",
+    completed: "Completado",
+    cancelled: "Cancelado",
+  };
+
+  return labels[status] || String(status || "").toUpperCase();
 }
 
 export function cardStatusLabel(card) {
@@ -90,9 +100,10 @@ export function canUseAsParent(candidateId, selectedCategoryId, categoriesById) 
 }
 
 const STATUS_STYLES = {
-  pending: "border-slate-400/20 bg-slate-400/10 text-slate-200",
+  pending_payment: "border-slate-400/20 bg-slate-400/10 text-slate-200",
   paid: "border-sky-400/20 bg-sky-400/10 text-sky-300",
   shipped: "border-emerald-400/20 bg-emerald-400/10 text-emerald-300",
+  completed: "border-amber-400/20 bg-amber-400/10 text-amber-300",
   cancelled: "border-rose-400/20 bg-rose-400/10 text-rose-300",
 };
 
@@ -117,7 +128,7 @@ export function StatCard({ title, value, tone = "default" }) {
 
   return (
     <div className={cn("rounded-3xl border p-5 transition hover:-translate-y-0.5", toneClass)}>
-      <p className="text-xs uppercase tracking-[0.24em] text-slate-400">{title}</p>
+      <p className="text-xs uppercase tracking-[0.2em] text-slate-400 whitespace-normal break-words leading-snug">{title}</p>
       <p className="mt-3 text-3xl font-black text-white">{value}</p>
     </div>
   );
@@ -125,7 +136,7 @@ export function StatCard({ title, value, tone = "default" }) {
 
 export function StatusBadge({ status }) {
   return (
-    <span className={cn("inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em]", STATUS_STYLES[status] || STATUS_STYLES.pending)}>
+    <span className={cn("inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em]", STATUS_STYLES[status] || STATUS_STYLES.pending_payment)}>
       {orderStatusLabel(status)}
     </span>
   );
@@ -183,7 +194,11 @@ export function matchesOrderSearch(order, needle) {
 
   const haystack = [
     String(order.id),
+    order.customer_name || "",
+    order.customer_email || "",
     order.customer_phone || "",
+    order.shipping_address || "",
+    order.shipping_city || "",
     order.status || "",
     ...(order.items || []).flatMap((item) => [item.card?.name || "", String(item.card_id || "")]),
   ]
@@ -191,4 +206,40 @@ export function matchesOrderSearch(order, needle) {
     .toLowerCase();
 
   return haystack.includes(needle);
+}
+
+export function ActionStatusButton({
+  idleLabel,
+  pendingLabel,
+  successLabel = "Completado",
+  pending = false,
+  success = false,
+  disabled = false,
+  className = "",
+  type = "button",
+  onClick,
+}) {
+  const isDisabled = disabled || pending;
+  const content = pending
+    ? { label: pendingLabel, icon: <LoaderCircle className="h-4 w-4 animate-spin" /> }
+    : success
+      ? { label: successLabel, icon: <Check className="h-4 w-4" /> }
+      : { label: idleLabel, icon: null };
+
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={isDisabled}
+      className={cn(
+        "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition duration-200",
+        success && !pending ? "scale-[1.02] ring-2 ring-emerald-300/25" : "",
+        className,
+        isDisabled ? "opacity-60" : ""
+      )}
+    >
+      {content.icon}
+      <span>{content.label}</span>
+    </button>
+  );
 }

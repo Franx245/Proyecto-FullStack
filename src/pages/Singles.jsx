@@ -122,14 +122,14 @@ export default function Singles() {
   }, []);
 
   return (
-    <div className="max-w-[1400px] mx-auto px-4 py-6">
+    <div className="mx-auto max-w-[1400px] px-4 py-5 sm:py-6">
       {/* Header */}
-      <div className="flex justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-black tracking-tight">
+      <div className="mb-5 flex flex-col gap-3 min-[420px]:mb-6 min-[420px]:flex-row min-[420px]:items-start min-[420px]:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-black tracking-tight sm:text-3xl">
             {category || "Cartas"}
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
             {debouncedSearch
               ? `Resultados para "${debouncedSearch}" · ${totalRows}`
               : `${totalRows} resultados disponibles`}
@@ -164,21 +164,25 @@ export default function Singles() {
           />
 
           {/* Paginacion API */}
-          <div className="flex justify-center gap-2 mt-8">
+          <div className="mt-6 flex items-center justify-center gap-2 sm:mt-8">
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page === 1}
-              className="px-3 py-1.5 bg-secondary rounded-lg transition hover:bg-secondary/80 disabled:opacity-40 disabled:hover:bg-secondary"
+              className="flex h-10 w-10 items-center justify-center rounded-xl bg-secondary transition hover:bg-secondary/80 disabled:opacity-40 disabled:hover:bg-secondary"
+              aria-label="Página anterior"
             >
               ←
             </button>
 
-            <span className="px-4 py-1.5 rounded-lg border border-border bg-card text-sm">{page}</span>
+            <span className="min-w-[88px] rounded-xl border border-border bg-card px-4 py-2 text-center text-sm">
+              {page}{totalPages > 0 ? ` / ${totalPages}` : ""}
+            </span>
 
             <button
               onClick={() => setPage((p) => p + 1)}
               disabled={totalPages > 0 ? page >= totalPages : cards.length === 0}
-              className="px-3 py-1.5 bg-secondary rounded-lg transition hover:bg-secondary/80 disabled:opacity-40 disabled:hover:bg-secondary"
+              className="flex h-10 w-10 items-center justify-center rounded-xl bg-secondary transition hover:bg-secondary/80 disabled:opacity-40 disabled:hover:bg-secondary"
+              aria-label="Página siguiente"
             >
               →
             </button>

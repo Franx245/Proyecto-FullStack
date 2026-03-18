@@ -1,9 +1,11 @@
-import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
+  Check,
   Minus,
+  MapPin,
   Plus,
   Trash2,
   ShoppingCart,
@@ -12,8 +14,10 @@ import {
 } from "lucide-react";
 
 import { useCart } from "@/lib/cartStore";
-import { checkoutCart } from "@/api/store";
+import { checkoutCart, fetchMyAddresses } from "@/api/store";
 import { trackOrderId } from "@/lib/orderTracking";
+import { useAuth } from "@/lib/auth";
+import { SHIPPING_OPTIONS, getShippingOption } from "@/lib/shipping";
 import { toast } from "sonner";
 
 /**
@@ -108,14 +112,86 @@ function CartRow({ item }) {
   );
 }
 
+function emptyCheckoutAddress() {
+  return {
+    label: "Casa",
+    recipient_name: "",
+    phone: "",
+    line1: "",
+    line2: "",
+    city: "",
+    state: "Buenos Aires",
+    postal_code: "",
+    zone: "gba",
+    notes: "",
+    is_default: false,
+  };
+}
+
 // 🛒 Page
 export default function CartPage() {
   const { items, totalPrice, totalItems, clearCart } = useCart();
+  const { user, isAuthenticated, isBootstrapping } = useAuth();
   const navigate = useNavigate();
 
   const [phone, setPhone] = useState("");
+  const [customerName, setCustomerName] = useState("");
+  const [shippingZone, setShippingZone] = useState("pickup");
+  const [deliveryMode, setDeliveryMode] = useState("saved");
+  const [selectedAddressId, setSelectedAddressId] = useState("");
+  const [newAddress, setNewAddress] = useState(emptyCheckoutAddress());
+  const [saveAddress, setSaveAddress] = useState(true);
+  const [notes, setNotes] = useState("");
   const [accepted, setAccepted] = useState(false);
   const [errors, setErrors] = useState({});
+
+  const addressesQuery = useQuery({
+    queryKey: ["my-addresses", "checkout"],
+    queryFn: fetchMyAddresses,
+    enabled: isAuthenticated,
+    staleTime: 1000 * 30,
+  });
+
+  const addresses = useMemo(
+    () => addressesQuery.data?.addresses ?? [],
+    [addressesQuery.data?.addresses]
+  );
+
+  useEffect(() => {
+    if (user) {
+      setPhone((current) => current || user.phone || "");
+      setCustomerName((current) => current || user.full_name || "");
+    }
+  }, [user]);
+
+  useEffect(() => {
+    const defaultAddress = addresses.find((address) => address.is_default) || addresses[0];
+    if (!defaultAddress) {
+      setDeliveryMode("new");
+      return;
+    }
+
+    setDeliveryMode("saved");
+    setSelectedAddressId(String(defaultAddress.id));
+    setShippingZone(defaultAddress.zone);
+  }, [addresses]);
+
+  useEffect(() => {
+    setNewAddress((current) => ({
+      ...current,
+      zone: shippingZone,
+    }));
+  }, [shippingZone]);
+
+  const selectedAddress = useMemo(
+    () => addresses.find((address) => String(address.id) === selectedAddressId) || null,
+    [addresses, selectedAddressId]
+  );
+
+  const effectiveZone = selectedAddress?.zone || shippingZone;
+  const shippingOption = getShippingOption(effectiveZone);
+  const totalWithShipping = totalPrice + shippingOption.cost;
+  const requiresManualAddress = isAuthenticated && effectiveZone !== "pickup" && (deliveryMode === "new" || !selectedAddress);
 
   const checkoutMutation = useMutation({
     mutationFn: checkoutCart,
@@ -139,7 +215,18 @@ export default function CartPage() {
   const validate = () => {
     /** @type {Record<string, string>} */
     const nextErrors = {};
+    if (!isAuthenticated) nextErrors.auth = "Necesitás iniciar sesión para confirmar la compra";
     if (!phone.trim()) nextErrors.phone = "Ingresá tu número de WhatsApp";
+    if (!customerName.trim()) nextErrors.customer_name = "Ingresá el nombre de quien recibe";
+    if (effectiveZone !== "pickup" && deliveryMode === "saved" && !selectedAddressId) {
+      nextErrors.addressId = "Elegí una dirección guardada o cargá una nueva";
+    }
+    if (requiresManualAddress) {
+      if (!newAddress.recipient_name.trim()) nextErrors.recipient_name = "Ingresá quién recibe";
+      if (!newAddress.line1.trim()) nextErrors.line1 = "Ingresá calle y altura";
+      if (!newAddress.city.trim()) nextErrors.city = "Ingresá la ciudad";
+      if (!newAddress.state.trim()) nextErrors.state = "Ingresá la provincia";
+    }
     if (!accepted) nextErrors.accepted = "Debés aceptar la política de privacidad";
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
@@ -148,13 +235,30 @@ export default function CartPage() {
   const handleConfirm = async () => {
     if (!validate()) return;
 
-    checkoutMutation.mutate({
+    const payload = {
       items: items.map((item) => ({
         cardId: Number(item.version_id),
         quantity: item.quantity,
       })),
+      customer_name: customerName.trim(),
       phone,
-    });
+      shipping_zone: effectiveZone,
+      notes: notes.trim(),
+    };
+
+    if (effectiveZone !== "pickup") {
+      if (deliveryMode === "saved" && selectedAddressId) {
+        payload.addressId = Number(selectedAddressId);
+      } else {
+        payload.address = {
+          ...newAddress,
+          zone: effectiveZone,
+        };
+        payload.save_address = saveAddress;
+      }
+    }
+
+    checkoutMutation.mutate(payload);
   };
 
   return (
@@ -189,16 +293,279 @@ export default function CartPage() {
         </div>
       ) : (
         <div className="grid lg:grid-cols-[1fr_360px] gap-6">
-          {/* Items */}
           <div className="space-y-3">
             <AnimatePresence>
               {items.map((item) => (
                 <CartRow key={item.version_id} item={item} />
               ))}
             </AnimatePresence>
+
+            <div className="rounded-3xl border border-border bg-card p-5 space-y-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                  Checkout autenticado
+                </p>
+                <h2 className="mt-2 text-lg font-black">
+                  Datos de entrega
+                </h2>
+              </div>
+
+              {!isAuthenticated ? (
+                <div className="rounded-2xl border border-border bg-secondary/50 p-4">
+                  <p className="text-sm font-semibold">Necesitás una cuenta para confirmar el pedido.</p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    El checkout ahora vincula stock, historial, direcciones y seguimiento con tu usuario.
+                  </p>
+                  <Link
+                    to="/auth?redirect=/cart"
+                    className="mt-4 inline-flex h-11 items-center justify-center rounded-2xl bg-primary px-5 text-sm font-bold text-primary-foreground"
+                  >
+                    Ingresar para comprar
+                  </Link>
+                </div>
+              ) : (
+                <>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <input
+                        type="text"
+                        placeholder="Nombre completo"
+                        value={customerName}
+                        onChange={(e) => {
+                          setCustomerName(e.target.value);
+                          setErrors((prev) => ({ ...prev, customer_name: "" }));
+                        }}
+                        className="w-full h-11 px-3 rounded-xl border border-border bg-secondary outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+                      />
+                      {errors.customer_name ? <p className="mt-1 text-xs text-destructive">{errors.customer_name}</p> : null}
+                    </div>
+
+                    <div>
+                      <input
+                        type="tel"
+                        placeholder="+54 9 11..."
+                        value={phone}
+                        onChange={(e) => {
+                          setPhone(e.target.value);
+                          setErrors((prev) => ({ ...prev, phone: "" }));
+                        }}
+                        className="w-full h-11 px-3 rounded-xl border border-border bg-secondary outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+                      />
+                      {errors.phone ? <p className="mt-1 text-xs text-destructive">{errors.phone}</p> : null}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="space-y-2 text-sm">
+                      <span className="font-semibold">Modalidad</span>
+                      <select
+                        value={shippingZone}
+                        onChange={(e) => {
+                          const nextZone = e.target.value;
+                          setShippingZone(nextZone);
+                          if (nextZone === "pickup") {
+                            setSelectedAddressId("");
+                          }
+                        }}
+                        className="w-full h-11 rounded-xl border border-border bg-secondary px-3 outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+                      >
+                        {Object.entries(SHIPPING_OPTIONS).map(([zone, option]) => (
+                          <option key={zone} value={zone}>{option.label} · {option.eta}</option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <div className="rounded-2xl border border-border bg-secondary/60 px-4 py-3 text-sm">
+                      <p className="font-semibold">Costo estimado</p>
+                      <p className="mt-1 text-muted-foreground">{shippingOption.label}</p>
+                      <p className="mt-2 text-lg font-black text-primary">${shippingOption.cost.toFixed(2)}</p>
+                    </div>
+                  </div>
+
+                  {effectiveZone !== "pickup" ? (
+                    <div className="space-y-4 rounded-2xl border border-border bg-secondary/40 p-4">
+                      <div className="flex items-center gap-2 text-sm font-semibold">
+                        <MapPin className="w-4 h-4 text-primary" />
+                        Dirección de entrega
+                      </div>
+
+                      {addresses.length ? (
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setDeliveryMode("saved")}
+                            className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${deliveryMode === "saved" ? "bg-primary text-primary-foreground" : "border border-border hover:bg-background"}`}
+                          >
+                            Usar guardada
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDeliveryMode("new");
+                              setSelectedAddressId("");
+                            }}
+                            className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${deliveryMode === "new" ? "bg-primary text-primary-foreground" : "border border-border hover:bg-background"}`}
+                          >
+                            Cargar nueva
+                          </button>
+                        </div>
+                      ) : null}
+
+                      {deliveryMode === "saved" && addresses.length ? (
+                        <div>
+                          <select
+                            value={selectedAddressId}
+                            onChange={(e) => {
+                              const nextAddressId = e.target.value;
+                              const nextAddress = addresses.find((address) => String(address.id) === nextAddressId);
+                              setSelectedAddressId(nextAddressId);
+                              if (nextAddress?.zone) {
+                                setShippingZone(nextAddress.zone);
+                              }
+                              setErrors((prev) => ({ ...prev, addressId: "" }));
+                            }}
+                            className="w-full h-11 rounded-xl border border-border bg-background px-3 outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+                          >
+                            <option value="">Seleccioná una dirección</option>
+                            {addresses.map((address) => (
+                              <option key={address.id} value={address.id}>
+                                {address.label} · {address.line1}, {address.city}
+                              </option>
+                            ))}
+                          </select>
+                          {errors.addressId ? <p className="mt-1 text-xs text-destructive">{errors.addressId}</p> : null}
+
+                          {selectedAddress ? (
+                            <div className="mt-3 rounded-2xl border border-border bg-background/70 p-3 text-sm">
+                              <div className="flex items-center gap-2 font-semibold">
+                                <Check className="w-4 h-4 text-primary" />
+                                {selectedAddress.label}
+                              </div>
+                              <p className="mt-2 text-muted-foreground">
+                                {[selectedAddress.line1, selectedAddress.line2, selectedAddress.city, selectedAddress.state].filter(Boolean).join(", ")}
+                              </p>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <div>
+                            <input
+                              type="text"
+                              placeholder="Etiqueta"
+                              value={newAddress.label}
+                              onChange={(e) => setNewAddress((current) => ({ ...current, label: e.target.value }))}
+                              className="w-full h-11 px-3 rounded-xl border border-border bg-background outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+                            />
+                          </div>
+                          <div>
+                            <input
+                              type="text"
+                              placeholder="Recibe"
+                              value={newAddress.recipient_name}
+                              onChange={(e) => {
+                                setNewAddress((current) => ({ ...current, recipient_name: e.target.value }));
+                                setErrors((prev) => ({ ...prev, recipient_name: "" }));
+                              }}
+                              className="w-full h-11 px-3 rounded-xl border border-border bg-background outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+                            />
+                            {errors.recipient_name ? <p className="mt-1 text-xs text-destructive">{errors.recipient_name}</p> : null}
+                          </div>
+                          <div>
+                            <input
+                              type="text"
+                              placeholder="Calle y altura"
+                              value={newAddress.line1}
+                              onChange={(e) => {
+                                setNewAddress((current) => ({ ...current, line1: e.target.value }));
+                                setErrors((prev) => ({ ...prev, line1: "" }));
+                              }}
+                              className="w-full h-11 px-3 rounded-xl border border-border bg-background outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+                            />
+                            {errors.line1 ? <p className="mt-1 text-xs text-destructive">{errors.line1}</p> : null}
+                          </div>
+                          <div>
+                            <input
+                              type="text"
+                              placeholder="Depto / piso"
+                              value={newAddress.line2}
+                              onChange={(e) => setNewAddress((current) => ({ ...current, line2: e.target.value }))}
+                              className="w-full h-11 px-3 rounded-xl border border-border bg-background outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+                            />
+                          </div>
+                          <div>
+                            <input
+                              type="text"
+                              placeholder="Ciudad"
+                              value={newAddress.city}
+                              onChange={(e) => {
+                                setNewAddress((current) => ({ ...current, city: e.target.value }));
+                                setErrors((prev) => ({ ...prev, city: "" }));
+                              }}
+                              className="w-full h-11 px-3 rounded-xl border border-border bg-background outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+                            />
+                            {errors.city ? <p className="mt-1 text-xs text-destructive">{errors.city}</p> : null}
+                          </div>
+                          <div>
+                            <input
+                              type="text"
+                              placeholder="Provincia"
+                              value={newAddress.state}
+                              onChange={(e) => {
+                                setNewAddress((current) => ({ ...current, state: e.target.value }));
+                                setErrors((prev) => ({ ...prev, state: "" }));
+                              }}
+                              className="w-full h-11 px-3 rounded-xl border border-border bg-background outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+                            />
+                            {errors.state ? <p className="mt-1 text-xs text-destructive">{errors.state}</p> : null}
+                          </div>
+                          <div>
+                            <input
+                              type="text"
+                              placeholder="Código postal"
+                              value={newAddress.postal_code}
+                              onChange={(e) => setNewAddress((current) => ({ ...current, postal_code: e.target.value }))}
+                              className="w-full h-11 px-3 rounded-xl border border-border bg-background outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+                            />
+                          </div>
+                          <div>
+                            <input
+                              type="tel"
+                              placeholder="Teléfono alternativo"
+                              value={newAddress.phone}
+                              onChange={(e) => setNewAddress((current) => ({ ...current, phone: e.target.value }))}
+                              className="w-full h-11 px-3 rounded-xl border border-border bg-background outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+                            />
+                          </div>
+                          <label className="sm:col-span-2 flex items-center gap-2 text-sm text-muted-foreground">
+                            <input
+                              type="checkbox"
+                              checked={saveAddress}
+                              onChange={(e) => setSaveAddress(e.target.checked)}
+                            />
+                            Guardar esta dirección en mi cuenta
+                          </label>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-border bg-secondary/40 p-4 text-sm text-muted-foreground">
+                      Elegiste retiro por showroom. No hace falta cargar dirección.
+                    </div>
+                  )}
+
+                  <textarea
+                    rows={3}
+                    placeholder="Notas para el pedido o la entrega"
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    className="w-full rounded-2xl border border-border bg-secondary px-3 py-3 outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+                  />
+                </>
+              )}
+            </div>
           </div>
 
-          {/* Summary */}
           <div className="bg-card border border-border rounded-3xl p-6 space-y-4 sticky top-20 shadow-[0_20px_40px_rgba(0,0,0,0.18)]">
             <h2 className="font-bold text-lg">Resumen</h2>
 
@@ -225,29 +592,18 @@ export default function CartPage() {
               </div>
               <div className="flex justify-between text-yellow-400">
                 <span>Envío</span>
-                <span>A coordinar</span>
+                <span>${shippingOption.cost.toFixed(2)}</span>
               </div>
               <div className="flex justify-between font-bold text-base">
                 <span>Total</span>
                 <span className="text-primary">
-                  ${totalPrice.toFixed(2)}
+                  ${totalWithShipping.toFixed(2)}
                 </span>
               </div>
             </div>
 
-            {/* Form */}
             <div className="space-y-3 border-t pt-4">
-              <input
-                type="tel"
-                placeholder="+54 9 11..."
-                value={phone}
-                onChange={(e) => {
-                  setPhone(e.target.value);
-                  setErrors((prev) => ({ ...prev, phone: "" }));
-                }}
-                className="w-full h-11 px-3 rounded-xl border border-border bg-secondary outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
-              />
-              {errors.phone ? <p className="text-xs text-destructive">{errors.phone}</p> : null}
+              {errors.auth ? <p className="text-xs text-destructive">{errors.auth}</p> : null}
 
               <label className="flex gap-2 text-xs">
                 <input
@@ -267,7 +623,14 @@ export default function CartPage() {
 
               <button
                 onClick={handleConfirm}
-                disabled={checkoutMutation.isPending || !phone || !accepted}
+                disabled={
+                  checkoutMutation.isPending ||
+                  isBootstrapping ||
+                  !isAuthenticated ||
+                  !phone ||
+                  !accepted ||
+                  addressesQuery.isLoading
+                }
                 className="w-full h-11 rounded-xl bg-primary font-bold text-primary-foreground flex items-center justify-center gap-2 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {checkoutMutation.isPending ? (
@@ -280,7 +643,7 @@ export default function CartPage() {
                 )}
               </button>
               <p className="text-[11px] text-muted-foreground">
-                El pedido se crea como pendiente y el stock queda reservado inmediatamente.
+                El pedido se crea como pendiente de pago y el stock queda reservado inmediatamente.
               </p>
             </div>
           </div>

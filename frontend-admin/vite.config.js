@@ -9,6 +9,7 @@ export default defineConfig({
   server: {
     host: "127.0.0.1",
     port: adminPort,
+    strictPort: true,
     proxy: {
       "/api": {
         target: `http://127.0.0.1:${apiPort}`,
@@ -19,5 +20,6 @@ export default defineConfig({
   preview: {
     host: "127.0.0.1",
     port: adminPort,
+    strictPort: true,
   },
 });

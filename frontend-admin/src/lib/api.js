@@ -73,6 +73,31 @@ async function request(path, { method = "GET", body, retryOnAuthError = true } =
   return payload;
 }
 
+async function requestBlob(path, { method = "GET", retryOnAuthError = true } = {}) {
+  const session = getStoredSession();
+  const response = await fetch(path, {
+    method,
+    headers: {
+      ...(session?.accessToken ? { Authorization: `Bearer ${session.accessToken}` } : {}),
+    },
+  });
+
+  if (response.status === 401 && retryOnAuthError && session?.refreshToken) {
+    await refreshAccessToken();
+    return requestBlob(path, { method, retryOnAuthError: false });
+  }
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error || "Request failed");
+  }
+
+  return {
+    blob: await response.blob(),
+    fileName: response.headers.get("content-disposition")?.match(/filename="?([^";]+)"?/)?.[1] || "orders.xlsx",
+  };
+}
+
 export async function loginAdmin(credentials) {
   const payload = await request("/api/admin/login", {
     method: "POST",
@@ -92,6 +117,17 @@ export async function loginAdmin(credentials) {
 
 export async function getDashboard() {
   return request("/api/admin/dashboard");
+}
+
+export async function getWhatsappSettings() {
+  return request("/api/admin/settings/whatsapp");
+}
+
+export async function updateWhatsappSettings(payload) {
+  return request("/api/admin/settings/whatsapp", {
+    method: "PUT",
+    body: payload,
+  });
 }
 
 export async function getCards() {
@@ -114,6 +150,36 @@ export async function updateCardsBulk(ids, updates) {
 
 export async function getOrders() {
   return request("/api/admin/orders");
+}
+
+export async function updateOrderShipping(orderId, payload) {
+  return request(`/api/admin/orders/${orderId}/shipping`, {
+    method: "PUT",
+    body: payload,
+  });
+}
+
+export async function exportOrdersWorkbook() {
+  const { blob, fileName } = await requestBlob("/api/admin/export/orders");
+  const objectUrl = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(objectUrl);
+}
+
+export async function getUsers() {
+  return request("/api/admin/users");
+}
+
+export async function updateUserRole(userId, role) {
+  return request(`/api/admin/users/${userId}/role`, {
+    method: "PUT",
+    body: { role },
+  });
 }
 
 export async function updateOrderStatus(orderId, status) {

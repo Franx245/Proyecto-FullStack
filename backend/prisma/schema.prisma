@@ -86,13 +86,35 @@ model CustomProductImage {
 }
 
 model Order {
-  id            Int         @id @default(autoincrement())
-  total         Float
-  status        OrderStatus @default(PENDING)
-  customerPhone String?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  items         OrderItem[]
+  id                 Int          @id @default(autoincrement())
+  userId             Int?
+  addressId          Int?
+  subtotal           Float        @default(0)
+  shippingCost       Float        @default(0)
+  total              Float
+  status             OrderStatus  @default(PENDING_PAYMENT)
+  shippingZone       ShippingZone @default(PICKUP)
+  shippingLabel      String       @default("Retiro en persona")
+  trackingCode       String?
+  trackingVisibleToUser Boolean   @default(false)
+  customerName       String?
+  customerEmail      String?
+  customerPhone      String?
+  shippingAddress    String?
+  shippingCity       String?
+  shippingProvince   String?
+  shippingPostalCode String?
+  notes              String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  user               User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  address            Address?     @relation(fields: [addressId], references: [id], onDelete: SetNull)
+  items              OrderItem[]
+
+  @@index([userId])
+  @@index([addressId])
+  @@index([status])
+  @@index([shippingZone])
 }
 
 model OrderItem {
@@ -108,37 +130,106 @@ model OrderItem {
   @@index([cardId])
 }
 
-model AdminUser {
-  id           Int      @id @default(autoincrement())
-  email        String   @unique
-  passwordHash String
-  role         AdminRole @default(ADMIN)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  refreshTokens RefreshToken[]
+model User {
+  id                     Int            @id @default(autoincrement())
+  email                  String         @unique
+  username               String         @unique
+  passwordHash           String
+  fullName               String
+  phone                  String?
+  avatarUrl              String?
+  role                   UserRole       @default(USER)
+  isActive               Boolean        @default(true)
+  lastLoginAt            DateTime?
+  lastLoginIp            String?
+  passwordResetTokenHash String?
+  passwordResetExpiresAt DateTime?
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+  refreshTokens          RefreshToken[]
+  addresses              Address[]
+  orders                 Order[]
+  activities             UserActivity[]
+
+  @@index([role])
+  @@index([createdAt])
+}
+
+model Address {
+  id            Int          @id @default(autoincrement())
+  userId        Int
+  label         String       @default("Principal")
+  recipientName String
+  phone         String?
+  line1         String
+  line2         String?
+  city          String
+  state         String       @default("Buenos Aires")
+  postalCode    String?
+  zone          ShippingZone @default(CABA)
+  notes         String?
+  isDefault     Boolean      @default(false)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders        Order[]
+
+  @@index([userId])
+  @@index([zone])
+}
+
+model UserActivity {
+  id         Int      @id @default(autoincrement())
+  userId     Int?
+  action     String
+  ipAddress  String?
+  userAgent  String?
+  details    String?
+  createdAt  DateTime @default(now())
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
 }
 
 model RefreshToken {
-  id        String    @id @default(cuid())
-  tokenHash String    @unique
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
   expiresAt DateTime
   revokedAt DateTime?
-  createdAt DateTime  @default(now())
-  adminId   Int
-  admin     AdminUser @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([adminId])
+  @@index([userId])
   @@index([expiresAt])
 }
 
+model AppSetting {
+  key       String   @id
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 enum OrderStatus {
-  PENDING
+  PENDING_PAYMENT
   PAID
   SHIPPED
+  COMPLETED
   CANCELLED
 }
 
-enum AdminRole {
-  ADMIN
+enum UserRole {
+  USER
   STAFF
+  ADMIN
+}
+
+enum ShippingZone {
+  CABA
+  GBA
+  INTERIOR
+  PICKUP
 }

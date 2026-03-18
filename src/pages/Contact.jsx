@@ -1,8 +1,10 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useCart } from '@/lib/cartStore';
 import { motion } from 'framer-motion';
 import { MessageCircle, Send, User, Mail, Tag, AlignLeft, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
+import { fetchStorefrontConfig } from '@/api/store';
 
 /**
  * @param {{ quantity: number, name: string, price: number }[]} items
@@ -18,9 +20,15 @@ function buildWhatsAppCartMessage(items, totalPrice) {
 
 export default function Contact() {
   const { items, totalPrice } = useCart();
+  const storefrontConfigQuery = useQuery({
+    queryKey: ['storefront-config'],
+    queryFn: fetchStorefrontConfig,
+    staleTime: 1000 * 60,
+  });
   const [form, setForm] = useState({ name: '', email: '', subject: '', message: '' });
   const [sent, setSent] = useState(false);
   const [loading, setLoading] = useState(false);
+  const supportWhatsappNumber = String(storefrontConfigQuery.data?.storefront?.support_whatsapp_number || '').replace(/[^\d]/g, '');
 
   /** @type {{ key: "name" | "email" | "subject", label: string, placeholder: string, icon: typeof User, type: string }[]} */
   const formFields = [
@@ -43,8 +51,13 @@ export default function Contact() {
   };
 
   const handleWhatsApp = () => {
+    if (!supportWhatsappNumber) {
+      toast.error('WhatsApp de soporte no configurado');
+      return;
+    }
+
     const msg = buildWhatsAppCartMessage(items, totalPrice);
-    window.open(`https://wa.me/?text=${msg}`, '_blank');
+    window.open(`https://wa.me/${supportWhatsappNumber}?text=${msg}`, '_blank');
   };
 
   return (
@@ -93,7 +106,7 @@ export default function Contact() {
                 <rect x="50" y="55" width="4" height="4" fill="black"/>
               </svg>
             </div>
-            <p className="text-xs text-muted-foreground text-center">Escaneá para contactarnos por WhatsApp</p>
+            <p className="text-xs text-muted-foreground text-center">Escaneá para contactarnos por WhatsApp{supportWhatsappNumber ? ` al ${supportWhatsappNumber}` : ''}</p>
           </div>
 
           {/* WhatsApp button */}
