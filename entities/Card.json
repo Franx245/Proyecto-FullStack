@@ -1,0 +1,32 @@
+{
+  "name": "Card",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique card ID"
+    },
+    "name": {
+      "type": "string",
+      "description": "Card name"
+    },
+    "image_url": {
+      "type": "string",
+      "description": "Main card image"
+    },
+    "card_type": {
+      "type": "string",
+      "enum": ["Monster", "Spell", "Trap"],
+      "description": "Type of card"
+    },
+    "attribute": {
+      "type": "string",
+      "description": "Card attribute (DARK, LIGHT, etc.)"
+    },
+    "featured": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "required": ["id", "name"]
+}

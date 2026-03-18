@@ -1,0 +1,144 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Card {
+  id                Int         @id @default(autoincrement())
+  name              String
+  ygoproId          Int         @unique
+  description       String      @default("")
+  image             String?
+  cardType          String      @default("Unknown")
+  race              String?
+  attribute         String?
+  archetype         String?
+  atk               Int?
+  def               Int?
+  level             Int?
+  rarity            String      @default("Unknown")
+  setName           String      @default("YGOPRODeck")
+  setCode           String      @default("")
+  price             Float
+  stock             Int
+  lowStockThreshold Int         @default(3)
+  isVisible         Boolean     @default(true)
+  isFeatured        Boolean     @default(false)
+  isNewArrival      Boolean     @default(false)
+  salesCount        Int         @default(0)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  orderItems        OrderItem[]
+
+  @@index([name])
+  @@index([cardType])
+  @@index([rarity])
+}
+
+model CustomCategory {
+  id          Int              @id @default(autoincrement())
+  name        String
+  slug        String           @unique
+  description String           @default("")
+  image       String?
+  isVisible   Boolean          @default(true)
+  sortOrder   Int              @default(0)
+  parentId    Int?
+  parent      CustomCategory?  @relation("CustomCategoryHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children    CustomCategory[] @relation("CustomCategoryHierarchy")
+  products    CustomProduct[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([parentId])
+  @@index([isVisible])
+}
+
+model CustomProduct {
+  id          Int                  @id @default(autoincrement())
+  title       String
+  slug        String               @unique
+  description String               @default("")
+  price       Float
+  isVisible   Boolean              @default(true)
+  categoryId  Int
+  category    CustomCategory       @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  images      CustomProductImage[]
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  @@index([categoryId])
+  @@index([isVisible])
+}
+
+model CustomProductImage {
+  id        Int           @id @default(autoincrement())
+  productId Int
+  url       String
+  sortOrder Int           @default(0)
+  product   CustomProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, sortOrder])
+}
+
+model Order {
+  id            Int         @id @default(autoincrement())
+  total         Float
+  status        OrderStatus @default(PENDING)
+  customerPhone String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  items         OrderItem[]
+}
+
+model OrderItem {
+  id       Int   @id @default(autoincrement())
+  orderId  Int
+  cardId   Int
+  quantity Int
+  price    Float
+  order    Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  card     Card  @relation(fields: [cardId], references: [id])
+
+  @@index([orderId])
+  @@index([cardId])
+}
+
+model AdminUser {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  passwordHash String
+  role         AdminRole @default(ADMIN)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  refreshTokens RefreshToken[]
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  adminId   Int
+  admin     AdminUser @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId])
+  @@index([expiresAt])
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  SHIPPED
+  CANCELLED
+}
+
+enum AdminRole {
+  ADMIN
+  STAFF
+}

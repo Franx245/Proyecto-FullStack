@@ -1,0 +1,52 @@
+{
+  "name": "CardVersion",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique version ID"
+    },
+    "card_id": {
+      "type": "string",
+      "description": "Reference to Card"
+    },
+    "set_name": {
+      "type": "string",
+      "description": "Set or booster pack name"
+    },
+    "set_code": {
+      "type": "string",
+      "description": "Set code identifier"
+    },
+    "rarity": {
+      "type": "string",
+      "enum": [
+        "Common",
+        "Rare",
+        "Super Rare",
+        "Ultra Rare",
+        "Secret Rare",
+        "Starlight Rare"
+      ]
+    },
+    "price": {
+      "type": "number",
+      "description": "Price"
+    },
+    "stock": {
+      "type": "number",
+      "default": 0
+    },
+    "condition": {
+      "type": "string",
+      "enum": [
+        "Near Mint",
+        "Lightly Played",
+        "Moderately Played",
+        "Heavily Played"
+      ],
+      "default": "Near Mint"
+    }
+  },
+  "required": ["id", "card_id", "price"]
+}

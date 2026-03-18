@@ -1,0 +1,22 @@
+{
+  "orchestratorPid": 8616,
+  "services": [
+    {
+      "label": "api",
+      "pid": 820
+    },
+    {
+      "label": "store",
+      "pid": 21872
+    },
+    {
+      "label": "admin",
+      "pid": 29560
+    }
+  ],
+  "ports": {
+    "api": 3001,
+    "store": 5174,
+    "admin": 5175
+  }
+}

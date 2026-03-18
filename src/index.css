@@ -1,0 +1,147 @@
+/* eslint-disable */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ================= BASE THEME ================= */
+
+@layer base {
+  :root {
+    --font-inter: 'Inter', system-ui, sans-serif;
+
+    /* 🎨 CORE COLORS */
+    --background: 222 20% 7%;
+    --foreground: 220 15% 92%;
+
+    --card: 222 18% 10%;
+    --card-foreground: 220 15% 92%;
+
+    --popover: 222 18% 10%;
+    --popover-foreground: 220 15% 92%;
+
+    /* 🟢 BRAND (clave para tu identidad) */
+    --primary: 145 65% 48%;
+    --primary-foreground: 222 20% 7%;
+
+    /* ⚫ NEUTRALS */
+    --secondary: 222 15% 15%;
+    --secondary-foreground: 220 15% 85%;
+
+    --muted: 222 15% 15%;
+    --muted-foreground: 220 10% 55%;
+
+    --accent: 145 65% 48%;
+    --accent-foreground: 222 20% 7%;
+
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 222 15% 18%;
+    --input: 222 15% 18%;
+    --ring: 145 65% 48%;
+
+    /* 📊 charts */
+    --chart-1: 145 65% 48%;
+    --chart-2: 200 60% 50%;
+    --chart-3: 280 60% 55%;
+    --chart-4: 45 80% 55%;
+    --chart-5: 15 75% 55%;
+
+    --radius: 0.5rem;
+
+    /* 🧱 sidebar */
+    --sidebar-background: 222 18% 10%;
+    --sidebar-foreground: 220 15% 92%;
+    --sidebar-primary: 145 65% 48%;
+    --sidebar-primary-foreground: 222 20% 7%;
+    --sidebar-accent: 222 15% 15%;
+    --sidebar-accent-foreground: 220 15% 92%;
+    --sidebar-border: 222 15% 18%;
+    --sidebar-ring: 145 65% 48%;
+  }
+
+  .dark {
+    /* 🔁 mismo esquema (podés customizar después) */
+    --background: 222 20% 7%;
+    --foreground: 220 15% 92%;
+    --card: 222 18% 10%;
+    --card-foreground: 220 15% 92%;
+    --popover: 222 18% 10%;
+    --popover-foreground: 220 15% 92%;
+    --primary: 145 65% 48%;
+    --primary-foreground: 222 20% 7%;
+    --secondary: 222 15% 15%;
+    --secondary-foreground: 220 15% 85%;
+    --muted: 222 15% 15%;
+    --muted-foreground: 220 10% 55%;
+    --accent: 145 65% 48%;
+    --accent-foreground: 222 20% 7%;
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 222 15% 18%;
+    --input: 222 15% 18%;
+    --ring: 145 65% 48%;
+  }
+}
+
+/* ================= GLOBAL STYLES ================= */
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    scroll-behavior: smooth; /* 🔥 UX */
+  }
+
+  body {
+    @apply bg-background text-foreground tracking-tight antialiased;
+    font-family: var(--font-inter);
+  }
+}
+
+/* ================= COMPONENT HELPERS ================= */
+
+@layer components {
+  .card-hover {
+    @apply transition-all duration-300 hover:scale-[1.02] hover:shadow-lg hover:shadow-primary/10;
+  }
+
+  .btn-primary {
+    @apply bg-primary text-primary-foreground font-semibold px-4 py-2 rounded-lg transition hover:opacity-90;
+  }
+
+  .glass {
+    @apply bg-white/5 backdrop-blur border border-white/10;
+  }
+}
+
+/* ================= SCROLLBAR ================= */
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(222 18% 10%);
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(222 15% 25%);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(222 15% 35%);
+}
+
+/* ================= SELECTION ================= */
+
+::selection {
+  background: hsl(145 65% 48% / 0.3);
+  color: white;
+}

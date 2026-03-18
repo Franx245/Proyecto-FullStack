@@ -1,0 +1,70 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --admin-bg: #030712;
+  --admin-panel: rgba(15, 23, 42, 0.78);
+  --admin-border: rgba(255, 255, 255, 0.09);
+  --admin-text: #e5eefb;
+  --admin-muted: #94a3b8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: var(--admin-bg);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "IBM Plex Sans", sans-serif;
+  background:
+    radial-gradient(circle at top left, rgba(249, 115, 22, 0.16), transparent 24%),
+    radial-gradient(circle at top right, rgba(14, 165, 233, 0.12), transparent 22%),
+    radial-gradient(circle at bottom center, rgba(16, 185, 129, 0.08), transparent 30%),
+    linear-gradient(180deg, #020617 0%, #030712 100%);
+  color: var(--admin-text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.glass {
+  background: var(--admin-panel);
+  border-color: var(--admin-border);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 18px 50px rgba(2, 6, 23, 0.35);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: "Space Grotesk", sans-serif;
+  letter-spacing: -0.03em;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(245, 158, 11, 0.35);
+  color: white;
+}
