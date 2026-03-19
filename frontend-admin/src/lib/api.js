@@ -1,5 +1,71 @@
+import {
+  createRequestId,
+  recordAdminError,
+  recordAdminEvent,
+  recordSlowInteraction,
+} from "./observability";
+
 const SESSION_KEY = "duelvault_admin_session";
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+
+function normalizeBaseUrl(value) {
+  return typeof value === "string" ? value.trim().replace(/\/$/, "") : "";
+}
+
+function resolveApiBaseUrl() {
+  const configuredBaseUrl = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL || "");
+  if (configuredBaseUrl) {
+    return configuredBaseUrl;
+  }
+
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  const { hostname, origin } = window.location;
+  if (["localhost", "127.0.0.1"].includes(hostname)) {
+    return "";
+  }
+
+  if (hostname === "duelvault-store-api.vercel.app") {
+    return origin;
+  }
+
+  if (hostname === "duelvault-admin.vercel.app" || /duelvault-admin/i.test(hostname)) {
+    return "https://duelvault-store-api.vercel.app";
+  }
+
+  return "";
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
+const DEFAULT_API_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT || 12000);
+const inflightMutationRequests = new Map();
+
+export class ApiRequestError extends Error {
+  constructor(message, options = {}) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = options.status;
+    this.code = options.code;
+    this.details = options.details;
+    this.requestId = options.requestId;
+    this.retryable = Boolean(options.retryable);
+  }
+}
+
+export class ApiTimeoutError extends ApiRequestError {
+  constructor(message, options = {}) {
+    super(message, options);
+    this.name = "ApiTimeoutError";
+  }
+}
+
+export class ApiConflictError extends ApiRequestError {
+  constructor(message, options = {}) {
+    super(message, options);
+    this.name = "ApiConflictError";
+  }
+}
 
 function buildApiUrl(path) {
   if (/^https?:\/\//i.test(path)) {
@@ -7,6 +73,19 @@ function buildApiUrl(path) {
   }
 
   return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
+}
+
+function buildQueryString(params = {}) {
+  const searchParams = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== "") {
+      searchParams.set(key, String(value));
+    }
+  }
+
+  const query = searchParams.toString();
+  return query ? `?${query}` : "";
 }
 
 export function getStoredSession() {
@@ -24,6 +103,63 @@ export function setStoredSession(session) {
 
 export function clearStoredSession() {
   localStorage.removeItem(SESSION_KEY);
+}
+
+function delay(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function createApiError(payload, fallbackMessage, options = {}) {
+  const message = payload?.error || fallbackMessage;
+  const common = {
+    status: options.status,
+    code: payload?.code || options.code,
+    details: payload,
+    requestId: options.requestId,
+    retryable: Boolean(options.retryable),
+  };
+
+  if (options.status === 409 || payload?.code === "CONFLICT") {
+    return new ApiConflictError(message, common);
+  }
+
+  return new ApiRequestError(message, common);
+}
+
+function shouldRetryRequest({ method, status, error, attempt }) {
+  if (attempt >= 1) {
+    return false;
+  }
+
+  if (method !== "GET") {
+    return false;
+  }
+
+  if (error instanceof ApiTimeoutError) {
+    return true;
+  }
+
+  if (status >= 500) {
+    return true;
+  }
+
+  if (error instanceof TypeError) {
+    return true;
+  }
+
+  return false;
+}
+
+function buildMutationRequestKey(method, path, idempotencyKey, dedupeKey) {
+  return `${method}:${path}:${dedupeKey || idempotencyKey || "default"}`;
+}
+
+export function isConflictError(error) {
+  return error instanceof ApiConflictError || error?.code === "CONFLICT" || error?.status === 409;
+}
+
+export function isTimeoutError(error) {
+  return error instanceof ApiTimeoutError;
 }
 
 async function refreshAccessToken() {
@@ -57,54 +193,173 @@ async function refreshAccessToken() {
   return nextSession;
 }
 
-async function request(path, { method = "GET", body, retryOnAuthError = true } = {}) {
-  const session = getStoredSession();
-  const response = await fetch(buildApiUrl(path), {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      ...(session?.accessToken ? { Authorization: `Bearer ${session.accessToken}` } : {}),
-    },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  });
-
-  if (response.status === 401 && retryOnAuthError && session?.refreshToken) {
-    await refreshAccessToken();
-    return request(path, { method, body, retryOnAuthError: false });
-  }
-
-  const payload = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(payload.error || "Request failed");
-  }
-
-  return payload;
+export async function refreshAdminSession() {
+  return refreshAccessToken();
 }
 
-async function requestBlob(path, { method = "GET", retryOnAuthError = true } = {}) {
+async function request(path, { method = "GET", body, retryOnAuthError = true, timeoutMs = DEFAULT_API_TIMEOUT_MS, attempt = 0, requestLabel, idempotencyKey, dedupeKey, headers = {} } = {}) {
   const session = getStoredSession();
-  const response = await fetch(buildApiUrl(path), {
-    method,
-    headers: {
-      ...(session?.accessToken ? { Authorization: `Bearer ${session.accessToken}` } : {}),
-    },
-  });
+  const requestId = createRequestId("api");
+  const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort("timeout"), timeoutMs);
+  const requestUrl = buildApiUrl(path);
+  const mutationRequestKey = method !== "GET" ? buildMutationRequestKey(method, path, idempotencyKey, dedupeKey) : null;
 
-  if (response.status === 401 && retryOnAuthError && session?.refreshToken) {
-    await refreshAccessToken();
-    return requestBlob(path, { method, retryOnAuthError: false });
+  if (mutationRequestKey && inflightMutationRequests.has(mutationRequestKey)) {
+    return inflightMutationRequests.get(mutationRequestKey);
   }
 
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.error || "Request failed");
+  const requestPromise = (async () => {
+    try {
+      const response = await fetch(requestUrl, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Request-Id": requestId,
+          ...(idempotencyKey ? { "X-Idempotency-Key": idempotencyKey } : {}),
+          ...(session?.accessToken ? { Authorization: `Bearer ${session.accessToken}` } : {}),
+          ...headers,
+        },
+        signal: controller.signal,
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+
+      if (response.status === 401 && retryOnAuthError && session?.refreshToken) {
+        await refreshAccessToken();
+        return request(path, { method, body, retryOnAuthError: false, timeoutMs, requestLabel, idempotencyKey, dedupeKey, headers });
+      }
+
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        const apiError = createApiError(payload, "Request failed", {
+          status: response.status,
+          requestId,
+          retryable: response.status >= 500,
+        });
+
+        if (shouldRetryRequest({ method, status: response.status, error: apiError, attempt })) {
+          await delay(250 * (attempt + 1));
+          return request(path, { method, body, retryOnAuthError, timeoutMs, attempt: attempt + 1, requestLabel, idempotencyKey, dedupeKey, headers });
+        }
+
+        throw apiError;
+      }
+
+      const finishedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+      const durationMs = finishedAt - startedAt;
+
+      recordAdminEvent("api-success", {
+        request_id: requestId,
+        label: requestLabel || `${method} ${path}`,
+        method,
+        path,
+        duration_ms: Math.round(durationMs),
+        status: response.status,
+      });
+      recordSlowInteraction(requestLabel || `${method} ${path}`, durationMs, {
+        method,
+        path,
+        source: "api",
+      });
+
+      return payload;
+    } catch (error) {
+      const finishedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+      const durationMs = finishedAt - startedAt;
+
+      if (error?.name === "AbortError") {
+        const timeoutError = new ApiTimeoutError("La operación tardó demasiado. Reintentá.", {
+          status: 408,
+          code: "TIMEOUT",
+          requestId,
+          retryable: method === "GET",
+        });
+
+        if (shouldRetryRequest({ method, status: 408, error: timeoutError, attempt })) {
+          await delay(250 * (attempt + 1));
+          return request(path, { method, body, retryOnAuthError, timeoutMs, attempt: attempt + 1, requestLabel, idempotencyKey, dedupeKey, headers });
+        }
+
+        recordAdminError(timeoutError, { method, path, duration_ms: Math.round(durationMs) });
+        throw timeoutError;
+      }
+
+      if (shouldRetryRequest({ method, status: error?.status || 0, error, attempt })) {
+        await delay(250 * (attempt + 1));
+        return request(path, { method, body, retryOnAuthError, timeoutMs, attempt: attempt + 1, requestLabel, idempotencyKey, dedupeKey, headers });
+      }
+
+      recordAdminError(error, {
+        method,
+        path,
+        label: requestLabel || `${method} ${path}`,
+        duration_ms: Math.round(durationMs),
+      });
+      throw error;
+    } finally {
+      window.clearTimeout(timeoutId);
+      if (mutationRequestKey) {
+        inflightMutationRequests.delete(mutationRequestKey);
+      }
+    }
+  })();
+
+  if (mutationRequestKey) {
+    inflightMutationRequests.set(mutationRequestKey, requestPromise);
   }
 
-  return {
-    blob: await response.blob(),
-    fileName: response.headers.get("content-disposition")?.match(/filename="?([^";]+)"?/)?.[1] || "orders.xlsx",
-  };
+  return requestPromise;
+}
+
+async function requestBlob(path, { method = "GET", retryOnAuthError = true, timeoutMs = DEFAULT_API_TIMEOUT_MS } = {}) {
+  const session = getStoredSession();
+  const requestId = createRequestId("blob");
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort("timeout"), timeoutMs);
+
+  try {
+    const response = await fetch(buildApiUrl(path), {
+      method,
+      signal: controller.signal,
+      headers: {
+        "X-Request-Id": requestId,
+        ...(session?.accessToken ? { Authorization: `Bearer ${session.accessToken}` } : {}),
+      },
+    });
+
+    if (response.status === 401 && retryOnAuthError && session?.refreshToken) {
+      await refreshAccessToken();
+      return requestBlob(path, { method, retryOnAuthError: false, timeoutMs });
+    }
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw createApiError(payload, "Request failed", {
+        status: response.status,
+        requestId,
+        retryable: response.status >= 500,
+      });
+    }
+
+    return {
+      blob: await response.blob(),
+      fileName: response.headers.get("content-disposition")?.match(/filename="?([^";]+)"?/)?.[1] || "orders.xlsx",
+    };
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new ApiTimeoutError("La exportación tardó demasiado. Reintentá.", {
+        status: 408,
+        code: "TIMEOUT",
+        requestId,
+      });
+    }
+
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 export async function loginAdmin(credentials) {
@@ -112,6 +367,7 @@ export async function loginAdmin(credentials) {
     method: "POST",
     body: credentials,
     retryOnAuthError: false,
+    requestLabel: "login-admin",
   });
 
   const session = {
@@ -125,46 +381,127 @@ export async function loginAdmin(credentials) {
 }
 
 export async function getDashboard() {
-  return request("/api/admin/dashboard");
+  return request("/api/admin/dashboard", { requestLabel: "load-dashboard" });
 }
 
 export async function getWhatsappSettings() {
-  return request("/api/admin/settings/whatsapp");
+  return request("/api/admin/settings/whatsapp", { requestLabel: "load-whatsapp-settings" });
 }
 
 export async function updateWhatsappSettings(payload) {
   return request("/api/admin/settings/whatsapp", {
     method: "PUT",
     body: payload,
+    requestLabel: "update-whatsapp-settings",
+    idempotencyKey: payload?.mutation_id,
+  });
+}
+
+export async function getContactRequests() {
+  return request("/api/admin/contact-requests", { requestLabel: "load-contact-requests" });
+}
+
+export async function updateContactRequestStatus(contactRequestId, payload) {
+  return request(`/api/admin/contact-requests/${contactRequestId}`, {
+    method: "PATCH",
+    body: payload,
+    requestLabel: "update-contact-request",
+    idempotencyKey: payload?.mutation_id,
+    dedupeKey: `${contactRequestId}:${payload?.status || "notes"}`,
   });
 }
 
 export async function getCards() {
-  return request("/api/admin/cards");
+  return request("/api/admin/cards", { requestLabel: "load-admin-cards" });
+}
+
+export async function getInventoryCards(params = {}) {
+  return request(`/api/admin/cards/inventory${buildQueryString(params)}`, { requestLabel: "load-inventory-cards" });
+}
+
+export async function getCatalogScopeSettings() {
+  return request("/api/admin/settings/catalog-scope", { requestLabel: "load-catalog-scope" });
+}
+
+export async function updateCatalogScopeSettings(payload) {
+  return request("/api/admin/settings/catalog-scope", {
+    method: "PUT",
+    body: payload,
+    requestLabel: "update-catalog-scope",
+    idempotencyKey: payload?.mutation_id,
+  });
+}
+
+export async function syncCatalogToScope(payload = {}) {
+  return request("/api/admin/cards/sync-catalog", {
+    method: "POST",
+    body: payload,
+    requestLabel: "sync-catalog-to-scope",
+    idempotencyKey: payload?.mutation_id,
+  });
 }
 
 export async function updateCard(cardId, updates) {
   return request(`/api/admin/cards/${cardId}`, {
     method: "PUT",
     body: updates,
+    requestLabel: "update-card",
+    idempotencyKey: updates?.mutation_id,
+    dedupeKey: `${cardId}:${updates?.expected_updated_at || "unknown"}`,
   });
 }
 
-export async function updateCardsBulk(ids, updates) {
+function normalizeCardSelectionPayload(selectionOrIds) {
+  if (Array.isArray(selectionOrIds)) {
+    return { ids: selectionOrIds };
+  }
+
+  if (selectionOrIds && typeof selectionOrIds === "object") {
+    return {
+      ids: Array.isArray(selectionOrIds.ids) ? selectionOrIds.ids : [],
+      filters: selectionOrIds.filters || undefined,
+      select_all_matching: Boolean(selectionOrIds.select_all_matching),
+    };
+  }
+
+  return { ids: [] };
+}
+
+export async function updateCardsBulk(selectionOrIds, updates) {
+  const payload = { ...normalizeCardSelectionPayload(selectionOrIds), updates };
   return request("/api/admin/cards/bulk", {
     method: "PUT",
-    body: { ids, updates },
+    body: payload,
+    requestLabel: "bulk-update-cards",
+    idempotencyKey: updates?.mutation_id,
   });
+}
+
+export async function deleteCards(selectionOrIds) {
+  const payload = normalizeCardSelectionPayload(selectionOrIds);
+  return request("/api/admin/cards", {
+    method: "DELETE",
+    body: payload,
+    requestLabel: "delete-cards",
+    idempotencyKey: payload?.mutation_id,
+  });
+}
+
+export async function getAdminCardDetail(cardId) {
+  return request(`/api/admin/cards/${cardId}`, { requestLabel: "load-admin-card-detail" });
 }
 
 export async function getOrders() {
-  return request("/api/admin/orders");
+  return request("/api/admin/orders", { requestLabel: "load-orders" });
 }
 
 export async function updateOrderShipping(orderId, payload) {
   return request(`/api/admin/orders/${orderId}/shipping`, {
     method: "PUT",
     body: payload,
+    requestLabel: "update-order-shipping",
+    idempotencyKey: payload?.mutation_id,
+    dedupeKey: `${orderId}:${payload?.tracking_code || "shipping"}`,
   });
 }
 
@@ -181,43 +518,59 @@ export async function exportOrdersWorkbook() {
 }
 
 export async function getUsers() {
-  return request("/api/admin/users");
+  return request("/api/admin/users", { requestLabel: "load-users" });
 }
 
-export async function updateUserRole(userId, role) {
+export async function updateUserRole(userId, payload) {
   return request(`/api/admin/users/${userId}/role`, {
     method: "PUT",
-    body: { role },
+    body: payload,
+    requestLabel: "update-user-role",
+    idempotencyKey: payload?.mutation_id,
+    dedupeKey: `${userId}:${payload?.role}`,
   });
 }
 
-export async function updateOrderStatus(orderId, status) {
+export async function updateOrderStatus(orderId, payload) {
   return request(`/api/admin/orders/${orderId}/status`, {
     method: "PUT",
-    body: { status },
+    body: payload,
+    requestLabel: "update-order-status",
+    idempotencyKey: payload?.mutation_id,
+    dedupeKey: `${orderId}:${payload?.status}`,
   });
 }
 
-export async function deleteOrder(orderId) {
+export async function deleteOrder(orderId, payload = {}) {
   return request(`/api/admin/orders/${orderId}`, {
     method: "DELETE",
+    body: payload,
+    requestLabel: "delete-order",
+    idempotencyKey: payload?.mutation_id,
+    dedupeKey: `${orderId}:delete`,
   });
 }
 
-export async function clearOrders() {
+export async function clearOrders(payload = {}) {
   return request("/api/admin/orders", {
     method: "DELETE",
+    body: payload,
+    requestLabel: "clear-orders",
+    idempotencyKey: payload?.mutation_id,
+    dedupeKey: "clear-orders",
   });
 }
 
 export async function getCustomCategories() {
-  return request("/api/admin/custom/categories");
+  return request("/api/admin/custom/categories", { requestLabel: "load-custom-categories" });
 }
 
 export async function createCustomCategory(payload) {
   return request("/api/admin/custom/categories", {
     method: "POST",
     body: payload,
+    requestLabel: "create-custom-category",
+    idempotencyKey: payload?.mutation_id,
   });
 }
 
@@ -225,17 +578,21 @@ export async function updateCustomCategory(categoryId, payload) {
   return request(`/api/admin/custom/categories/${categoryId}`, {
     method: "PUT",
     body: payload,
+    requestLabel: "update-custom-category",
+    idempotencyKey: payload?.mutation_id,
   });
 }
 
 export async function getCustomProducts() {
-  return request("/api/admin/custom/products");
+  return request("/api/admin/custom/products", { requestLabel: "load-custom-products" });
 }
 
 export async function createCustomProduct(payload) {
   return request("/api/admin/custom/products", {
     method: "POST",
     body: payload,
+    requestLabel: "create-custom-product",
+    idempotencyKey: payload?.mutation_id,
   });
 }
 
@@ -243,5 +600,7 @@ export async function updateCustomProduct(productId, payload) {
   return request(`/api/admin/custom/products/${productId}`, {
     method: "PUT",
     body: payload,
+    requestLabel: "update-custom-product",
+    idempotencyKey: payload?.mutation_id,
   });
 }

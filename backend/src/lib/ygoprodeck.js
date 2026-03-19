@@ -49,6 +49,17 @@ async function fetchBatch(ids) {
   return payload.data ?? [];
 }
 
+export async function fetchMetadataPage({ limit = 2000, offset = 0 } = {}) {
+  const response = await fetch(buildCardInfoUrl({ num: limit, offset }));
+
+  if (!response.ok) {
+    throw new Error(`YGOPRODeck catalog request failed with ${response.status}`);
+  }
+
+  const payload = await response.json();
+  return (payload.data ?? []).map(normalizeMetadata);
+}
+
 export async function fetchMetadataByYgoIds(ids) {
   const uniqueIds = [...new Set(ids.map((id) => Number(id)).filter(Number.isFinite))];
 
@@ -76,20 +87,13 @@ export async function fetchAllMetadata() {
   const allCards = [];
 
   for (let offset = 0; ; offset += pageSize) {
-    const response = await fetch(buildCardInfoUrl({ num: pageSize, offset }));
-
-    if (!response.ok) {
-      throw new Error(`YGOPRODeck catalog request failed with ${response.status}`);
-    }
-
-    const payload = await response.json();
-    const cards = payload.data ?? [];
+    const cards = await fetchMetadataPage({ limit: pageSize, offset });
 
     if (cards.length === 0) {
       break;
     }
 
-    allCards.push(...cards.map(normalizeMetadata));
+    allCards.push(...cards);
 
     if (cards.length < pageSize) {
       break;

@@ -8,6 +8,8 @@ import {
 import {
   clearStoredUserSession,
   getStoredUserSession,
+  getUsableStoredUserSession,
+  isJwtExpired,
   setStoredUserSession,
 } from "@/lib/userSession";
 import { clearTrackedOrderIds } from "@/lib/orderTracking";
@@ -48,18 +50,20 @@ import { clearTrackedOrderIds } from "@/lib/orderTracking";
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [session, setSessionState] = useState(/** @type {UserSession | null} */ (getStoredUserSession()));
-  const [user, setUserState] = useState(/** @type {AuthUser | null} */ (getStoredUserSession()?.user ?? null));
+  const [session, setSessionState] = useState(/** @type {UserSession | null} */ (getUsableStoredUserSession()));
+  const [user, setUserState] = useState(/** @type {AuthUser | null} */ (getUsableStoredUserSession()?.user ?? null));
   const [isBootstrapping, setIsBootstrapping] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
 
     async function bootstrap() {
-      const storedSession = getStoredUserSession();
+      const storedSession = getUsableStoredUserSession();
 
       if (!storedSession?.accessToken) {
         if (!cancelled) {
+          setSessionState(null);
+          setUserState(null);
           setIsBootstrapping(false);
         }
         return;
@@ -120,6 +124,15 @@ export function AuthProvider({ children }) {
       return nextSession;
     },
     async refreshProfile() {
+      const currentSession = getUsableStoredUserSession();
+      if (!currentSession?.accessToken || isJwtExpired(currentSession.refreshToken)) {
+        clearStoredUserSession();
+        clearTrackedOrderIds();
+        setSessionState(null);
+        setUserState(null);
+        throw new Error("Session expired");
+      }
+
       const payload = await fetchCurrentUser();
       const current = getStoredUserSession();
       const nextSession = current ? { ...current, user: payload.user } : null;

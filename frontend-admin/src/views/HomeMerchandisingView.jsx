@@ -5,6 +5,7 @@ import {
   PaginationControls,
   StatCard,
   cn,
+  getAdminCardImageProps,
 } from "./shared";
 
 export default function HomeMerchandisingView({ cards, onSave, onBulkUpdate, savingCardId, isBulkSaving, canEditHome }) {
@@ -107,7 +108,7 @@ export default function HomeMerchandisingView({ cards, onSave, onBulkUpdate, sav
       <div className="glass rounded-3xl border border-white/10 p-4">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Home merchandising</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">✨ Curaduría de portada</p>
             <h2 className="mt-1 text-xl font-black text-white">Destacados y últimos ingresos</h2>
             <p className="mt-2 text-sm text-slate-400">La búsqueda recorre todo el catálogo y la edición se pagina para que responda mejor en desktop y mobile.</p>
           </div>
@@ -179,7 +180,7 @@ export default function HomeMerchandisingView({ cards, onSave, onBulkUpdate, sav
               <div key={card.id} className="rounded-3xl border border-white/10 bg-slate-950/40 p-4">
                 <div className="flex items-start gap-3">
                   <input type="checkbox" checked={selectedIds.has(card.id)} onChange={(event) => toggleCardSelection(card.id, event.target.checked)} className="mt-2" />
-                  <img src={card.image} alt={card.name} className="h-20 w-14 rounded-xl object-cover" />
+                  <img {...getAdminCardImageProps(card.image)} alt={card.name} className="h-20 w-14 rounded-xl object-cover" />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-3">
                       <div>
@@ -221,7 +222,7 @@ export default function HomeMerchandisingView({ cards, onSave, onBulkUpdate, sav
                   <th className="px-4 py-3 font-medium">Carta</th>
                   <th className="px-4 py-3 font-medium">Visible</th>
                   <th className="px-4 py-3 font-medium">Destacada</th>
-                  <th className="px-4 py-3 font-medium">Último ingreso</th>
+                  <th className="px-4 py-3 font-medium">Nuevo ingreso</th>
                   <th className="px-4 py-3 font-medium text-right">Acción</th>
                 </tr>
               </thead>
@@ -233,7 +234,7 @@ export default function HomeMerchandisingView({ cards, onSave, onBulkUpdate, sav
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
-                        <img src={card.image} alt={card.name} className="h-16 w-12 rounded-lg object-cover" />
+                        <img {...getAdminCardImageProps(card.image)} alt={card.name} className="h-16 w-12 rounded-lg object-cover" />
                         <div>
                           <p className="font-semibold text-white">{card.name}</p>
                           <p className="text-xs text-slate-400">{card.rarity}</p>

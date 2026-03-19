@@ -1,33 +1,6 @@
-import { memo } from "react";
+import { memo, useEffect, useState } from "react";
 import { Sparkles } from "lucide-react";
-
-function buildCardImageSources(id) {
-  if (id == null || id === "") {
-    return null;
-  }
-
-  const normalizedId = String(id).trim();
-  if (!normalizedId) {
-    return null;
-  }
-
-  return {
-    src: `https://images.ygoprodeck.com/images/cards_small/${normalizedId}.jpg`,
-    srcSet: [
-      `https://images.ygoprodeck.com/images/cards_small/${normalizedId}.jpg 1x`,
-      `https://images.ygoprodeck.com/images/cards/${normalizedId}.jpg 2x`,
-    ].join(", "),
-  };
-}
-
-function extractCardIdFromImageUrl(url) {
-  if (typeof url !== "string") {
-    return null;
-  }
-
-  const match = url.match(/\/cards(?:_small)?\/(\d+)\.(?:jpg|png|webp)/i);
-  return match?.[1] ?? null;
-}
+import { buildRemoteCardImageUrl, extractCardIdFromImageUrl, getCardImage } from "@/lib/cardImage";
 
 /**
  * @param {{
@@ -37,6 +10,7 @@ function extractCardIdFromImageUrl(url) {
  *  className?: string,
  *  fallbackSrc?: string | null,
  *  sizes?: string,
+ *  variant?: "thumb" | "detail",
  *  alt?: string,
  * }} props
  */
@@ -47,11 +21,19 @@ function CardImageBase({
   className = "h-full w-full object-cover",
   fallbackSrc = null,
   sizes,
+  variant = "thumb",
   alt,
 }) {
   const resolvedId = id ?? extractCardIdFromImageUrl(fallbackSrc);
-  const sources = buildCardImageSources(resolvedId);
+  const sources = getCardImage(resolvedId, variant);
   const resolvedAlt = alt || name || "Carta de Yu-Gi-Oh!";
+  const remoteFallback = sources?.rawSrc || buildRemoteCardImageUrl(resolvedId, variant);
+  const preferredSrc = sources?.src || fallbackSrc || "";
+  const [currentSrc, setCurrentSrc] = useState(preferredSrc);
+
+  useEffect(() => {
+    setCurrentSrc(preferredSrc);
+  }, [preferredSrc]);
 
   if (!sources && !fallbackSrc) {
     return (
@@ -63,14 +45,26 @@ function CardImageBase({
 
   return (
     <img
-      src={sources?.src || fallbackSrc || ""}
-      srcSet={sources?.srcSet}
+      src={currentSrc}
       sizes={sizes}
+      width={sources?.width}
+      height={sources?.height}
       alt={resolvedAlt}
       loading={priority ? "eager" : "lazy"}
       fetchPriority={priority ? "high" : "auto"}
-      decoding="async"
+      decoding={priority ? "sync" : "async"}
+      onError={() => {
+        if (currentSrc !== remoteFallback && remoteFallback) {
+          setCurrentSrc(remoteFallback);
+          return;
+        }
+
+        if (currentSrc !== (fallbackSrc || "") && fallbackSrc) {
+          setCurrentSrc(fallbackSrc);
+        }
+      }}
       className={className}
+      data-critical="catalog-image"
     />
   );
 }

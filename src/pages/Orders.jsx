@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 import {
   ClipboardList,
   Loader2,
@@ -21,6 +22,7 @@ import CardImage from "@/components/marketplace/CardImage";
  *
  * @typedef {{
  *  version_id: string | number,
+ *  detail_id?: string | number,
  *  name: string,
  *  quantity: number,
  *  price: number,
@@ -80,8 +82,15 @@ function normalizeWhatsappNumber(value) {
   return typeof value === "string" ? value.replace(/[^\d]/g, "") : "";
 }
 
+/** @param {{ card?: OrderItem | null }} item */
+function getOrderItemDetailPath(item) {
+  const detailId = item?.card?.detail_id ?? item?.card?.version_id;
+  return detailId ? `/card/${detailId}` : null;
+}
+
 export default function Orders() {
   const { isAuthenticated } = useAuth();
+  const navigate = useNavigate();
   const trackedOrderIds = useMemo(() => (isAuthenticated ? getTrackedOrderIds() : []), [isAuthenticated]);
   const storefrontConfigQuery = useQuery({
     queryKey: ["storefront-config"],
@@ -165,6 +174,14 @@ export default function Orders() {
       `https://wa.me/${supportWhatsappNumber}?text=${buildWhatsAppMessage(order)}`,
       "_blank"
     );
+  };
+
+  /** @param {{ id: string | number, quantity: number, subtotal: number, card: OrderItem }} item */
+  const handleOpenOrderItem = (item) => {
+    const detailPath = getOrderItemDetailPath(item);
+    if (detailPath) {
+      navigate(detailPath);
+    }
   };
 
   return (
@@ -265,7 +282,16 @@ export default function Orders() {
                   (item) => (
                   <div
                     key={item.id}
-                    className="flex items-center gap-3"
+                    onClick={() => handleOpenOrderItem(item)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        handleOpenOrderItem(item);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                    className="flex cursor-pointer items-center gap-3 rounded-xl px-2 py-2 transition hover:bg-background/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                   >
                     <div className="w-10 h-14 rounded-md bg-secondary overflow-hidden shrink-0">
                       {item.card?.image ? (

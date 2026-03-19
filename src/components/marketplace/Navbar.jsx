@@ -14,6 +14,10 @@ export default function Navbar({ searchQuery, onSearchChange }) {
 
   const navigate = useNavigate();
   const location = useLocation();
+  const cartButtonLabel = totalItems > 0
+    ? `Abrir carrito con ${totalItems} producto${totalItems === 1 ? "" : "s"}`
+    : "Abrir carrito";
+  const mobileMenuLabel = mobileOpen ? "Cerrar menú de navegación" : "Abrir menú de navegación";
 
   const navLinks = [
     { label: "Inicio", to: "/" },
@@ -44,9 +48,9 @@ export default function Navbar({ searchQuery, onSearchChange }) {
   );
 
   return (
-    <header className="sticky top-0 z-50 border-b border-emerald-400/10 bg-slate-950/65 backdrop-blur-2xl supports-[backdrop-filter]:bg-slate-950/45">
+    <header className="sticky top-0 z-50 border-b border-emerald-400/10 bg-slate-950/65 backdrop-blur-2xl supports-[backdrop-filter]:bg-slate-950/45" data-critical="navbar">
       <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-emerald-400/35 to-transparent" />
-      <div className="mx-auto max-w-[1400px] px-4 py-3 md:px-6">
+      <div className="mx-auto max-w-[1400px] px-4 py-3 md:px-6" data-critical="navbar-inner">
         <div className="flex min-w-0 items-center gap-3 lg:gap-5">
           <Link to="/" className="group flex shrink-0 items-center gap-3">
             <div className="relative flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl border border-emerald-400/25 bg-gradient-to-br from-emerald-400/30 via-emerald-300/10 to-transparent shadow-[0_0_24px_rgba(74,222,128,0.22)] transition duration-300 group-hover:scale-105 group-hover:shadow-[0_0_34px_rgba(74,222,128,0.35)]">
@@ -96,6 +100,8 @@ export default function Navbar({ searchQuery, onSearchChange }) {
 
           <button
             onClick={() => navigate("/cart")}
+            aria-label={cartButtonLabel}
+            title={cartButtonLabel}
             className="relative shrink-0 rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-slate-200 transition duration-300 hover:border-emerald-400/20 hover:bg-white/[0.06] hover:text-white"
           >
             <ShoppingCart className="h-5 w-5" />
@@ -132,6 +138,10 @@ export default function Navbar({ searchQuery, onSearchChange }) {
 
           <button
             onClick={() => setMobileOpen((p) => !p)}
+            aria-label={mobileMenuLabel}
+            aria-expanded={mobileOpen}
+            aria-controls="mobile-navigation"
+            title={mobileMenuLabel}
             className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-slate-200 transition duration-300 hover:bg-white/[0.06] md:hidden"
           >
             {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
@@ -154,7 +164,7 @@ export default function Navbar({ searchQuery, onSearchChange }) {
       </div>
 
       {mobileOpen && (
-        <nav className="space-y-2 border-t border-white/10 bg-slate-950/95 px-4 py-4 md:hidden">
+        <nav id="mobile-navigation" className="space-y-2 border-t border-white/10 bg-slate-950/95 px-4 py-4 md:hidden">
           {navLinks.map((link) => (
             <Link
               key={link.to}

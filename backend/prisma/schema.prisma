@@ -34,10 +34,36 @@ model Card {
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
   orderItems        OrderItem[]
+  priceHistory      CardPriceHistory[]
+  stockHistory      CardStockHistory[]
 
   @@index([name])
   @@index([cardType])
   @@index([rarity])
+}
+
+model CardPriceHistory {
+  id          Int      @id @default(autoincrement())
+  cardId       Int
+  previousPrice Float
+  nextPrice     Float
+  source        String   @default("admin")
+  createdAt     DateTime @default(now())
+  card          Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@index([cardId, createdAt])
+}
+
+model CardStockHistory {
+  id            Int      @id @default(autoincrement())
+  cardId         Int
+  previousStock  Int
+  nextStock      Int
+  source         String   @default("admin")
+  createdAt      DateTime @default(now())
+  card           Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@index([cardId, createdAt])
 }
 
 model CustomCategory {
@@ -151,9 +177,36 @@ model User {
   addresses              Address[]
   orders                 Order[]
   activities             UserActivity[]
+  respondedContactRequests ContactRequest[] @relation("ContactRequestRespondedBy")
+  adminAuditLogs         AdminAuditLog[] @relation("AdminAuditActor")
+  idempotencyKeys        AdminIdempotencyKey[]
 
   @@index([role])
   @@index([createdAt])
+}
+
+model ContactRequest {
+  id            Int                  @id @default(autoincrement())
+  name          String
+  email         String
+  subject       String
+  message       String
+  adminNotes    String?
+  responseMessage String?
+  status        ContactRequestStatus @default(NEW)
+  source        String               @default("storefront")
+  ipAddress     String?
+  userAgent     String?
+  respondedAt   DateTime?
+  respondedById Int?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  respondedBy   User?                @relation("ContactRequestRespondedBy", fields: [respondedById], references: [id], onDelete: SetNull)
+
+  @@index([email])
+  @@index([status])
+  @@index([createdAt])
+  @@index([respondedById])
 }
 
 model Address {
@@ -214,6 +267,41 @@ model AppSetting {
   updatedAt DateTime @updatedAt
 }
 
+model AdminAuditLog {
+  id         Int      @id @default(autoincrement())
+  actorId    Int?
+  entityType String
+  entityId   String
+  action     String
+  requestId  String?
+  routeKey   String?
+  before     String?
+  after      String?
+  metadata   String?
+  createdAt  DateTime @default(now())
+  actor      User?    @relation("AdminAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId, createdAt])
+  @@index([entityType, entityId, createdAt])
+  @@index([requestId])
+}
+
+model AdminIdempotencyKey {
+  id           Int      @id @default(autoincrement())
+  actorId      Int
+  routeKey     String
+  key          String
+  requestHash  String?
+  statusCode   Int?
+  responseBody String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  actor        User     @relation(fields: [actorId], references: [id], onDelete: Cascade)
+
+  @@unique([actorId, routeKey, key])
+  @@index([createdAt])
+}
+
 enum OrderStatus {
   PENDING_PAYMENT
   PAID
@@ -233,4 +321,11 @@ enum ShippingZone {
   GBA
   INTERIOR
   PICKUP
+}
+
+enum ContactRequestStatus {
+  NEW
+  IN_PROGRESS
+  RESPONDED
+  ARCHIVED
 }

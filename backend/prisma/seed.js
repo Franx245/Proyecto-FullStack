@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import prismaPkg from "@prisma/client";
 import { fetchAllMetadata, fetchMetadataByYgoIds } from "../src/lib/ygoprodeck.js";
+import { buildDefaultPrice } from "../src/lib/catalogSync.js";
 
 const { PrismaClient, OrderStatus, ShippingZone, UserRole } = prismaPkg;
 const prisma = new PrismaClient();
@@ -28,17 +29,6 @@ function chunk(items, size) {
   }
 
   return result;
-}
-
-function buildDefaultPrice(metadata) {
-  const rarity = (metadata.rarity || "").toLowerCase();
-
-  if (rarity.includes("secret")) return 14.9;
-  if (rarity.includes("ultra")) return 11.9;
-  if (rarity.includes("super")) return 8.9;
-  if (rarity.includes("rare")) return 6.9;
-  if ((metadata.cardType || "").toLowerCase().includes("monster")) return 5.9;
-  return 4.9;
 }
 
 function buildShipping(zone) {
@@ -508,14 +498,48 @@ async function seedActivities(users) {
 }
 
 async function seedAppSettings() {
-  await prisma.appSetting.upsert({
-    where: { key: "support_whatsapp_number" },
-    update: {},
-    create: {
-      key: "support_whatsapp_number",
-      value: "5491122334455",
-    },
-  });
+  await Promise.all([
+    prisma.appSetting.upsert({
+      where: { key: "support_whatsapp_number" },
+      update: {},
+      create: {
+        key: "support_whatsapp_number",
+        value: "5491122334455",
+      },
+    }),
+    prisma.appSetting.upsert({
+      where: { key: "support_email" },
+      update: {},
+      create: {
+        key: "support_email",
+        value: "crisnehu@gmail.com",
+      },
+    }),
+    prisma.appSetting.upsert({
+      where: { key: "catalog_scope_mode" },
+      update: {},
+      create: {
+        key: "catalog_scope_mode",
+        value: "ALL",
+      },
+    }),
+    prisma.appSetting.upsert({
+      where: { key: "catalog_scope_limit" },
+      update: {},
+      create: {
+        key: "catalog_scope_limit",
+        value: "500",
+      },
+    }),
+    prisma.appSetting.upsert({
+      where: { key: "catalog_scope_selected_ids" },
+      update: {},
+      create: {
+        key: "catalog_scope_selected_ids",
+        value: "[]",
+      },
+    }),
+  ]);
 }
 
 async function shouldSkipHeavyDevSeed() {

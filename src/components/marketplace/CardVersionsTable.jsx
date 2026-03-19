@@ -1,9 +1,10 @@
 import { useCallback } from "react";
 import { motion } from "framer-motion";
-import { ShieldCheck } from "lucide-react";
+import { ShoppingCart, ShieldCheck } from "lucide-react";
 import { useCart } from "@/lib/cartStore";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "sonner";
+import { useNavigate } from "react-router-dom";
 
 import RarityBadge from "./RarityBadge";
 import QuantitySelector from "./QuantitySelector";
@@ -12,6 +13,7 @@ import CardImage from "./CardImage";
 /**
  * @typedef {{
  *  version_id: string | number,
+ *  card_id?: string | number,
  *  ygopro_id?: string | number,
  *  name?: string,
  *  image?: string,
@@ -57,8 +59,9 @@ function StockBadge({ stock }) {
  * @param {{ versions?: CardVersion[], isLoading?: boolean }} props
  */
 export default function CardVersionsTable({ versions = [], isLoading }) {
-  const { addItem } = useCart();
+  const { addItem, setIsOpen } = useCart();
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
 
   const handleAdd = useCallback(
     /** @param {CardVersion} version @param {number} qty */
@@ -66,6 +69,8 @@ export default function CardVersionsTable({ versions = [], isLoading }) {
       addItem(
         {
           version_id: String(version.version_id),
+          detail_id: String(version.version_id),
+          ygopro_id: version.ygopro_id,
           name: version.name ?? "Carta",
           price: version.price ?? 0,
           rarity: version.rarity,
@@ -83,6 +88,28 @@ export default function CardVersionsTable({ versions = [], isLoading }) {
     [addItem]
   );
 
+  const handleOpenDetail = useCallback(
+    /** @param {CardVersion} version */
+    (version) => {
+      const detailId = version?.version_id ?? version?.card_id;
+      if (!detailId) {
+        return;
+      }
+
+      navigate(`/card/${detailId}`);
+    },
+    [navigate]
+  );
+
+  const handleOpenCart = useCallback(
+    /** @param {React.MouseEvent<HTMLButtonElement>} event */
+    (event) => {
+      event.stopPropagation();
+      setIsOpen(true);
+    },
+    [setIsOpen]
+  );
+
   return (
     <div className="mt-8">
       {/* Header */}
@@ -96,7 +123,7 @@ export default function CardVersionsTable({ versions = [], isLoading }) {
       <div className="bg-card border border-border rounded-2xl overflow-hidden">
 
         {/* Desktop header */}
-        <div className="hidden md:grid grid-cols-[80px_minmax(0,1fr)_140px_120px_120px_230px] gap-4 px-5 py-3 border-b border-border bg-secondary/30">
+        <div className="hidden md:grid grid-cols-[80px_minmax(0,1fr)_minmax(190px,1.15fr)_130px_140px_220px] gap-5 px-5 py-3 border-b border-border bg-secondary/30">
           {["Imagen", "Set", "Rareza", "Precio", "Stock", "Acción"].map((h) => (
             <span
               key={h}
@@ -132,7 +159,16 @@ export default function CardVersionsTable({ versions = [], isLoading }) {
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: idx * 0.04 }}
-              className="group grid grid-cols-1 gap-4 border-b border-border px-4 py-4 transition-colors last:border-0 hover:bg-secondary/30 md:grid-cols-[80px_minmax(0,1fr)_140px_120px_120px_230px] md:items-center md:px-5"
+              onClick={() => handleOpenDetail(version)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  handleOpenDetail(version);
+                }
+              }}
+              role="button"
+              tabIndex={0}
+              className="group grid cursor-pointer grid-cols-1 gap-4 border-b border-border px-4 py-4 transition-colors last:border-0 hover:bg-secondary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary md:grid-cols-[80px_minmax(0,1fr)_minmax(190px,1.15fr)_130px_140px_220px] md:items-center md:px-5"
             >
               {/* Image */}
               <div className="flex items-start gap-4 md:block">
@@ -166,13 +202,21 @@ export default function CardVersionsTable({ versions = [], isLoading }) {
                   </p>
                 )}
                 <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <RarityBadge rarity={version.rarity} />
+                  <RarityBadge rarity={version.rarity} className="max-w-[15rem]" />
                   <StockBadge stock={version.stock} />
                 </div>
                 <div className="mt-3 flex items-center justify-between gap-3">
                   <span className="text-lg font-bold text-primary">
                     ${version.price?.toFixed(2) ?? "—"}
                   </span>
+                  <button
+                    type="button"
+                    onClick={handleOpenCart}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-slate-200 transition hover:border-primary/30 hover:bg-primary/10 hover:text-white"
+                  >
+                    <ShoppingCart className="h-3.5 w-3.5" />
+                    Ver carrito
+                  </button>
                 </div>
               </div>
               </div>
@@ -192,8 +236,8 @@ export default function CardVersionsTable({ versions = [], isLoading }) {
               </div>
 
               {/* Rarity */}
-              <div className="hidden md:block">
-                <RarityBadge rarity={version.rarity} />
+              <div className="hidden min-w-0 md:block">
+                <RarityBadge rarity={version.rarity} className="max-w-full" />
               </div>
 
               {/* Price */}
@@ -209,12 +253,22 @@ export default function CardVersionsTable({ versions = [], isLoading }) {
               </div>
 
               {/* Action */}
-              <div className={isMobile ? "md:col-auto" : "min-w-0 md:justify-self-end"}>
-                <QuantitySelector
-                  onConfirm={(qty) => handleAdd(version, qty)}
-                  maxStock={version.stock ?? 0}
-                  disabled={version.stock === 0}
-                />
+              <div className={isMobile ? "md:col-auto" : "min-w-0 md:justify-self-center"}>
+                <div className="flex flex-col gap-2 md:w-[190px]" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                  <button
+                    type="button"
+                    onClick={handleOpenCart}
+                    className="hidden h-10 w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-slate-100 transition hover:border-primary/30 hover:bg-primary/10 hover:text-white md:inline-flex"
+                  >
+                    <ShoppingCart className="h-4 w-4" />
+                    Ver carrito
+                  </button>
+                  <QuantitySelector
+                    onConfirm={(qty) => handleAdd(version, qty)}
+                    maxStock={version.stock ?? 0}
+                    disabled={version.stock === 0}
+                  />
+                </div>
               </div>
             </motion.div>
           ))

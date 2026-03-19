@@ -1,6 +1,9 @@
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { ArrowRight, ShieldCheck, Sparkles, Star, Zap } from "lucide-react";
+import { getCardImage } from "@/lib/cardImage";
+
+const heroCardImage = getCardImage(89631139, "detail");
 
 export default function HeroSection() {
   const trustBadges = [
@@ -24,7 +27,7 @@ export default function HeroSection() {
 
       <div className="relative mx-auto grid max-w-[1400px] gap-14 px-4 pb-16 pt-16 md:px-6 md:pb-20 md:pt-24 lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:gap-10 lg:pt-28">
         <motion.div
-          initial={{ opacity: 0, y: 40 }}
+          initial={false}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, ease: "easeOut" }}
           className="max-w-2xl"
@@ -98,8 +101,12 @@ export default function HeroSection() {
               <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.22),transparent_30%),linear-gradient(160deg,rgba(74,222,128,0.14),transparent_36%,rgba(255,255,255,0.02)_70%)]" />
               <div className="relative rounded-[1.5rem] border border-white/10 bg-slate-950/82 p-3">
                 <img
-                  src="https://images.ygoprodeck.com/images/cards/89631139.jpg"
+                  src={heroCardImage?.src}
                   alt="Blue-Eyes White Dragon"
+                  width={heroCardImage?.width}
+                  height={heroCardImage?.height}
+                  loading="eager"
+                  fetchPriority="high"
                   className="h-[360px] w-[255px] rounded-[1.15rem] object-cover md:h-[470px] md:w-[332px]"
                 />
                 <div className="mt-3 flex items-center justify-between gap-4 px-1 pb-1 pt-2">
@@ -112,8 +119,8 @@ export default function HeroSection() {
                     <p className="mt-1 text-sm font-bold text-emerald-300">Collector</p>
                   </div>
                 </div>
-              </div>
             </div>
+          </div>
           </div>
         </motion.div>
       </div>

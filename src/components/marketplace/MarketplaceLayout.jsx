@@ -1,10 +1,34 @@
-import { useState, useCallback } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
 import Navbar from "./Navbar";
-import CartDrawer from "./CartDrawer";
+import StoreFooter from "./StoreFooter";
+
+/** @param {() => void} callback */
+function scheduleIdleTask(callback) {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+
+  if ("requestIdleCallback" in window) {
+    const callbackId = window.requestIdleCallback(callback, { timeout: 1600 });
+    return () => window.cancelIdleCallback?.(callbackId);
+  }
+
+  const timeoutId = globalThis.setTimeout(callback, 220);
+  return () => globalThis.clearTimeout(timeoutId);
+}
+
+const loadCartDrawer = () => import("./CartDrawer");
+const CartDrawer = lazy(loadCartDrawer);
 
 export default function MarketplaceLayout() {
   const [searchQuery, setSearchQuery] = useState("");
+
+  useEffect(() => {
+    return scheduleIdleTask(() => {
+      void loadCartDrawer();
+    });
+  }, []);
 
   const handleSearchChange = useCallback(
     /** @param {string} value */
@@ -15,35 +39,21 @@ export default function MarketplaceLayout() {
   );
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
+    <div className="min-h-screen flex flex-col bg-background" data-critical="page-shell">
       <Navbar
         searchQuery={searchQuery}
         onSearchChange={handleSearchChange}
       />
 
-      <CartDrawer />
+      <Suspense fallback={null}>
+        <CartDrawer />
+      </Suspense>
 
-      <main className="flex-1">
+      <main className="flex-1 min-h-[calc(100svh-4.5rem)] md:min-h-[calc(100svh-5rem)]" data-critical="page-main">
         <Outlet context={{ searchQuery }} />
       </main>
 
-      <footer className="mt-16 border-t border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01))]">
-        <div className="mx-auto flex max-w-[1400px] flex-col gap-5 px-4 py-8 md:flex-row md:items-center md:justify-between md:px-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-400/20 bg-gradient-to-br from-emerald-400/25 via-emerald-300/10 to-transparent shadow-[0_0_24px_rgba(74,222,128,0.18)]">
-              <span className="font-display text-xs font-bold tracking-[0.24em] text-emerald-100">YG</span>
-            </div>
-            <div>
-              <p className="font-display text-lg font-bold text-white">DuelVault</p>
-              <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Marketplace premium</p>
-            </div>
-          </div>
-
-          <p className="max-w-xl text-center text-xs leading-6 text-slate-500 md:text-right">
-            © {new Date().getFullYear()} DuelVault · No afiliado a Konami
-          </p>
-        </div>
-      </footer>
+      <StoreFooter />
     </div>
   );
 }

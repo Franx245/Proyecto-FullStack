@@ -60,6 +60,7 @@ export default function RarityBadge({
         inline-flex items-center justify-center
         rounded border font-semibold tracking-wide
         whitespace-nowrap
+        max-w-full overflow-hidden text-ellipsis
         ${config.className}
         ${sizeClass}
         ${className}

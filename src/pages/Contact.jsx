@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useCart } from '@/lib/cartStore';
 import { motion } from 'framer-motion';
-import { MessageCircle, Send, User, Mail, Tag, AlignLeft, CheckCircle } from 'lucide-react';
+import { MessageCircle, Send, User, Mail, Tag, AlignLeft, CheckCircle, Phone, QrCode } from 'lucide-react';
 import { toast } from 'sonner';
-import { fetchStorefrontConfig } from '@/api/store';
+import { fetchStorefrontConfig, submitContactRequest } from '@/api/store';
 
 /**
  * @param {{ quantity: number, name: string, price: number }[]} items
@@ -18,6 +18,25 @@ function buildWhatsAppCartMessage(items, totalPrice) {
   );
 }
 
+/** @param {string} value */
+function formatPhoneDisplay(value) {
+  const digits = String(value || '').replace(/[^\d]/g, '');
+
+  if (!digits) {
+    return 'Sin configurar';
+  }
+
+  if (digits.length === 13 && digits.startsWith('549')) {
+    return `+${digits.slice(0, 2)} ${digits.slice(2, 5)} ${digits.slice(5, 9)}-${digits.slice(9)}`;
+  }
+
+  if (digits.length === 11) {
+    return `${digits.slice(0, 3)} ${digits.slice(3, 7)}-${digits.slice(7)}`;
+  }
+
+  return value;
+}
+
 export default function Contact() {
   const { items, totalPrice } = useCart();
   const storefrontConfigQuery = useQuery({
@@ -28,13 +47,25 @@ export default function Contact() {
   const [form, setForm] = useState({ name: '', email: '', subject: '', message: '' });
   const [sent, setSent] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [submitFeedback, setSubmitFeedback] = useState({ type: '', message: '' });
   const supportWhatsappNumber = String(storefrontConfigQuery.data?.storefront?.support_whatsapp_number || '').replace(/[^\d]/g, '');
+  const supportEmail = String(storefrontConfigQuery.data?.storefront?.support_email || '').trim();
+  const whatsappLink = useMemo(() => {
+    if (!supportWhatsappNumber) {
+      return '';
+    }
+
+    return `https://wa.me/${supportWhatsappNumber}?text=${buildWhatsAppCartMessage(items, totalPrice)}`;
+  }, [items, supportWhatsappNumber, totalPrice]);
+  const qrCodeUrl = whatsappLink
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=320x320&margin=0&data=${encodeURIComponent(whatsappLink)}`
+    : '';
 
   /** @type {{ key: "name" | "email" | "subject", label: string, placeholder: string, icon: typeof User, type: string }[]} */
   const formFields = [
     { key: 'name', label: 'Nombre', placeholder: 'Tu nombre', icon: User, type: 'text' },
     { key: 'email', label: 'Email', placeholder: 'tu@email.com', icon: Mail, type: 'email' },
-    { key: 'subject', label: 'Asunto', placeholder: 'Consulta sobre pedido', icon: Tag, type: 'text' },
+    { key: 'subject', label: 'Asunto', placeholder: 'Consulta sobre...', icon: Tag, type: 'text' },
   ];
 
   const canSubmit = form.name && form.email && form.subject && form.message;
@@ -42,12 +73,34 @@ export default function Contact() {
   /** @param {React.FormEvent<HTMLFormElement>} e */
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!canSubmit) return;
+    setSubmitFeedback({ type: '', message: '' });
+
+    if (!canSubmit) {
+      setSubmitFeedback({
+        type: 'error',
+        message: 'Completa nombre, email, asunto y mensaje antes de enviar.',
+      });
+      toast.error('Completa todos los campos');
+      return;
+    }
+
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 1200));
-    setSent(true);
-    setLoading(false);
-    toast.success('¡Mensaje enviado!', { description: 'Te responderemos a la brevedad.' });
+    try {
+      await submitContactRequest(form);
+      setSent(true);
+      setForm({ name: '', email: '', subject: '', message: '' });
+      setSubmitFeedback({
+        type: 'success',
+        message: 'Tu consulta fue enviada correctamente. Te responderemos a la brevedad.',
+      });
+      toast.success('Consulta enviada', { description: 'La recibimos correctamente y la verás reflejada en el panel admin.' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No pudimos enviar tu consulta';
+      setSubmitFeedback({ type: 'error', message });
+      toast.error(message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleWhatsApp = () => {
@@ -56,8 +109,7 @@ export default function Contact() {
       return;
     }
 
-    const msg = buildWhatsAppCartMessage(items, totalPrice);
-    window.open(`https://wa.me/${supportWhatsappNumber}?text=${msg}`, '_blank');
+    window.open(whatsappLink, '_blank');
   };
 
   return (
@@ -65,140 +117,185 @@ export default function Contact() {
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className="max-w-[1000px] mx-auto px-4 py-10"
+      className="mx-auto max-w-[1120px] px-4 py-6 sm:px-5 sm:py-8 lg:px-6 lg:py-9"
     >
-      <h1 className="text-3xl font-black tracking-tight mb-2">Contacto</h1>
-      <p className="text-sm text-muted-foreground mb-8">Estamos para ayudarte. Escribinos o envianos tu carrito por WhatsApp.</p>
+      <div className="mb-5 sm:mb-6">
+        <span className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-200">
+          Soporte DuelVault
+        </span>
+        <h1 className="mt-3 text-3xl font-black tracking-tight text-white sm:text-[2.2rem]">Contacto</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400 sm:text-[15px]">
+          Elegí el canal más rápido para cerrar tu compra o enviarnos una consulta. Mantuvimos la estética de la tienda y comprimimos el bloque para que en mobile respire mejor.
+        </p>
+      </div>
 
-      <div className="grid md:grid-cols-[300px_1fr] gap-6 items-start">
-        {/* Left: QR + WhatsApp */}
-        <div className="space-y-4">
-          {/* QR Card */}
-          <div className="bg-card border border-border rounded-2xl p-6 flex flex-col items-center gap-4">
-            <div className="w-40 h-40 rounded-xl bg-white p-2 flex items-center justify-center">
-              {/* QR placeholder — real QR for wa.me */}
-              <svg viewBox="0 0 100 100" className="w-full h-full" xmlns="http://www.w3.org/2000/svg">
-                <rect width="100" height="100" fill="white"/>
-                {/* Finder patterns */}
-                <rect x="5" y="5" width="30" height="30" fill="black"/>
-                <rect x="8" y="8" width="24" height="24" fill="white"/>
-                <rect x="12" y="12" width="16" height="16" fill="black"/>
-                <rect x="65" y="5" width="30" height="30" fill="black"/>
-                <rect x="68" y="8" width="24" height="24" fill="white"/>
-                <rect x="72" y="12" width="16" height="16" fill="black"/>
-                <rect x="5" y="65" width="30" height="30" fill="black"/>
-                <rect x="8" y="68" width="24" height="24" fill="white"/>
-                <rect x="12" y="72" width="16" height="16" fill="black"/>
-                {/* Data dots */}
-                {[40,45,50,55,60].map(x => [40,45,50,55,60].map(y => (
-                  Math.random() > 0.5 && <rect key={`${x}-${y}`} x={x} y={y} width="4" height="4" fill="black"/>
-                )))}
-                <rect x="40" y="40" width="4" height="4" fill="black"/>
-                <rect x="50" y="40" width="4" height="4" fill="black"/>
-                <rect x="60" y="40" width="4" height="4" fill="black"/>
-                <rect x="40" y="50" width="4" height="4" fill="black"/>
-                <rect x="55" y="50" width="4" height="4" fill="black"/>
-                <rect x="40" y="60" width="4" height="4" fill="black"/>
-                <rect x="45" y="60" width="4" height="4" fill="black"/>
-                <rect x="60" y="60" width="4" height="4" fill="black"/>
-                <rect x="45" y="45" width="4" height="4" fill="black"/>
-                <rect x="60" y="45" width="4" height="4" fill="black"/>
-                <rect x="50" y="55" width="4" height="4" fill="black"/>
-              </svg>
+      <div className="overflow-hidden rounded-[28px] border border-white/10 bg-[linear-gradient(135deg,rgba(15,23,42,0.96),rgba(18,30,46,0.98))] shadow-[0_24px_80px_rgba(2,6,23,0.45)]">
+        <div className="grid lg:grid-cols-[0.94fr_1.06fr]">
+          <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.2),transparent_42%),linear-gradient(180deg,rgba(15,23,42,0.95),rgba(12,20,34,1))] p-4 sm:p-6 lg:border-b-0 lg:border-r">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-400/20 bg-emerald-400/10 text-emerald-300">
+                <Phone className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-[1.7rem] font-bold text-white sm:text-2xl">Contacto Rápido</h2>
+                <p className="mt-1 text-sm leading-6 text-slate-400">
+                  ¿Preferís resolverlo ahora? Escaneá el código QR o abrí WhatsApp con tu carrito actual.
+                </p>
+              </div>
             </div>
-            <p className="text-xs text-muted-foreground text-center">Escaneá para contactarnos por WhatsApp{supportWhatsappNumber ? ` al ${supportWhatsappNumber}` : ''}</p>
+
+            <div className="mt-4 grid gap-3 sm:mt-5 sm:gap-4">
+              <div className="rounded-3xl border border-white/8 bg-slate-950/45 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-300/80">WhatsApp activo</p>
+                    <p className="mt-2 text-[15px] font-semibold text-white sm:text-base">{formatPhoneDisplay(supportWhatsappNumber)}</p>
+                  </div>
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-400/10 text-emerald-300">
+                    <QrCode className="h-5 w-5" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-center overflow-hidden rounded-[28px] border border-white/10 bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
+                {qrCodeUrl ? (
+                  <img
+                    src={qrCodeUrl}
+                    alt="QR para enviar el carrito por WhatsApp"
+                    className="h-40 w-40 object-cover sm:h-[220px] sm:w-[220px]"
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="flex h-40 w-40 flex-col items-center justify-center border border-slate-200 bg-slate-100 px-4 text-center text-sm text-slate-500 sm:h-[220px] sm:w-[220px]">
+                    <QrCode className="mb-3 h-8 w-8" />
+                    Configurá el número desde admin para generar el QR.
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={handleWhatsApp}
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[#08b23f] px-4 text-sm font-bold text-white shadow-[0_16px_35px_rgba(8,178,63,0.28)] transition hover:bg-[#079739] active:scale-[0.99]"
+              >
+                <MessageCircle className="h-4 w-4" />
+                Enviar carrito por WhatsApp
+              </button>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-amber-300/80">Email soporte</p>
+                  <p className="mt-2 break-all text-sm text-slate-200">{supportEmail || 'Sin email configurado'}</p>
+                </div>
+                <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-amber-300/80">Carrito actual</p>
+                  <p className="mt-2 text-sm text-slate-200">
+                    {items.length} ítem{items.length !== 1 ? 's' : ''} · ${totalPrice.toFixed(2)}
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* WhatsApp button */}
-          <button
-            onClick={handleWhatsApp}
-            className="w-full flex items-center justify-center gap-2 h-11 rounded-xl bg-[#25D366] text-white font-semibold text-sm hover:bg-[#1ebe5d] active:scale-[0.98] transition-all"
-          >
-            <MessageCircle className="w-4 h-4" />
-            Enviar carrito por WhatsApp
-          </button>
-
-          {items.length > 0 && (
-            <p className="text-xs text-muted-foreground text-center">{items.length} ítem{items.length !== 1 ? 's' : ''} · Total: <span className="text-primary font-semibold">${totalPrice.toFixed(2)}</span></p>
-          )}
-        </div>
-
-        {/* Right: Contact Form */}
-        <div className="bg-card border border-border rounded-2xl p-6">
-          {sent ? (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="flex flex-col items-center justify-center py-12 gap-4"
-            >
-              <div className="w-14 h-14 rounded-full bg-primary/15 flex items-center justify-center">
-                <CheckCircle className="w-7 h-7 text-primary" />
-              </div>
-              <h3 className="font-bold text-lg">¡Mensaje enviado!</h3>
-              <p className="text-sm text-muted-foreground text-center">Te responderemos lo antes posible.</p>
-              <button
-                onClick={() => { setSent(false); setForm({ name: '', email: '', subject: '', message: '' }); }}
-                className="mt-2 text-sm text-primary hover:underline"
+          <div className="bg-[linear-gradient(180deg,rgba(36,49,70,0.98),rgba(29,40,58,1))] p-4 sm:p-6">
+            {sent ? (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="flex flex-col items-center justify-center gap-4 py-10"
               >
-                Enviar otro mensaje
-              </button>
-            </motion.div>
-          ) : (
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <h2 className="font-bold text-lg mb-4">Envianos un mensaje</h2>
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-amber-400/15">
+                  <CheckCircle className="h-7 w-7 text-amber-300" />
+                </div>
+                <h3 className="text-lg font-bold text-white">Consulta recibida</h3>
+                <p className="text-center text-sm text-slate-400">Ya guardamos tu mensaje y el equipo podrá responderlo desde el panel administrativo.</p>
+                <button
+                  onClick={() => {
+                    setSent(false);
+                    setSubmitFeedback({ type: '', message: '' });
+                    setForm({ name: '', email: '', subject: '', message: '' });
+                  }}
+                  className="mt-2 text-sm font-medium text-amber-300 hover:text-amber-200"
+                >
+                  Enviar otro mensaje
+                </button>
+              </motion.div>
+            ) : (
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="mb-3 sm:mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-amber-300/25 bg-amber-300/12 text-amber-300">
+                      <Mail className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-[1.7rem] font-bold text-white sm:text-2xl">Envíanos un Correo</h2>
+                      <p className="mt-1 text-sm text-slate-400">Completá el formulario y guardaremos tu consulta para que el equipo la responda.</p>
+                    </div>
+                  </div>
+                </div>
 
-              {formFields.map(({ key, label, placeholder, icon: Icon, type }) => (
-                <div key={key}>
-                  <label className="text-xs text-muted-foreground mb-1.5 block">{label}</label>
+                {formFields.map(({ key, label, placeholder, icon: Icon, type }) => (
+                  <div key={key}>
+                    <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-300">{label}</label>
+                    <div className="relative">
+                      <Icon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                      <input
+                        type={type}
+                        placeholder={placeholder}
+                        value={form[key]}
+                        onChange={e => setForm(prev => ({ ...prev, [key]: e.target.value }))}
+                        className="h-11 w-full rounded-2xl border border-slate-700/80 bg-slate-950/45 pl-10 pr-4 text-sm text-slate-100 placeholder:text-slate-500 focus:border-amber-300/35 focus:outline-none focus:ring-4 focus:ring-amber-300/10"
+                      />
+                    </div>
+                  </div>
+                ))}
+
+                <div>
+                  <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-300">Mensaje</label>
                   <div className="relative">
-                    <Icon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/50" />
-                    <input
-                      type={type}
-                      placeholder={placeholder}
-                      value={form[key]}
-                      onChange={e => setForm(prev => ({ ...prev, [key]: e.target.value }))}
-                      className="w-full h-10 pl-9 pr-3 rounded-lg bg-secondary border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all"
+                    <AlignLeft className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
+                    <textarea
+                      placeholder="Escribe tu mensaje aquí..."
+                      rows={4}
+                      value={form.message}
+                      onChange={e => setForm(prev => ({ ...prev, message: e.target.value }))}
+                      className="w-full resize-none rounded-2xl border border-slate-700/80 bg-slate-950/45 py-3 pl-10 pr-4 text-sm text-slate-100 placeholder:text-slate-500 focus:border-amber-300/35 focus:outline-none focus:ring-4 focus:ring-amber-300/10"
                     />
                   </div>
                 </div>
-              ))}
 
-              <div>
-                <label className="text-xs text-muted-foreground mb-1.5 block">Mensaje</label>
-                <div className="relative">
-                  <AlignLeft className="absolute left-3 top-3 w-4 h-4 text-muted-foreground/50" />
-                  <textarea
-                    placeholder="Escribí tu consulta..."
-                    rows={4}
-                    value={form.message}
-                    onChange={e => setForm(prev => ({ ...prev, message: e.target.value }))}
-                    className="w-full pl-9 pr-3 py-2.5 rounded-lg bg-secondary border border-border text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all"
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={!canSubmit || loading}
-                className="w-full h-11 rounded-xl bg-primary text-primary-foreground font-bold text-sm flex items-center justify-center gap-2 hover:bg-primary/85 active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {loading ? (
-                  <span className="flex items-center gap-2">
-                    <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                    </svg>
-                    Enviando...
-                  </span>
+                {submitFeedback.message ? (
+                  <div className={`rounded-2xl border px-4 py-3 text-sm ${submitFeedback.type === 'success' ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-100' : 'border-rose-400/25 bg-rose-400/10 text-rose-100'}`}>
+                    {submitFeedback.message}
+                  </div>
                 ) : (
-                  <>
-                    <Send className="w-4 h-4" />
-                    Enviar mensaje
-                  </>
+                  <p className="text-xs text-slate-500">
+                    Al enviar, guardamos tu consulta en nuestro panel para darte seguimiento.
+                  </p>
                 )}
-              </button>
-            </form>
-          )}
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-amber-400 text-slate-950 text-sm font-bold transition hover:bg-amber-300 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {loading ? (
+                    <span className="flex items-center gap-2">
+                      <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                      </svg>
+                      Enviando...
+                    </span>
+                  ) : (
+                    <>
+                      <Send className="h-4 w-4" />
+                      Enviar Mensaje
+                    </>
+                  )}
+                </button>
+              </form>
+            )}
+          </div>
         </div>
       </div>
     </motion.div>

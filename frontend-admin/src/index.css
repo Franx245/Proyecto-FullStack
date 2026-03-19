@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=optional");
 
 @tailwind base;
 @tailwind components;
@@ -6,11 +6,16 @@
 
 :root {
   color-scheme: dark;
-  --admin-bg: #030712;
-  --admin-panel: rgba(15, 23, 42, 0.78);
-  --admin-border: rgba(255, 255, 255, 0.09);
-  --admin-text: #e5eefb;
-  --admin-muted: #94a3b8;
+  --admin-bg: #060816;
+  --admin-panel: rgba(12, 17, 35, 0.82);
+  --admin-border: rgba(214, 170, 87, 0.18);
+  --admin-text: #f3ecdf;
+  --admin-muted: #b5b8c7;
+  --admin-field-bg: linear-gradient(180deg, rgba(6, 9, 24, 0.94), rgba(18, 21, 42, 0.86));
+  --admin-field-border: rgba(214, 170, 87, 0.18);
+  --admin-field-border-focus: rgba(245, 185, 78, 0.5);
+  --admin-field-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  --admin-field-radius: 18px;
 }
 
 * {
@@ -20,17 +25,22 @@
 html {
   min-height: 100%;
   background: var(--admin-bg);
+  overflow-y: scroll;
+  scroll-behavior: smooth;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: auto;
   font-family: "IBM Plex Sans", sans-serif;
   background:
-    radial-gradient(circle at top left, rgba(249, 115, 22, 0.16), transparent 24%),
-    radial-gradient(circle at top right, rgba(14, 165, 233, 0.12), transparent 22%),
-    radial-gradient(circle at bottom center, rgba(16, 185, 129, 0.08), transparent 30%),
-    linear-gradient(180deg, #020617 0%, #030712 100%);
+    radial-gradient(circle at top left, rgba(244, 179, 57, 0.16), transparent 24%),
+    radial-gradient(circle at top right, rgba(105, 57, 168, 0.12), transparent 22%),
+    radial-gradient(circle at bottom center, rgba(164, 33, 87, 0.1), transparent 30%),
+    linear-gradient(180deg, #050713 0%, #060816 100%);
   color: var(--admin-text);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -40,11 +50,109 @@ body {
   min-height: 100vh;
 }
 
+img {
+  display: block;
+}
+
 .glass {
-  background: var(--admin-panel);
+  background:
+    linear-gradient(180deg, rgba(15, 20, 40, 0.92), rgba(8, 12, 28, 0.88)),
+    radial-gradient(circle at top, rgba(215, 171, 82, 0.08), transparent 55%);
   border-color: var(--admin-border);
   backdrop-filter: blur(18px);
-  box-shadow: 0 18px 50px rgba(2, 6, 23, 0.35);
+  box-shadow: 0 18px 50px rgba(2, 6, 23, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.glass::before {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(255, 214, 126, 0.08), transparent 32%, transparent 70%, rgba(196, 77, 255, 0.05));
+  opacity: 0.8;
+}
+
+.glass > * {
+  position: relative;
+  z-index: 1;
+}
+
+.admin-scroll-row {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  will-change: scroll-position;
+}
+
+.admin-scroll-row::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+
+.admin-scroll-row::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.28);
+}
+
+.glass :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+  border: 1px solid var(--admin-field-border);
+  background: var(--admin-field-bg);
+  color: var(--admin-text);
+  box-shadow: var(--admin-field-shadow);
+}
+
+.glass :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea)::placeholder {
+  color: rgba(148, 163, 184, 0.72);
+}
+
+.glass :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea):focus {
+  outline: none;
+  border-color: var(--admin-field-border-focus);
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.12), var(--admin-field-shadow);
+}
+
+.glass textarea {
+  min-height: 112px;
+}
+
+.glass select {
+  appearance: none;
+  color-scheme: dark;
+  background-image:
+    linear-gradient(45deg, transparent 50%, rgba(148, 163, 184, 0.78) 50%),
+    linear-gradient(135deg, rgba(148, 163, 184, 0.78) 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) calc(50% - 2px),
+    calc(100% - 12px) calc(50% - 2px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  padding-right: 2.9rem;
+}
+
+.glass select option,
+.glass select optgroup {
+  background: #0b1022;
+  color: var(--admin-text);
+}
+
+.glass select option:checked {
+  background: #152042;
+  color: #ffffff;
+}
+
+.glass :is(button, a, input, select, textarea) {
+  touch-action: manipulation;
+}
+
+.admin-content-auto {
+  content-visibility: visible;
+  contain-intrinsic-size: auto;
+}
+
+.admin-list-card {
+  contain: none;
 }
 
 h1,
@@ -55,6 +163,7 @@ h5,
 h6 {
   font-family: "Space Grotesk", sans-serif;
   letter-spacing: -0.03em;
+  text-wrap: balance;
 }
 
 button,
@@ -67,4 +176,35 @@ textarea {
 ::selection {
   background: rgba(245, 158, 11, 0.35);
   color: white;
+}
+
+@media (max-width: 1023px) {
+  .glass {
+    box-shadow: 0 12px 32px rgba(2, 6, 23, 0.28);
+  }
+}
+
+@media (max-width: 767px), (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .glass {
+    backdrop-filter: none;
+    box-shadow: 0 10px 24px rgba(2, 6, 23, 0.24);
+  }
+
+  .admin-scroll-row {
+    scrollbar-width: none;
+  }
+
+  .admin-scroll-row::-webkit-scrollbar {
+    display: none;
+  }
+
 }

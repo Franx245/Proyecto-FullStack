@@ -7,6 +7,7 @@ import CardImage from "./CardImage";
 /**
  * @typedef {{
  *  version_id: string | number,
+ *  detail_id?: string | number,
  *  ygopro_id?: string | number,
  *  name: string,
  *  image?: string,
@@ -28,15 +29,21 @@ import CardImage from "./CardImage";
  * }} CartStore
  */
 
+/** @param {CartItemType} item */
+function getCartItemDetailPath(item) {
+  const detailId = item?.detail_id ?? item?.version_id;
+  return detailId ? `/card/${detailId}` : null;
+}
+
 /**
  * 🔥 FIX GLOBAL: casteamos el store UNA vez
  */
 const useSafeCart = () => /** @type {CartStore} */ (useCart());
 
 /**
- * @param {{ item: CartItemType }} props
+ * @param {{ item: CartItemType, onOpenDetail: (item: CartItemType) => void }} props
  */
-function CartItem({ item }) {
+function CartItem({ item, onOpenDetail }) {
   const cart = useSafeCart();
 
   return (
@@ -45,7 +52,16 @@ function CartItem({ item }) {
       initial={{ opacity: 0, x: 20 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 20 }}
-      className="flex gap-3 p-3 rounded-lg bg-secondary/50"
+      onClick={() => onOpenDetail(item)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpenDetail(item);
+        }
+      }}
+      role="button"
+      tabIndex={0}
+      className="flex cursor-pointer gap-3 rounded-lg bg-secondary/50 p-3 transition-colors hover:bg-secondary/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
     >
       {/* IMAGE */}
       <div className="w-14 h-[72px] rounded-md bg-secondary overflow-hidden shrink-0">
@@ -77,7 +93,11 @@ function CartItem({ item }) {
       {/* CONTROLS */}
       <div className="flex flex-col items-end justify-between">
         <button
-          onClick={() => cart.removeItem(item.version_id)}
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            cart.removeItem(item.version_id);
+          }}
           className="text-muted-foreground hover:text-destructive"
         >
           <Trash2 className="w-3.5 h-3.5" />
@@ -85,10 +105,13 @@ function CartItem({ item }) {
 
         <div className="flex items-center gap-1">
           <button
-            onClick={() =>
-              item.quantity > 1 &&
-              cart.updateQuantity(item.version_id, item.quantity - 1)
-            }
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              if (item.quantity > 1) {
+                cart.updateQuantity(item.version_id, item.quantity - 1);
+              }
+            }}
             className="w-6 h-6 rounded bg-secondary flex items-center justify-center"
           >
             <Minus className="w-3 h-3" />
@@ -99,9 +122,11 @@ function CartItem({ item }) {
           </span>
 
           <button
-            onClick={() =>
-              cart.updateQuantity(item.version_id, item.quantity + 1)
-            }
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              cart.updateQuantity(item.version_id, item.quantity + 1);
+            }}
             className="w-6 h-6 rounded bg-secondary flex items-center justify-center"
           >
             <Plus className="w-3 h-3" />
@@ -115,6 +140,17 @@ function CartItem({ item }) {
 export default function CartDrawer() {
   const cart = useSafeCart();
   const navigate = useNavigate();
+
+  /** @param {CartItemType} item */
+  const handleOpenDetail = (item) => {
+    const detailPath = getCartItemDetailPath(item);
+    if (!detailPath) {
+      return;
+    }
+
+    cart.setIsOpen(false);
+    navigate(detailPath);
+  };
 
   return (
     <AnimatePresence>
@@ -153,7 +189,11 @@ export default function CartDrawer() {
               <AnimatePresence>
                 {cart.items.length > 0 ? (
                   cart.items.map((item) => (
-                    <CartItem key={item.version_id} item={item} />
+                    <CartItem
+                      key={item.version_id}
+                      item={item}
+                      onOpenDetail={handleOpenDetail}
+                    />
                   ))
                 ) : (
                   <div className="text-center text-muted-foreground py-20">

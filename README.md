@@ -270,6 +270,136 @@ npm run db:seed
 - merchandising de home
 - categorías y publicaciones custom
 
+## Estado actual y cambios implementados
+
+Esta base quedó evolucionada en cuatro frentes: storefront, panel admin, backend operacional y despliegue productivo. Abajo se resume qué cambió y por qué existe cada cambio.
+
+### 1. Storefront público: rendimiento, navegación y conversión
+
+- Persistencia de caché con TanStack Query en [src/lib/query-client.js](src/lib/query-client.js).
+	Por qué: evita refetches innecesarios, reduce tiempo de carga percibido y permite reutilizar catálogo y filtros entre navegaciones.
+
+- Bootstrap temprano del catálogo en [index.html](index.html) y [src/api/store.js](src/api/store.js).
+	Por qué: la primera visita a /singles precalienta la página 1 del catálogo y la primera imagen crítica, reduciendo el tiempo hasta contenido útil.
+
+- Precarga diferida de rutas, drawer del carrito y vistas pesadas en [src/App.jsx](src/App.jsx) y [src/components/marketplace/MarketplaceLayout.jsx](src/components/marketplace/MarketplaceLayout.jsx).
+	Por qué: la tienda no necesita descargar toda la aplicación al primer render; se prioriza lo visible y el resto se carga en idle.
+
+- CSS crítico inline y service worker de shell en [vite.config.js](vite.config.js), [src/critical.css](src/critical.css) y [src/main.jsx](src/main.jsx).
+	Por qué: mejora el first paint, evita flashes visuales en producción y mantiene una capa de caché controlada para assets del storefront.
+
+- Optimización de imágenes y fallback Cloudinary/YGOPRODeck en [src/lib/cardImage.js](src/lib/cardImage.js), [src/components/marketplace/CardImage.jsx](src/components/marketplace/CardItem.jsx) y [src/components/marketplace/HeroSection.jsx](src/components/marketplace/HeroSection.jsx).
+	Por qué: las cartas son el activo visual principal; se necesitaba bajar peso, mejorar nitidez y tolerar fallos del origen remoto.
+
+- Rework del grid, quick add, detalle y navegación desde carrito/pedidos en [src/components/marketplace/CardGrid.jsx](src/components/marketplace/CardItem.jsx), [src/components/marketplace/CardVersionsTable.jsx](src/components/marketplace/CartDrawer.jsx), [src/pages/Cart.jsx](src/pages/Orders.jsx) y [src/pages/Singles.jsx](src/pages/Contact.jsx).
+	Por qué: el flujo comercial ahora tiene menos fricción. El usuario puede abrir detalle desde más puntos, agregar rápido al carrito y mantener contexto.
+
+- Footer dinámico con datos reales de soporte en [src/components/marketplace/StoreFooter.jsx](src/components/marketplace/MarketplaceLayout.jsx).
+	Por qué: el storefront necesitaba reflejar el canal de contacto configurado por operación, no texto hardcodeado.
+
+### 2. Panel admin: operación real, persistencia y UX de operador
+
+- Dashboard administrativo reescrito en [frontend-admin/src/views/DashboardView.jsx](frontend-admin/src/views/DashboardView.jsx).
+	Por qué: el panel dejó de ser solo informativo y pasó a ser un centro de mando con filtros persistidos, alertas operativas y acciones rápidas sobre pedidos.
+
+- Inventario virtualizado, con drawer de detalle, historial, edición masiva y borrado seguro en [frontend-admin/src/views/InventoryView.jsx](frontend-admin/src/views/InventoryView.jsx).
+	Por qué: con miles de cartas el listado anterior no escalaba. La virtualización y el guardado diferido reducen costo de render y errores de operador.
+
+- Persistencia del estado de vistas y cache admin en [frontend-admin/src/lib/queryClient.js](frontend-admin/src/App.jsx), [frontend-admin/src/views/OrdersView.jsx](frontend-admin/src/views/UsersView.jsx) y [frontend-admin/src/views/DashboardView.jsx](frontend-admin/src/views/WhatsappSettingsView.jsx).
+	Por qué: el operador no debe perder filtros, página o contexto al navegar. También se corrigió un bug productivo donde inventario quedaba atascado en datos persistidos viejos.
+
+- Invalidación de claves viejas de localStorage en [frontend-admin/src/App.jsx](frontend-admin/src/App.jsx) y versionado de caché en [frontend-admin/src/lib/queryClient.js](frontend-admin/src/lib/queryClient.js).
+	Por qué: en producción había sesiones con estado obsoleto. Se forzó una limpieza controlada para que el admin cargue páginas y conteos actuales.
+
+- Resolución robusta del backend API desde el admin en [frontend-admin/src/lib/api.js](frontend-admin/src/lib/api.js).
+	Por qué: el admin estaba desplegado en dominio separado y, cuando faltaba VITE_API_BASE_URL, intentaba pegarle a rutas relativas que devolvían 404. Ahora resuelve el origen correcto según entorno.
+
+- Observabilidad de interacciones y mutaciones en [frontend-admin/src/lib/observability.js](frontend-admin/src/lib/observability.js).
+	Por qué: hace falta trazabilidad para errores de operador, flujos lentos y debugging sin depender solo de consola.
+
+- Confirmaciones modales reutilizables e imágenes admin optimizadas en [frontend-admin/src/views/shared.jsx](frontend-admin/src/views/OrdersView.jsx), [frontend-admin/src/views/UsersView.jsx](frontend-admin/src/views/WhatsappSettingsView.jsx) y [frontend-admin/src/views/HomeMerchandisingView.jsx](frontend-admin/src/views/CustomContentView.jsx).
+	Por qué: se eliminaron confirms del navegador, se unificó UX crítica y se mejoró claridad visual en flujos destructivos.
+
+- Reglas de routing para rutas profundas del admin en [frontend-admin/vercel.json](frontend-admin/vercel.json).
+	Por qué: Vercel debía devolver index.html en rutas como /inventory, /orders o /users para que el router del admin funcione también con refresh directo.
+
+- Ajustes de build del admin en [frontend-admin/vite.config.js](frontend-admin/vite.config.js) y limpieza de import inútil en [frontend-admin/src/main.jsx](frontend-admin/src/main.jsx).
+	Por qué: se mejoró carga inicial, partición de chunks, precarga de vistas críticas y se eliminó un warning/editor error real.
+
+### 3. Backend y capa de datos: seguridad operativa e idempotencia
+
+- Validación de concurrencia optimista, idempotencia y auditoría administrativa documentadas en la memoria de repo y aplicadas en backend/server.js y Prisma.
+	Por qué: varias mutaciones críticas podían pisarse entre operadores o reintentarse desde red inestable. Ahora el backend rechaza conflictos con estructura explícita y deja huella auditable.
+
+- Manejo más seguro de sesiones/JWT en [src/lib/userSession.js](src/lib/auth.jsx) y [src/api/store.js](src/api/store.js).
+	Por qué: el frontend ya no debe seguir usando tokens expirados; primero valida refresh token útil y limpia sesión si quedó vencida.
+
+- Soporte de consultas de contacto persistidas y administración de respuestas en [src/pages/Contact.jsx](src/api/store.js) y [frontend-admin/src/views/WhatsappSettingsView.jsx](frontend-admin/src/views/WhatsappSettingsView.jsx).
+	Por qué: el formulario público dejó de ser solo cosmético. Ahora genera registros reales que operación puede tomar, responder y archivar.
+
+- Base para sincronización de catálogo en [backend/src/lib/catalogSync.js](backend/src/lib/catalogSync.js).
+	Por qué: la importación del catálogo necesita una pieza dedicada para crear, actualizar, ocultar o eliminar cartas de forma coherente con pedidos existentes.
+
+- Integración opcional con Supabase realtime en [src/lib/supabase.js](src/hooks/useCardsRealtime.js), [src/config/env.js](src/App.jsx) y dependencias nuevas en [package.json](package.json).
+	Por qué: cuando está habilitado, el storefront puede refrescar queries de cartas frente a cambios en la base sin esperar navegación manual.
+
+### 4. Producción y despliegue: estabilidad real en Vercel
+
+- Separación formal entre storefront/API y admin según memoria de repo.
+	Por qué: el admin se despliega como proyecto Vercel independiente y la tienda/API como proyecto raíz; esto evita mezclar tiempos de build y configuración.
+
+- URLs productivas actualmente utilizadas:
+	- Storefront/API: https://duelvault-store-api.vercel.app
+	- Admin: https://duelvault-admin.vercel.app
+
+- Compatibilidad de login admin desde el storefront en [src/pages/Auth.jsx](src/pages/Auth.jsx).
+	Por qué: si la app corre fuera de localhost, el redireccionamiento al admin ya no depende de puertos locales y usa la URL productiva correcta.
+
+- SEO y descubribilidad básica en [public/robots.txt](public/robots.txt) y [public/sitemap.xml](public/sitemap.xml).
+	Por qué: la tienda pública necesitaba archivos mínimos para indexación controlada en producción.
+
+### 5. Resumen funcional de los fixes más recientes
+
+- Se corrigió el fallo donde el admin cargaba HTML pero no podía iniciar sesión ni listar cartas en producción.
+	Motivo técnico: estaba consumiendo /api relativo desde el dominio del admin, que no expone esos endpoints.
+
+- Se corrigió el caso donde el inventario del admin parecía limitado a 33 cartas.
+	Motivo técnico: el backend devolvía el total correcto, pero el navegador conservaba estado persistido viejo; se versionaron y limpiaron claves de cache/localStorage.
+
+- Se dejó el proyecto sin errores activos de editor reportados durante el último ciclo de deploy.
+	Motivo técnico: había imports residuales y varios warnings menores que ya no aportaban valor.
+
+## Variables adicionales usadas por la versión actual
+
+Además de las variables mínimas ya listadas, la versión actual puede usar:
+
+```env
+VITE_CLOUDINARY_CLOUD_NAME=
+VITE_SUPABASE_URL=
+VITE_SUPABASE_ANON_KEY=
+VITE_ENABLE_SUPABASE_REALTIME=false
+VITE_SUPABASE_SCHEMA=public
+VITE_SUPABASE_CARDS_TABLE=cards
+```
+
+Qué habilitan:
+
+- VITE_CLOUDINARY_CLOUD_NAME: optimización remota de imágenes de cartas.
+- VITE_SUPABASE_URL: endpoint del proyecto Supabase para realtime en frontend.
+- VITE_SUPABASE_ANON_KEY: clave pública necesaria para suscripción realtime.
+- VITE_ENABLE_SUPABASE_REALTIME: activa o desactiva invalidación reactiva del catálogo.
+- VITE_SUPABASE_SCHEMA: schema observado para cambios.
+- VITE_SUPABASE_CARDS_TABLE: tabla observada para refresco de cartas.
+
+## Credenciales y entorno de prueba
+
+Usuarios documentados para QA y desarrollo:
+
+- admin@test.com / admin123
+- staff@test.com / staff123
+
+Estas cuentas sirven para validar login, panel administrativo y los flujos básicos luego de cada deploy.
+
 ## Test Users
 
 Usuarios documentados para desarrollo:

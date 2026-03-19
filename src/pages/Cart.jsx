@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -18,12 +18,14 @@ import { checkoutCart, fetchMyAddresses } from "@/api/store";
 import { trackOrderId } from "@/lib/orderTracking";
 import { useAuth } from "@/lib/auth";
 import { SHIPPING_OPTIONS, getShippingOption } from "@/lib/shipping";
+import { refreshCards } from "@/lib/query-client";
 import { toast } from "sonner";
 import CardImage from "@/components/marketplace/CardImage";
 
 /**
  * @typedef {{
  *  version_id: string | number,
+ *  detail_id?: string | number,
  *  name: string,
  *  ygopro_id?: string | number,
  *  image?: string,
@@ -66,6 +68,7 @@ import CardImage from "@/components/marketplace/CardImage";
  *  phone: string,
  *  shipping_zone: string,
  *  notes: string,
+ *  accepted: boolean,
  *  addressId?: number,
  *  address?: CheckoutAddress,
  *  save_address?: boolean
@@ -74,11 +77,19 @@ import CardImage from "@/components/marketplace/CardImage";
  * @typedef {{ id: string | number }} CheckoutOrderSummary
  *
  * @typedef {{ orders?: CheckoutOrderSummary[] }} OrdersCacheShape
+ *
+ * @typedef {Error & { unavailableCardIds?: Array<string | number> }} CheckoutMutationError
  */
 
+/** @param {CartItem} item */
+function getCartItemDetailPath(item) {
+  const detailId = item?.detail_id ?? item?.version_id;
+  return detailId ? `/card/${detailId}` : null;
+}
+
 // 🧩 Row
-/** @param {{ item: CartItem }} props */
-function CartRow({ item }) {
+/** @param {{ item: CartItem, onOpenDetail: (item: CartItem) => void }} props */
+function CartRow({ item, onOpenDetail }) {
   const { updateQuantity, removeItem } = useCart();
 
   return (
@@ -87,7 +98,16 @@ function CartRow({ item }) {
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, x: -20 }}
-      className="flex gap-4 p-4 bg-card border border-border rounded-xl hover:border-border/80 transition"
+      onClick={() => onOpenDetail(item)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpenDetail(item);
+        }
+      }}
+      role="button"
+      tabIndex={0}
+      className="flex cursor-pointer gap-4 rounded-xl border border-border bg-card p-4 transition hover:border-border/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
     >
       {/* Image */}
       <div className="w-16 h-[84px] rounded-lg bg-secondary overflow-hidden shrink-0">
@@ -125,7 +145,11 @@ function CartRow({ item }) {
       {/* Controls */}
       <div className="flex flex-col items-end justify-between">
         <button
-          onClick={() => removeItem(String(item.version_id))}
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            removeItem(String(item.version_id));
+          }}
           className="p-1 text-muted-foreground hover:text-destructive transition"
         >
           <Trash2 className="w-4 h-4" />
@@ -133,9 +157,11 @@ function CartRow({ item }) {
 
         <div className="flex items-center gap-2 bg-secondary rounded-lg px-2 py-1">
           <button
-            onClick={() =>
-              updateQuantity(String(item.version_id), item.quantity - 1)
-            }
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              updateQuantity(String(item.version_id), item.quantity - 1);
+            }}
           >
             <Minus className="w-3.5 h-3.5" />
           </button>
@@ -145,9 +171,11 @@ function CartRow({ item }) {
           </span>
 
           <button
-            onClick={() =>
-              updateQuantity(String(item.version_id), item.quantity + 1)
-            }
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              updateQuantity(String(item.version_id), item.quantity + 1);
+            }}
           >
             <Plus className="w-3.5 h-3.5" />
           </button>
@@ -174,12 +202,19 @@ function emptyCheckoutAddress() {
   };
 }
 
+/** @param {CheckoutAddress[]} addresses */
+function getPreferredAddress(addresses) {
+  return addresses.find(
+    /** @param {CheckoutAddress} address */
+    (address) => address.is_default
+  ) || addresses[0] || null;
+}
+
 // 🛒 Page
 export default function CartPage() {
-  const { items, totalPrice, totalItems, clearCart } = useCart();
+  const { items, totalPrice, totalItems, clearCart, removeItem } = useCart();
   const { user, isAuthenticated, isBootstrapping } = useAuth();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
 
   const [phone, setPhone] = useState("");
   const [customerName, setCustomerName] = useState("");
@@ -191,6 +226,14 @@ export default function CartPage() {
   const [notes, setNotes] = useState("");
   const [accepted, setAccepted] = useState(false);
   const [errors, setErrors] = useState(/** @type {CheckoutErrors} */ ({}));
+
+  /** @param {CartItem} item */
+  const handleOpenDetail = (item) => {
+    const detailPath = getCartItemDetailPath(item);
+    if (detailPath) {
+      navigate(detailPath);
+    }
+  };
 
   const addressesQuery = useQuery({
     queryKey: ["my-addresses", "checkout"],
@@ -212,10 +255,7 @@ export default function CartPage() {
   }, [user]);
 
   useEffect(() => {
-    const defaultAddress = addresses.find(
-      /** @param {CheckoutAddress} address */
-      (address) => address.is_default
-    ) || addresses[0];
+    const defaultAddress = getPreferredAddress(addresses);
     if (!defaultAddress) {
       setDeliveryMode("new");
       return;
@@ -226,13 +266,6 @@ export default function CartPage() {
     setShippingZone(defaultAddress.zone);
   }, [addresses]);
 
-  useEffect(() => {
-    setNewAddress((current) => ({
-      ...current,
-      zone: shippingZone,
-    }));
-  }, [shippingZone]);
-
   const selectedAddress = /** @type {CheckoutAddress | null} */ (useMemo(
     () => addresses.find(
       /** @param {CheckoutAddress} address */
@@ -241,6 +274,32 @@ export default function CartPage() {
     [addresses, selectedAddressId]
   ));
 
+  useEffect(() => {
+    if (!isAuthenticated || deliveryMode !== "saved" || shippingZone === "pickup") {
+      return;
+    }
+
+    if (selectedAddress) {
+      return;
+    }
+
+    const fallbackAddress = getPreferredAddress(addresses);
+    if (!fallbackAddress) {
+      setDeliveryMode("new");
+      return;
+    }
+
+    setSelectedAddressId(String(fallbackAddress.id));
+    setShippingZone(fallbackAddress.zone);
+  }, [addresses, deliveryMode, isAuthenticated, selectedAddress, shippingZone]);
+
+  useEffect(() => {
+    setNewAddress((current) => ({
+      ...current,
+      zone: shippingZone,
+    }));
+  }, [shippingZone]);
+
   const effectiveZone = selectedAddress?.zone || shippingZone;
   const shippingOption = getShippingOption(effectiveZone);
   const totalWithShipping = totalPrice + shippingOption.cost;
@@ -248,25 +307,6 @@ export default function CartPage() {
 
   const checkoutMutation = useMutation({
     mutationFn: checkoutCart,
-    onSuccess: ({ order }) => {
-      trackOrderId(order.id);
-      queryClient.setQueryData(["my-orders"], (current) => {
-        const currentData = /** @type {OrdersCacheShape | undefined} */ (current);
-        const currentOrders = Array.isArray(currentData?.orders) ? currentData.orders : [];
-        return {
-          ...(currentData && typeof currentData === "object" ? currentData : {}),
-          orders: [order, ...currentOrders.filter((existing) => String(existing.id) !== String(order.id))],
-        };
-      });
-      queryClient.invalidateQueries({ queryKey: ["my-orders"] });
-      clearCart();
-
-      toast.success("¡Pedido confirmado!", {
-        description: `Orden ${order.id}`,
-      });
-
-      navigate("/orders", { replace: true });
-    },
     onError: (error) => {
       toast.error("No se pudo completar el checkout", {
         description: error.message,
@@ -307,6 +347,7 @@ export default function CartPage() {
       phone,
       shipping_zone: effectiveZone,
       notes: notes.trim(),
+      accepted,
     };
 
     if (effectiveZone !== "pickup") {
@@ -321,7 +362,46 @@ export default function CartPage() {
       }
     }
 
-    checkoutMutation.mutate(payload);
+    try {
+      const response = await checkoutMutation.mutateAsync(payload);
+      const order = response?.order;
+
+      if (!order?.id) {
+        throw new Error("La orden se creó pero la respuesta fue inválida");
+      }
+
+      await refreshCards();
+      trackOrderId(order.id);
+
+      clearCart();
+      window.localStorage.setItem("yugioh_cart", "[]");
+
+      toast.success("¡Pedido confirmado!", {
+        description: `Orden ${order.id}`,
+      });
+
+      window.location.replace("/orders");
+    } catch (error) {
+      const checkoutError = /** @type {CheckoutMutationError | null} */ (
+        error instanceof Error ? error : null
+      );
+      const message = checkoutError?.message || "No se pudo completar el checkout";
+      const unavailableCardIds = Array.isArray(checkoutError?.unavailableCardIds)
+        ? checkoutError.unavailableCardIds.map((value) => String(value))
+        : [];
+
+      if (unavailableCardIds.length > 0) {
+        unavailableCardIds.forEach((cardId) => removeItem(cardId));
+        toast.error("Actualizamos tu carrito", {
+          description: message,
+        });
+        return;
+      }
+
+      toast.error("No se pudo completar el checkout", {
+        description: message,
+      });
+    }
   };
 
   return (
@@ -359,7 +439,11 @@ export default function CartPage() {
           <div className="space-y-3">
             <AnimatePresence>
               {items.map((item) => (
-                <CartRow key={item.version_id} item={item} />
+                <CartRow
+                  key={item.version_id}
+                  item={item}
+                  onOpenDetail={handleOpenDetail}
+                />
               ))}
             </AnimatePresence>
 
@@ -428,6 +512,12 @@ export default function CartPage() {
                           setShippingZone(nextZone);
                           if (nextZone === "pickup") {
                             setSelectedAddressId("");
+                          } else if (deliveryMode === "saved") {
+                            const fallbackAddress = getPreferredAddress(addresses);
+                            if (fallbackAddress) {
+                              setSelectedAddressId(String(fallbackAddress.id));
+                              setShippingZone(fallbackAddress.zone);
+                            }
                           }
                         }}
                         className="w-full h-11 rounded-xl border border-border bg-secondary px-3 outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
@@ -456,7 +546,14 @@ export default function CartPage() {
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
-                            onClick={() => setDeliveryMode("saved")}
+                            onClick={() => {
+                              setDeliveryMode("saved");
+                              const fallbackAddress = getPreferredAddress(addresses);
+                              if (fallbackAddress) {
+                                setSelectedAddressId(String(fallbackAddress.id));
+                                setShippingZone(fallbackAddress.zone);
+                              }
+                            }}
                             className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${deliveryMode === "saved" ? "bg-primary text-primary-foreground" : "border border-border hover:bg-background"}`}
                           >
                             Usar guardada

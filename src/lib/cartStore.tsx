@@ -2,12 +2,14 @@ import { createContext, useContext, useState, useCallback, useEffect } from "rea
 
 interface CartItem {
   version_id: string;
+  detail_id?: string;
   name: string;
   quantity: number;
   price: number;
   rarity?: string;
   image?: string;
   set_name?: string;
+  ygopro_id?: string | number;
   stock?: number;
 }
 
@@ -102,6 +104,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   // 🧹 Limpiar carrito
   const clearCart = useCallback(() => {
+    saveCart([]);
     setItems([]);
   }, []);
 

@@ -1,5 +1,47 @@
 const SESSION_KEY = "duelvault_user_session";
 
+function decodeBase64Url(value) {
+  if (typeof value !== "string" || !value) {
+    return "";
+  }
+
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padding = normalized.length % 4;
+  const padded = padding ? normalized.padEnd(normalized.length + (4 - padding), "=") : normalized;
+
+  try {
+    return atob(padded);
+  } catch {
+    return "";
+  }
+}
+
+function readJwtPayload(token) {
+  if (typeof token !== "string") {
+    return null;
+  }
+
+  const parts = token.split(".");
+  if (parts.length < 2) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(decodeBase64Url(parts[1]));
+  } catch {
+    return null;
+  }
+}
+
+export function isJwtExpired(token) {
+  const payload = readJwtPayload(token);
+  if (!payload || typeof payload.exp !== "number") {
+    return true;
+  }
+
+  return payload.exp * 1000 <= Date.now();
+}
+
 /**
  * @typedef {{
  *   id: number,
@@ -35,4 +77,18 @@ export function setStoredUserSession(session) {
 
 export function clearStoredUserSession() {
   localStorage.removeItem(SESSION_KEY);
+}
+
+export function getUsableStoredUserSession() {
+  const session = getStoredUserSession();
+  if (!session?.accessToken || !session?.refreshToken) {
+    return null;
+  }
+
+  if (isJwtExpired(session.refreshToken)) {
+    clearStoredUserSession();
+    return null;
+  }
+
+  return session;
 }

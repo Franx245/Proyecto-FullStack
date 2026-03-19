@@ -1,8 +1,24 @@
 import { useMemo } from "react";
-import { AnimatePresence } from "framer-motion";
 import { SearchX, Sparkles } from "lucide-react";
 import CardItem from "./CardItem";
-import CardSkeleton from "./CardSkeleton";
+
+function GridSkeletonCard() {
+  return (
+    <div className="overflow-hidden rounded-[1.35rem] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.015))] animate-pulse">
+      <div className="aspect-[3/4] bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(15,23,42,0.4))]" />
+
+      <div className="space-y-3 p-4">
+        <div className="h-4 w-4/5 rounded bg-secondary" />
+        <div className="h-4 w-3/5 rounded bg-secondary" />
+        <div className="flex items-center justify-between gap-3 pt-2">
+          <div className="h-10 w-24 rounded-2xl bg-secondary" />
+          <div className="h-10 w-20 rounded-2xl bg-secondary" />
+        </div>
+        <div className="h-9 rounded-2xl bg-secondary" />
+      </div>
+    </div>
+  );
+}
 
 /**
  * @param {{
@@ -21,16 +37,16 @@ export default function CardGrid({
   isLoadingMore = false,
 }) {
   const skeletons = useMemo(() => {
-    const count = isLoading ? 20 : 6;
+    const count = isLoading ? 8 : 4;
 
     return Array.from({ length: count }, (_, i) => (
-      <CardSkeleton key={`skel-${i}`} />
+      <GridSkeletonCard key={`skel-${i}`} />
     ));
   }, [isLoading]);
 
   return (
     <div className="space-y-6 sm:space-y-8">
-      <div className="rounded-[1.5rem] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.015))] p-3 shadow-[0_20px_70px_rgba(0,0,0,0.22)] backdrop-blur-xl sm:rounded-[2rem] sm:p-4 md:p-5">
+      <div className="rounded-[1.5rem] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.015))] p-3 shadow-[0_20px_70px_rgba(0,0,0,0.22)] backdrop-blur-xl sm:rounded-[2rem] sm:p-4 md:p-5" data-critical="catalog-shell">
         <div className="mb-4 flex flex-col gap-3 rounded-[1.2rem] border border-white/8 bg-white/[0.03] px-3 py-3 min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between sm:rounded-[1.4rem] sm:px-4">
           <div className="min-w-0">
             <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Singles catalog</p>
@@ -42,12 +58,10 @@ export default function CardGrid({
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4">
-        <AnimatePresence mode="popLayout">
+        <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4" data-critical="catalog-grid">
           {cards.map((card, index) => (
-            <CardItem key={card?.version_id ?? Math.random()} card={card} priorityImage={index < 3} />
+            <CardItem key={card?.version_id ?? Math.random()} card={card} priorityImage={index < 4} />
           ))}
-        </AnimatePresence>
 
         {(isLoading || isLoadingMore) && skeletons}
         </div>

@@ -11,7 +11,8 @@ import CardImage from "./CardImage";
  *  attribute?: string,
  *  card_type?: string,
  *  race?: string,
- *  description?: string
+ *  description?: string,
+ *  rarity?: string
  * }} Card
  *
  * @typedef {{
@@ -39,6 +40,32 @@ import CardImage from "./CardImage";
  */
 export default function CardInfo({ card = {}, ygoproData = {} }) {
   const [zoom, setZoom] = useState(false);
+  const RARITY_BORDER_COLORS = {
+    Common: {
+      border: "border-zinc-400/80",
+      panel: "bg-[radial-gradient(circle_at_top_left,rgba(244,244,245,0.08),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.03),rgba(24,24,27,0.96))] shadow-[0_20px_60px_rgba(255,255,255,0.05)]",
+    },
+    Rare: {
+      border: "border-blue-400/80",
+      panel: "bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.16),transparent_30%),linear-gradient(180deg,rgba(30,41,59,0.92),rgba(9,14,28,0.98))] shadow-[0_20px_60px_rgba(59,130,246,0.12)]",
+    },
+    "Super Rare": {
+      border: "border-violet-400/85",
+      panel: "bg-[radial-gradient(circle_at_top_left,rgba(139,92,246,0.16),transparent_30%),linear-gradient(180deg,rgba(31,24,48,0.94),rgba(12,12,24,0.98))] shadow-[0_20px_60px_rgba(139,92,246,0.14)]",
+    },
+    "Ultra Rare": {
+      border: "border-yellow-400/85",
+      panel: "bg-[radial-gradient(circle_at_top_left,rgba(250,204,21,0.16),transparent_30%),linear-gradient(180deg,rgba(48,38,10,0.92),rgba(20,16,8,0.98))] shadow-[0_20px_60px_rgba(250,204,21,0.12)]",
+    },
+    "Secret Rare": {
+      border: "border-pink-400/85",
+      panel: "bg-[radial-gradient(circle_at_top_left,rgba(236,72,153,0.16),transparent_30%),linear-gradient(180deg,rgba(44,18,40,0.92),rgba(18,8,22,0.98))] shadow-[0_20px_60px_rgba(236,72,153,0.12)]",
+    },
+    "Starlight Rare": {
+      border: "border-cyan-300/90",
+      panel: "bg-[radial-gradient(circle_at_top_left,rgba(103,232,249,0.16),transparent_26%),radial-gradient(circle_at_top_right,rgba(244,114,182,0.12),transparent_24%),linear-gradient(180deg,rgba(18,34,42,0.92),rgba(16,12,28,0.98))] shadow-[0_20px_65px_rgba(103,232,249,0.16)]",
+    },
+  };
 
   const ATTRIBUTE_COLORS = {
     DARK: "bg-purple-900/80 text-purple-200 border-purple-700",
@@ -78,6 +105,14 @@ export default function CardInfo({ card = {}, ygoproData = {} }) {
   const attrStyle =
   (attrKey && ATTRIBUTE_COLORS[attrKey]) ||
   "bg-secondary text-muted-foreground border-border";
+  const rarityKey =
+    /** @type {keyof typeof RARITY_BORDER_COLORS | undefined} */ (card?.rarity);
+  const rarityAppearance =
+    (rarityKey && RARITY_BORDER_COLORS[rarityKey]) ||
+    {
+      border: "border-border",
+      panel: "bg-card shadow-[0_18px_60px_rgba(0,0,0,0.24)]",
+    };
 
   const tags = useMemo(() => {
   return [data.type, data.race, "Effect"].filter(
@@ -86,7 +121,7 @@ export default function CardInfo({ card = {}, ygoproData = {} }) {
 }, [data.type, data.race]);
 
   return (
-    <div className="bg-card border border-border rounded-2xl p-6 md:p-8">
+    <div className={`border-2 rounded-2xl p-6 md:p-8 ${rarityAppearance.border} ${rarityAppearance.panel}`}>
       <div className="grid md:grid-cols-2 gap-8">
 
         {/* IMAGE */}

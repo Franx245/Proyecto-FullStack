@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://duelvault-store-api.vercel.app/sitemap.xml

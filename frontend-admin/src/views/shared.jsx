@@ -4,6 +4,30 @@ export function cn(...classes) {
   return classes.filter(Boolean).join(" ");
 }
 
+export function getAdminCardImageProps(imageUrl) {
+  const src = imageUrl || "";
+
+  if (!src) {
+    return {
+      src,
+      loading: "lazy",
+      decoding: "async",
+    };
+  }
+
+  const highResSrc = src.includes("/images/cards_small/")
+    ? src.replace("/images/cards_small/", "/images/cards/")
+    : src;
+
+  return {
+    src,
+    srcSet: highResSrc && highResSrc !== src ? `${src} 1x, ${highResSrc} 2x` : undefined,
+    sizes: "(max-width: 1024px) 56px, 48px",
+    loading: "lazy",
+    decoding: "async",
+  };
+}
+
 export function currency(value) {
   return new Intl.NumberFormat("es-AR", {
     style: "currency",
@@ -32,9 +56,19 @@ export function orderStatusLabel(status) {
 }
 
 export function cardStatusLabel(card) {
-  if (card.status === "out_of_stock") return "Out of stock";
-  if (card.status === "low_stock") return "Low stock";
-  return "In stock";
+  if (card.status === "out_of_stock") return "Agotada";
+  if (card.status === "low_stock") return "Stock bajo";
+  return "Disponible";
+}
+
+export function userRoleLabel(role) {
+  const labels = {
+    USER: "Cliente",
+    STAFF: "Equipo",
+    ADMIN: "Administrador",
+  };
+
+  return labels[role] || String(role || "").toUpperCase();
 }
 
 export function createEmptyCategoryForm() {
@@ -121,15 +155,15 @@ export function EmptyState({ icon: Icon, title, description }) {
 
 export function StatCard({ title, value, tone = "default" }) {
   const toneClass = {
-    default: "border-white/10 bg-white/[0.04]",
-    warn: "border-amber-400/30 bg-amber-400/10",
-    danger: "border-rose-500/30 bg-rose-500/10",
+    default: "border-amber-200/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.9),rgba(10,14,32,0.94))]",
+    warn: "border-amber-400/40 bg-[linear-gradient(180deg,rgba(84,45,8,0.5),rgba(20,15,11,0.95))]",
+    danger: "border-rose-500/35 bg-[linear-gradient(180deg,rgba(74,16,35,0.52),rgba(21,10,22,0.95))]",
   }[tone];
 
   return (
-    <div className={cn("rounded-3xl border p-5 transition hover:-translate-y-0.5", toneClass)}>
-      <p className="text-xs uppercase tracking-[0.2em] text-slate-400 whitespace-normal break-words leading-snug">{title}</p>
-      <p className="mt-3 text-3xl font-black text-white">{value}</p>
+    <div className={cn("min-h-[172px] rounded-[30px] border p-5 transition shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]", toneClass)}>
+      <p className="max-w-[18ch] text-[11px] uppercase tracking-[0.34em] text-slate-300 whitespace-normal break-words leading-snug">{title}</p>
+      <p className="mt-4 break-words text-[clamp(2rem,2vw,3.15rem)] font-black leading-[0.95] text-white [text-wrap:balance] [font-variant-numeric:tabular-nums]">{value}</p>
     </div>
   );
 }
@@ -148,7 +182,7 @@ export function PaginationControls({ page, totalPages, onPageChange }) {
   }
 
   return (
-    <div className="flex items-center justify-center gap-2 border-t border-white/5 px-4 py-4">
+    <div className="flex flex-wrap items-center justify-center gap-2 border-t border-white/5 px-4 py-4">
       <button
         onClick={() => onPageChange(Math.max(1, page - 1))}
         disabled={page === 1}
@@ -232,7 +266,7 @@ export function ActionStatusButton({
       onClick={onClick}
       disabled={isDisabled}
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition duration-200",
+        "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition duration-200",
         success && !pending ? "scale-[1.02] ring-2 ring-emerald-300/25" : "",
         className,
         isDisabled ? "opacity-60" : ""
@@ -241,5 +275,62 @@ export function ActionStatusButton({
       {content.icon}
       <span>{content.label}</span>
     </button>
+  );
+}
+
+export function ConfirmActionDialog({
+  open,
+  title,
+  description,
+  confirmLabel = "Confirmar",
+  cancelLabel = "Cancelar",
+  tone = "danger",
+  pending = false,
+  onConfirm,
+  onCancel,
+}) {
+  if (!open) {
+    return null;
+  }
+
+  const confirmClassName = tone === "danger"
+    ? "bg-rose-500 text-white hover:bg-rose-400"
+    : "bg-amber-500 text-slate-950 hover:bg-amber-400";
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Cerrar diálogo"
+        onClick={pending ? undefined : onCancel}
+        className="fixed inset-0 z-40 bg-slate-950/70 backdrop-blur-sm"
+      />
+      <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
+        <div className="glass w-full max-w-md rounded-[30px] border border-white/10 p-6 shadow-2xl">
+          <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Confirmación</p>
+          <h3 className="mt-2 text-xl font-black text-white">{title}</h3>
+          <p className="mt-3 text-sm leading-6 text-slate-300">{description}</p>
+
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={pending}
+              className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/[0.06] disabled:opacity-50"
+            >
+              {cancelLabel}
+            </button>
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={pending}
+              className={cn("rounded-2xl px-4 py-3 text-sm font-bold transition disabled:opacity-50", confirmClassName)}
+            >
+              {pending ? "Procesando..." : confirmLabel}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
   );
 }

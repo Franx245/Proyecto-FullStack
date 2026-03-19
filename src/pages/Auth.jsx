@@ -21,6 +21,15 @@ function isValidEmail(value) {
   return typeof value === "string" && value.includes("@");
 }
 
+function normalizeAbsoluteUrl(value) {
+  const normalizedValue = typeof value === "string" ? value.trim().replace(/\/$/, "") : "";
+  if (!normalizedValue) {
+    return "";
+  }
+
+  return /^https?:\/\//i.test(normalizedValue) ? normalizedValue : "";
+}
+
 export default function AuthPage() {
   const { login, register, isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
@@ -42,7 +51,16 @@ export default function AuthPage() {
   const activeTab = useMemo(() => TABS.find((item) => item.key === tab) || TABS[0], [tab]);
 
   function buildAdminUrl(runtime) {
-    return `${window.location.protocol}//${window.location.hostname}:${runtime?.admin_port || 5174}`;
+    const configuredAdminUrl = normalizeAbsoluteUrl(runtime?.admin_url);
+    if (configuredAdminUrl) {
+      return configuredAdminUrl;
+    }
+
+    if (["localhost", "127.0.0.1"].includes(window.location.hostname)) {
+      return `${window.location.protocol}//${window.location.hostname}:${runtime?.admin_port || 5174}`;
+    }
+
+    return "https://duelvault-admin.vercel.app";
   }
 
   if (isAuthenticated && activeTab.key !== "admin") {
@@ -140,6 +158,7 @@ export default function AuthPage() {
         admin: payload.admin,
       };
       const bootstrap = window.btoa(JSON.stringify(session));
+      setBusy(false);
       window.location.assign(`${buildAdminUrl(runtime.runtime)}?bootstrap=${encodeURIComponent(bootstrap)}`);
     } catch (error) {
       toast.error("No pudimos ingresar al panel admin", { description: error.message });

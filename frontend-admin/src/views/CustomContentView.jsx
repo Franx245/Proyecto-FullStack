@@ -213,7 +213,7 @@ export default function CustomContentView({
       <form onSubmit={submitCategory} className="glass rounded-3xl border border-white/10 p-5">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Category form</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">🗂️ Formulario de categoría</p>
             <h3 className="mt-1 text-lg font-black text-white">{selectedCategory ? "Editar categoría" : "Nueva categoría"}</h3>
           </div>
           <button
@@ -302,7 +302,7 @@ export default function CustomContentView({
             checked={categoryForm.is_visible}
             onChange={(event) => setCategoryForm((current) => ({ ...current, is_visible: event.target.checked }))}
           />
-          Visible en storefront y encabezado si es de primer nivel
+          Visible en la tienda y en el encabezado si es de primer nivel
         </label>
 
         {categoryMutation.error ? (
@@ -325,12 +325,12 @@ export default function CustomContentView({
       <div className="glass rounded-3xl border border-white/10 p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Category tree</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">🌳 Árbol de categorías</p>
             <h3 className="mt-1 text-lg font-black text-white">Jerarquía actual</h3>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300">{categories.length} total</span>
-            <div className="relative w-full min-w-[220px] sm:w-64">
+            <div className="relative w-full min-w-0 sm:w-64">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
               <input
                 value={categorySearch}
@@ -353,7 +353,7 @@ export default function CustomContentView({
       <form onSubmit={submitProduct} className="glass rounded-3xl border border-white/10 p-5">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Product form</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">🛍️ Formulario de publicación</p>
             <h3 className="mt-1 text-lg font-black text-white">{selectedProduct ? "Editar publicación" : "Nueva publicación"}</h3>
           </div>
           <button
@@ -468,12 +468,12 @@ export default function CustomContentView({
       <div className="glass rounded-3xl border border-white/10 p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Published items</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">📚 Publicaciones cargadas</p>
             <h3 className="mt-1 text-lg font-black text-white">Publicaciones cargadas</h3>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300">{products.length} total</span>
-            <div className="relative w-full min-w-[220px] sm:w-64">
+            <div className="relative w-full min-w-0 sm:w-64">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
               <input
                 value={productSearch}
@@ -497,6 +497,7 @@ export default function CustomContentView({
                 setMobilePanel("products");
               }}
               className={cn(
+                "admin-list-card admin-content-auto",
                 "flex w-full items-center gap-4 rounded-2xl border px-4 py-3 text-left transition",
                 selectedProductId === product.id ? "border-amber-400/40 bg-amber-400/10" : "border-white/10 bg-slate-950/40 hover:bg-white/[0.05]"
               )}
@@ -529,7 +530,7 @@ export default function CustomContentView({
       <div className="glass rounded-3xl border border-white/10 p-5">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Custom storefront</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">🛍️ Tienda personalizada</p>
             <h2 className="mt-1 text-xl font-black text-white">Categorías y publicaciones custom</h2>
             <p className="mt-2 max-w-3xl text-sm text-slate-400">En mobile se separa por paneles para evitar formularios interminables; en desktop mantenés edición paralela.</p>
           </div>

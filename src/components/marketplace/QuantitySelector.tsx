@@ -1,6 +1,5 @@
 import { useState, useCallback } from "react";
 import { Minus, Plus, ShoppingCart } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
 
 interface QuantitySelectorProps {
   onConfirm: (qty: number) => void;
@@ -61,16 +60,10 @@ export default function QuantitySelector({
 
   // 🚀 Selector activo
   return (
-    <AnimatePresence mode="wait">
-      <motion.div
-        key="qty"
-        initial={{ opacity: 0, scale: 0.92 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.92 }}
-        transition={{ duration: 0.15 }}
-        onClick={(e) => e.stopPropagation()}
-        className="grid w-full grid-cols-[42px_minmax(0,1fr)_42px_auto] items-center gap-2"
-      >
+    <div
+      onClick={(e) => e.stopPropagation()}
+      className="grid w-full grid-cols-[42px_minmax(0,1fr)_42px_auto] items-center gap-2 animate-in fade-in zoom-in-95 duration-150"
+    >
         <button
           onClick={decrease}
           disabled={!canDecrease}
@@ -97,7 +90,6 @@ export default function QuantitySelector({
         >
           Añadir
         </button>
-      </motion.div>
-    </AnimatePresence>
+    </div>
   );
 }

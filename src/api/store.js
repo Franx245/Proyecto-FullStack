@@ -1,9 +1,104 @@
 import {
   clearStoredUserSession,
   getStoredUserSession,
+  getUsableStoredUserSession,
+  isJwtExpired,
   setStoredUserSession,
 } from "@/lib/userSession";
 import { ENV } from "@/config/env";
+
+const INITIAL_CATALOG_BOOTSTRAP_KEY = "__DUELVAULT_INITIAL_CATALOG__";
+const PERSISTED_QUERY_CACHE_KEY = "duelvault-react-query-cache";
+export const CATALOG_PAGE_SIZE = 24;
+export const CATALOG_QUERY_STALE_TIME = 1000 * 60 * 5;
+
+function normalizeCatalogPayload(payload) {
+  return {
+    cards: payload?.cards ?? [],
+    totalPages: payload?.totalPages ?? 0,
+    totalRows: payload?.total ?? 0,
+    filters: payload?.filters ?? { rarities: [], sets: [] },
+    version: payload?.version ?? null,
+  };
+}
+
+function isEmptyArray(value) {
+  return !Array.isArray(value) || value.length === 0;
+}
+
+function readInitialCatalogBootstrap() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return window[INITIAL_CATALOG_BOOTSTRAP_KEY] ?? null;
+}
+
+function readPersistedQueryState() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(PERSISTED_QUERY_CACHE_KEY);
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw);
+    return parsed?.clientState ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** @param {(entry: any) => boolean} matcher */
+function readPersistedQueryData(matcher) {
+  const clientState = readPersistedQueryState();
+  const queries = Array.isArray(clientState?.queries) ? clientState.queries : [];
+
+  for (const entry of queries) {
+    if (matcher(entry)) {
+      return entry?.state?.data;
+    }
+  }
+
+  return undefined;
+}
+
+function canUseInitialCatalogBootstrap(options = {}) {
+  const bootstrap = readInitialCatalogBootstrap();
+  if (!bootstrap) {
+    return false;
+  }
+
+  const requestedCategory = typeof options.category === "string" ? options.category.trim() : "";
+  const bootstrapCategory = typeof bootstrap.category === "string" ? bootstrap.category : "";
+  const requestedSearch = typeof options.search === "string" ? options.search.trim() : "";
+
+  return (
+    (options.page ?? 1) === 1 &&
+    (options.pageSize ?? CATALOG_PAGE_SIZE) === CATALOG_PAGE_SIZE &&
+    requestedSearch === "" &&
+    requestedCategory === bootstrapCategory &&
+    options.minPrice == null &&
+    options.maxPrice == null &&
+    options.priceRange == null &&
+    isEmptyArray(options.rarities) &&
+    isEmptyArray(options.cardTypes) &&
+    isEmptyArray(options.conditions) &&
+    isEmptyArray(options.sets)
+  );
+}
+
+export function getInitialCatalogSnapshot(options = {}) {
+  if (!canUseInitialCatalogBootstrap(options)) {
+    return undefined;
+  }
+
+  const bootstrap = readInitialCatalogBootstrap();
+  return bootstrap?.payload ? normalizeCatalogPayload(bootstrap.payload) : undefined;
+}
 
 function buildApiUrl(path) {
   if (/^https?:\/\//i.test(path)) {
@@ -29,6 +124,14 @@ function buildQuery(params) {
   return searchParams.toString();
 }
 
+function createRequestError(payload, fallbackMessage) {
+  const error = new Error(payload?.error || fallbackMessage);
+  if (payload && typeof payload === "object") {
+    Object.assign(error, payload);
+  }
+  return error;
+}
+
 async function request(path, options = {}) {
   const response = await fetch(buildApiUrl(path), {
     headers: {
@@ -40,14 +143,21 @@ async function request(path, options = {}) {
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(payload.error || "Request failed");
+    throw createRequestError(payload, "Request failed");
   }
 
   return payload;
 }
 
+export async function submitContactRequest(payload) {
+  return request("/api/contact", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 async function refreshUserAccessToken() {
-  const session = getStoredUserSession();
+  const session = getUsableStoredUserSession();
   if (!session?.refreshToken) {
     throw new Error("Session expired");
   }
@@ -68,7 +178,18 @@ async function refreshUserAccessToken() {
 }
 
 async function authRequest(path, { method = "GET", body, retryOnAuthError = true } = {}) {
-  const session = getStoredUserSession();
+  const session = getUsableStoredUserSession();
+
+  if (retryOnAuthError && session?.accessToken && isJwtExpired(session.accessToken) && session?.refreshToken) {
+    try {
+      await refreshUserAccessToken();
+      return authRequest(path, { method, body, retryOnAuthError: false });
+    } catch {
+      clearStoredUserSession();
+      throw new Error("Session expired");
+    }
+  }
+
   const response = await fetch(buildApiUrl(path), {
     method,
     headers: {
@@ -91,18 +212,33 @@ async function authRequest(path, { method = "GET", body, retryOnAuthError = true
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(payload.error || "Request failed");
+    throw createRequestError(payload, "Request failed");
   }
 
   return payload;
 }
 
 export async function fetchCatalogCards(options = {}) {
+  if (canUseInitialCatalogBootstrap(options)) {
+    const bootstrap = readInitialCatalogBootstrap();
+
+    if (bootstrap?.payload) {
+      return normalizeCatalogPayload(bootstrap.payload);
+    }
+
+    if (bootstrap?.promise) {
+      const payload = await bootstrap.promise.catch(() => null);
+      if (payload) {
+        return normalizeCatalogPayload(payload);
+      }
+    }
+  }
+
   const search = typeof options.search === "string" ? options.search.trim() : "";
   const priceRange = options.priceRange ?? null;
   const query = buildQuery({
     page: options.page ?? 1,
-    pageSize: options.pageSize ?? 20,
+    pageSize: options.pageSize ?? CATALOG_PAGE_SIZE,
     q: search,
     category: options.category,
     minPrice: priceRange?.min ?? options.minPrice,
@@ -115,15 +251,19 @@ export async function fetchCatalogCards(options = {}) {
 
   const payload = await request(`/api/cards?${query}`);
 
-  return {
-    cards: payload.cards ?? [],
-    totalPages: payload.totalPages ?? 0,
-    totalRows: payload.total ?? 0,
-    filters: payload.filters ?? { rarities: [], sets: [] },
-  };
+  return normalizeCatalogPayload(payload);
 }
 
 export async function fetchCardSets() {
+  const persistedSets = readPersistedQueryData(
+    /** @param {{ queryKey?: unknown }} entry */
+    (entry) => Array.isArray(entry?.queryKey) && entry.queryKey[0] === "ygopro-card-sets"
+  );
+
+  if (Array.isArray(persistedSets) && persistedSets.length > 0) {
+    return persistedSets;
+  }
+
   const payload = await request("/api/cards/filters");
   return payload.filters?.sets ?? [];
 }
@@ -202,7 +342,7 @@ export async function registerUser(payload) {
 }
 
 export async function logoutUser() {
-  const session = getStoredUserSession();
+  const session = getUsableStoredUserSession() ?? getStoredUserSession();
   try {
     if (session?.refreshToken) {
       await request("/api/auth/logout", {

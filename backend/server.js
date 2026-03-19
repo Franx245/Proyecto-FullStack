@@ -2,10 +2,12 @@ import bcrypt from "bcryptjs";
 import cors from "cors";
 import ExcelJS from "exceljs";
 import express from "express";
+import { createHash } from "node:crypto";
 import prismaPkg from "@prisma/client";
 import path from "path";
 import { fileURLToPath } from "url";
 import { prisma } from "./src/lib/prisma.js";
+import { syncCatalogFromScope } from "./src/lib/catalogSync.js";
 import {
   createPasswordResetToken,
   getRefreshTokenExpiryDate,
@@ -18,7 +20,7 @@ import {
   verifyRefreshToken,
 } from "./src/lib/auth.js";
 
-const { OrderStatus, ShippingZone, UserRole } = prismaPkg;
+const { ContactRequestStatus, OrderStatus, ShippingZone, UserRole } = prismaPkg;
 const __filename = fileURLToPath(import.meta.url);
 const isDirectExecution = process.argv[1]
   ? path.resolve(process.argv[1]) === __filename
@@ -26,6 +28,7 @@ const isDirectExecution = process.argv[1]
 
 const app = express();
 const PORT = Number(process.env.PORT || 3001);
+const REQUEST_TIMEOUT_MS = Number(process.env.API_REQUEST_TIMEOUT_MS || 15000);
 const localHosts = new Set(["localhost", "127.0.0.1"]);
 const configuredOrigins = new Set(
   [
@@ -89,6 +92,50 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json());
+app.use((req, res, next) => {
+  const requestId = String(req.headers["x-request-id"] || `srv_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`);
+  const controller = new AbortController();
+
+  req.requestContext = {
+    requestId,
+    signal: controller.signal,
+    isCancelled: false,
+    isTimedOut: false,
+    startedAt: Date.now(),
+  };
+
+  const abortRequest = (reason) => {
+    req.requestContext.isCancelled = true;
+    if (reason === "timeout") {
+      req.requestContext.isTimedOut = true;
+    }
+
+    if (!controller.signal.aborted) {
+      controller.abort(reason);
+    }
+  };
+
+  res.setHeader("X-Request-Id", requestId);
+  req.on("aborted", () => abortRequest("client_aborted"));
+  req.on("close", () => {
+    if (req.aborted) {
+      abortRequest("client_aborted");
+    }
+  });
+
+  res.setTimeout(REQUEST_TIMEOUT_MS, () => {
+    abortRequest("timeout");
+    if (!res.headersSent) {
+      res.status(408).json({
+        error: "Request timed out",
+        code: "REQUEST_TIMEOUT",
+        requestId,
+      });
+    }
+  });
+
+  next();
+});
 
 function toStatus(card) {
   if (card.stock <= 0) {
@@ -102,16 +149,35 @@ function toStatus(card) {
   return "in_stock";
 }
 
-function toPublicCard(card) {
+function getAdminCardImageUrl(imageUrl) {
+  const normalizedImageUrl = typeof imageUrl === "string" ? imageUrl.trim() : "";
+
+  if (!normalizedImageUrl) {
+    return null;
+  }
+
+  if (normalizedImageUrl.includes("/images/cards_small/")) {
+    return normalizedImageUrl;
+  }
+
+  if (normalizedImageUrl.includes("/images/cards/")) {
+    return normalizedImageUrl.replace("/images/cards/", "/images/cards_small/");
+  }
+
+  return normalizedImageUrl;
+}
+
+function toPublicCard(card, options = {}) {
   const stockStatus = toStatus(card);
+  const imageUrl = options.adminThumbnail ? getAdminCardImageUrl(card.image) : card.image || null;
 
   return {
     id: card.id,
     version_id: String(card.id),
     ygopro_id: card.ygoproId,
     name: card.name,
-    image: card.image || null,
-    image_url: card.image || null,
+    image: imageUrl,
+    image_url: imageUrl,
     description: card.description || "",
     card_type: card.cardType || "Unknown",
     race: card.race || null,
@@ -129,6 +195,7 @@ function toPublicCard(card) {
     is_featured: card.isFeatured,
     is_new_arrival: card.isNewArrival,
     sales_count: card.salesCount,
+    updated_at: card.updatedAt,
     condition: stockStatus === "out_of_stock" ? "Out of stock" : "Near Mint",
     status: stockStatus,
     is_low_stock: stockStatus === "low_stock",
@@ -136,9 +203,38 @@ function toPublicCard(card) {
   };
 }
 
-function attachMetadata(cards) {
-  return cards.map((card) => toPublicCard(card));
+function attachMetadata(cards, options = {}) {
+  return cards.map((card) => toPublicCard(card, options));
 }
+
+const PUBLIC_CARD_LIST_SELECT = {
+  id: true,
+  ygoproId: true,
+  name: true,
+  image: true,
+  cardType: true,
+  attribute: true,
+  rarity: true,
+  setName: true,
+  setCode: true,
+  price: true,
+  stock: true,
+  lowStockThreshold: true,
+  isVisible: true,
+  isFeatured: true,
+  isNewArrival: true,
+  salesCount: true,
+  updatedAt: true,
+};
+
+const CATALOG_SCOPE_MODE = {
+  ALL: "ALL",
+  FIRST_N: "FIRST_N",
+  SELECTED: "SELECTED",
+};
+
+const DEFAULT_CATALOG_SCOPE_LIMIT = 500;
+const MAX_CATALOG_SCOPE_LIMIT = 5000;
 
 function slugify(value) {
   return String(value || "")
@@ -168,6 +264,33 @@ function normalizeShippingZone(value) {
   return Object.values(ShippingZone).includes(normalized) ? normalized : null;
 }
 
+function parseExpectedUpdatedAt(value) {
+  if (value == null || value === "") {
+    return null;
+  }
+
+  const parsedDate = new Date(value);
+  return Number.isNaN(parsedDate.getTime()) ? "INVALID_DATE" : parsedDate;
+}
+
+function getMutationMetadata(req) {
+  return {
+    mutationId: String(req.headers["x-idempotency-key"] || req.body?.mutation_id || "").trim() || null,
+    requestId: req.requestContext?.requestId || String(req.headers["x-request-id"] || "").trim() || null,
+    resourceId: req.body?.resource_id ?? null,
+  };
+}
+
+function assertExpectedUpdatedAt(entity, expectedUpdatedAt) {
+  if (!expectedUpdatedAt) {
+    return;
+  }
+
+  if (!entity?.updatedAt || entity.updatedAt.getTime() !== expectedUpdatedAt.getTime()) {
+    throw new Error("CONCURRENT_MODIFICATION");
+  }
+}
+
 function getShippingInfo(zone) {
   return SHIPPING_OPTIONS[zone] || SHIPPING_OPTIONS[ShippingZone.PICKUP];
 }
@@ -180,20 +303,32 @@ function canCancelOrder(role) {
   return role === UserRole.ADMIN;
 }
 
+function getAllowedOrderTransitions(currentStatus, role) {
+  return (ORDER_TRANSITIONS[currentStatus] || []).filter((candidateStatus) => {
+    if (candidateStatus === OrderStatus.CANCELLED) {
+      return canCancelOrder(role);
+    }
+
+    return true;
+  });
+}
+
 function canTransitionOrder(currentStatus, nextStatus, role) {
   if (!nextStatus || currentStatus === nextStatus) {
-    return true;
+    return false;
   }
 
-  if (nextStatus === OrderStatus.CANCELLED) {
-    return canCancelOrder(role);
-  }
-
-  return (ORDER_TRANSITIONS[currentStatus] || []).includes(nextStatus);
+  return getAllowedOrderTransitions(currentStatus, role).includes(nextStatus);
 }
 
 function formatCurrency(value) {
   return Number((value || 0).toFixed(2));
+}
+
+function createAppError(message, extra = {}) {
+  const error = new Error(message);
+  Object.assign(error, extra);
+  return error;
 }
 
 function extractIp(req) {
@@ -211,6 +346,290 @@ function safeJsonStringify(value) {
   } catch {
     return null;
   }
+}
+
+function safeJsonParse(value) {
+  try {
+    return value ? JSON.parse(value) : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeHashInput(value) {
+  if (Array.isArray(value)) {
+    return value.map(normalizeHashInput);
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (value && typeof value === "object") {
+    return Object.keys(value)
+      .sort()
+      .reduce((result, key) => {
+        result[key] = normalizeHashInput(value[key]);
+        return result;
+      }, {});
+  }
+
+  return value ?? null;
+}
+
+function buildRequestHash(value) {
+  return createHash("sha256")
+    .update(JSON.stringify(normalizeHashInput(value)))
+    .digest("hex");
+}
+
+function getRouteKey(req, fallback = null) {
+  const routePath = req.route?.path || fallback || req.path || req.originalUrl || "unknown";
+  return `${req.method} ${routePath}`;
+}
+
+function assertRequestActive(req) {
+  if (req.requestContext?.isTimedOut) {
+    throw createAppError("Request timed out", { statusCode: 408, code: "REQUEST_TIMEOUT" });
+  }
+
+  if (req.requestContext?.isCancelled || req.requestContext?.signal?.aborted) {
+    throw createAppError("Request cancelled", { statusCode: 499, code: "REQUEST_CANCELLED" });
+  }
+}
+
+async function beginIdempotentMutation(req, { routeKey, payload } = {}) {
+  const actorId = Number(req.user?.id);
+  const key = String(req.headers["x-idempotency-key"] || req.body?.mutation_id || "").trim();
+  const resolvedRouteKey = routeKey || getRouteKey(req);
+
+  if (!Number.isFinite(actorId) || !key) {
+    return {
+      routeKey: resolvedRouteKey,
+      key: null,
+      replay: null,
+      recordId: null,
+      finalized: true,
+    };
+  }
+
+  const requestHash = buildRequestHash({
+    params: req.params,
+    body: payload ?? req.body ?? null,
+  });
+
+  const uniqueWhere = {
+    actorId_routeKey_key: {
+      actorId,
+      routeKey: resolvedRouteKey,
+      key,
+    },
+  };
+
+  let existingRecord = await prisma.adminIdempotencyKey.findUnique({ where: uniqueWhere });
+
+  if (!existingRecord) {
+    try {
+      existingRecord = await prisma.adminIdempotencyKey.create({
+        data: {
+          actorId,
+          routeKey: resolvedRouteKey,
+          key,
+          requestHash,
+        },
+      });
+
+      return {
+        routeKey: resolvedRouteKey,
+        key,
+        replay: null,
+        recordId: existingRecord.id,
+        requestHash,
+        finalized: false,
+      };
+    } catch (error) {
+      if (error?.code !== "P2002") {
+        throw error;
+      }
+
+      existingRecord = await prisma.adminIdempotencyKey.findUnique({ where: uniqueWhere });
+    }
+  }
+
+  if (existingRecord?.requestHash && existingRecord.requestHash !== requestHash) {
+    throw createAppError("Idempotency key already used with a different payload", {
+      statusCode: 409,
+      code: "IDEMPOTENCY_KEY_REUSED",
+      details: {
+        requestId: req.requestContext?.requestId || null,
+        routeKey: resolvedRouteKey,
+      },
+    });
+  }
+
+  if (existingRecord?.statusCode && existingRecord.responseBody) {
+    return {
+      routeKey: resolvedRouteKey,
+      key,
+      replay: {
+        statusCode: existingRecord.statusCode,
+        body: safeJsonParse(existingRecord.responseBody) || {},
+      },
+      recordId: existingRecord.id,
+      requestHash,
+      finalized: true,
+    };
+  }
+
+  throw createAppError("Another mutation with the same idempotency key is still in progress", {
+    statusCode: 409,
+    code: "MUTATION_IN_PROGRESS",
+    details: {
+      requestId: req.requestContext?.requestId || null,
+      routeKey: resolvedRouteKey,
+    },
+  });
+}
+
+async function finalizeIdempotentMutation(context, statusCode, responseBody) {
+  if (!context?.recordId || context.finalized) {
+    return;
+  }
+
+  await prisma.adminIdempotencyKey.update({
+    where: { id: context.recordId },
+    data: {
+      statusCode,
+      responseBody: safeJsonStringify(responseBody),
+    },
+  });
+  context.finalized = true;
+}
+
+async function releaseIdempotentMutation(context) {
+  if (!context?.recordId || context.finalized) {
+    return;
+  }
+
+  await prisma.adminIdempotencyKey.delete({ where: { id: context.recordId } }).catch(() => null);
+  context.finalized = true;
+}
+
+function sanitizeCardForAudit(card) {
+  if (!card) {
+    return null;
+  }
+
+  return {
+    id: card.id,
+    ygoproId: card.ygoproId,
+    name: card.name,
+    price: card.price,
+    stock: card.stock,
+    lowStockThreshold: card.lowStockThreshold,
+    isVisible: Boolean(card.isVisible),
+    isFeatured: Boolean(card.isFeatured),
+    isNewArrival: Boolean(card.isNewArrival),
+    salesCount: card.salesCount,
+    updatedAt: card.updatedAt,
+  };
+}
+
+function sanitizeUserForAudit(user) {
+  return user ? toUserResponse(user) : null;
+}
+
+function sanitizeContactRequestForAudit(contactRequest) {
+  return contactRequest ? toContactRequestResponse(contactRequest) : null;
+}
+
+function sanitizeOrderForAudit(order) {
+  if (!order) {
+    return null;
+  }
+
+  return {
+    id: order.id,
+    userId: order.userId ?? null,
+    addressId: order.addressId ?? null,
+    subtotal: order.subtotal,
+    shippingCost: order.shippingCost,
+    total: order.total,
+    status: order.status,
+    shippingZone: order.shippingZone,
+    shippingLabel: order.shippingLabel,
+    trackingCode: order.trackingCode || null,
+    trackingVisibleToUser: Boolean(order.trackingVisibleToUser),
+    customerName: order.customerName || null,
+    customerEmail: order.customerEmail || null,
+    customerPhone: order.customerPhone || null,
+    shippingAddress: order.shippingAddress || null,
+    shippingCity: order.shippingCity || null,
+    shippingProvince: order.shippingProvince || null,
+    shippingPostalCode: order.shippingPostalCode || null,
+    notes: order.notes || null,
+    createdAt: order.createdAt,
+    updatedAt: order.updatedAt,
+    items: Array.isArray(order.items)
+      ? order.items.map((item) => ({
+        id: item.id,
+        cardId: item.cardId,
+        quantity: item.quantity,
+        price: item.price,
+      }))
+      : [],
+  };
+}
+
+async function createAdminAuditLog(tx, { actorId, entityType, entityId, action, req, routeKey, before, after, metadata } = {}) {
+  await tx.adminAuditLog.create({
+    data: {
+      actorId: actorId ?? null,
+      entityType,
+      entityId: String(entityId ?? "unknown"),
+      action,
+      requestId: req.requestContext?.requestId || null,
+      routeKey: routeKey || getRouteKey(req),
+      before: safeJsonStringify(before),
+      after: safeJsonStringify(after),
+      metadata: safeJsonStringify(metadata),
+    },
+  });
+}
+
+function getExpectedUpdatedAtMap(payload) {
+  const map = new Map();
+  const resources = Array.isArray(payload?.resources) ? payload.resources : [];
+
+  for (const resource of resources) {
+    const id = Number(resource?.id);
+    const expectedUpdatedAt = parseExpectedUpdatedAt(resource?.expected_updated_at ?? resource?.updated_at ?? null);
+    if (Number.isFinite(id) && expectedUpdatedAt instanceof Date) {
+      map.set(id, expectedUpdatedAt);
+    }
+  }
+
+  return map;
+}
+
+function toContactRequestResponse(contactRequest) {
+  return {
+    id: contactRequest.id,
+    name: contactRequest.name,
+    email: contactRequest.email,
+    subject: contactRequest.subject,
+    message: contactRequest.message,
+    admin_notes: contactRequest.adminNotes || "",
+    response_message: contactRequest.responseMessage || "",
+    status: String(contactRequest.status || ContactRequestStatus.NEW).toLowerCase(),
+    source: contactRequest.source || "storefront",
+    ip_address: contactRequest.ipAddress || null,
+    user_agent: contactRequest.userAgent || null,
+    responded_at: contactRequest.respondedAt || null,
+    responded_by: contactRequest.respondedBy ? toUserResponse(contactRequest.respondedBy) : null,
+    created_at: contactRequest.createdAt,
+    updated_at: contactRequest.updatedAt,
+  };
 }
 
 function toUserResponse(user) {
@@ -680,47 +1099,132 @@ function buildCardFilters(query) {
   };
 }
 
-  const PUBLIC_CARD_FILTERS_CACHE_TTL_MS = 1000 * 60 * 10;
-  let publicCardFiltersCache = {
+const PUBLIC_CARD_FILTERS_CACHE_TTL_MS = 1000 * 60 * 10;
+const PUBLIC_CARD_LIST_CACHE_TTL_MS = 1000 * 30;
+
+let publicCardFiltersCache = {
+  value: null,
+  expiresAt: 0,
+};
+
+let publicCardListCache = new Map();
+
+function invalidatePublicCatalogCaches() {
+  publicCardListCache.clear();
+  publicCardFiltersCache = {
     value: null,
     expiresAt: 0,
   };
+}
 
-  async function getPublicCardFilters() {
-    const now = Date.now();
-    if (publicCardFiltersCache.value && publicCardFiltersCache.expiresAt > now) {
-      return publicCardFiltersCache.value;
-    }
+function buildCatalogVersion(total, updatedAt) {
+  const updatedAtMs = updatedAt instanceof Date ? updatedAt.getTime() : 0;
+  return `v${total}-${updatedAtMs}`;
+}
 
-    const [rarityRows, setRows] = await Promise.all([
-      prisma.card.findMany({
-        where: { isVisible: true },
-        select: { rarity: true },
-        distinct: ["rarity"],
-        orderBy: { rarity: "asc" },
-      }),
-      prisma.card.findMany({
-        where: { isVisible: true },
-        select: { setName: true },
-        distinct: ["setName"],
-        orderBy: { setName: "asc" },
-      }),
-    ]);
+function setPublicCatalogCacheHeaders(res) {
+  res.set("Cache-Control", "public, max-age=0, must-revalidate");
+  res.set("CDN-Cache-Control", "public, s-maxage=60, stale-while-revalidate=300");
+  res.set("Vercel-CDN-Cache-Control", "public, s-maxage=60, stale-while-revalidate=300");
+}
 
-    const nextValue = {
-      rarities: rarityRows.map((card) => card.rarity).filter(Boolean),
-      sets: setRows.map((card) => card.setName).filter(Boolean),
-    };
+function buildPublicCardListCacheKey(query, searchOverride) {
+  const params = new URLSearchParams();
 
-    publicCardFiltersCache = {
-      value: nextValue,
-      expiresAt: now + PUBLIC_CARD_FILTERS_CACHE_TTL_MS,
-    };
+  Object.entries(query)
+    .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+    .forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        value.forEach((entry) => params.append(key, String(entry)));
+        return;
+      }
 
-    return nextValue;
+      if (value !== undefined && value !== null && value !== "") {
+        params.set(key, String(value));
+      }
+    });
+
+  if (searchOverride !== undefined) {
+    params.set("__searchOverride", String(searchOverride));
   }
 
+  return params.toString();
+}
+
+function getCachedPublicCardList(cacheKey) {
+  const now = Date.now();
+  const cached = publicCardListCache.get(cacheKey);
+
+  if (!cached) {
+    return null;
+  }
+
+  if (cached.expiresAt <= now) {
+    publicCardListCache.delete(cacheKey);
+    return null;
+  }
+
+  return cached.value;
+}
+
+function setCachedPublicCardList(cacheKey, value) {
+  publicCardListCache.set(cacheKey, {
+    value,
+    expiresAt: Date.now() + PUBLIC_CARD_LIST_CACHE_TTL_MS,
+  });
+
+  if (publicCardListCache.size > 50) {
+    const oldestKey = publicCardListCache.keys().next().value;
+    if (oldestKey) {
+      publicCardListCache.delete(oldestKey);
+    }
+  }
+}
+
+async function getPublicCardFilters() {
+  const now = Date.now();
+  if (publicCardFiltersCache.value && publicCardFiltersCache.expiresAt > now) {
+    return publicCardFiltersCache.value;
+  }
+
+  const [rarityRows, setRows] = await Promise.all([
+    prisma.card.findMany({
+      where: { isVisible: true },
+      select: { rarity: true },
+      distinct: ["rarity"],
+      orderBy: { rarity: "asc" },
+    }),
+    prisma.card.findMany({
+      where: { isVisible: true },
+      select: { setName: true },
+      distinct: ["setName"],
+      orderBy: { setName: "asc" },
+    }),
+  ]);
+
+  const nextValue = {
+    rarities: rarityRows.map((card) => card.rarity).filter(Boolean),
+    sets: setRows.map((card) => card.setName).filter(Boolean),
+  };
+
+  publicCardFiltersCache = {
+    value: nextValue,
+    expiresAt: now + PUBLIC_CARD_FILTERS_CACHE_TTL_MS,
+  };
+
+  return nextValue;
+}
+
 async function listPublicCards(req, res, searchOverride) {
+  setPublicCatalogCacheHeaders(res);
+
+  const cacheKey = buildPublicCardListCacheKey(req.query, searchOverride);
+  const cachedResponse = getCachedPublicCardList(cacheKey);
+  if (cachedResponse) {
+    res.json(cachedResponse);
+    return;
+  }
+
   const page = Math.max(1, Number(req.query.page || 1));
   const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize || 20)));
   const filters = buildCardFilters({
@@ -730,25 +1234,34 @@ async function listPublicCards(req, res, searchOverride) {
 
   const includeFilterMetadata = req.query.featured !== "true" && req.query.latest !== "true";
 
-  const [total, cards, filterOptions] = await Promise.all([
+  const [total, cards, filterOptions, versionAggregate] = await Promise.all([
     prisma.card.count({ where: filters.where }),
     prisma.card.findMany({
       where: filters.where,
       orderBy: filters.orderBy,
+      select: PUBLIC_CARD_LIST_SELECT,
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),
     includeFilterMetadata ? getPublicCardFilters() : Promise.resolve({ rarities: [], sets: [] }),
+    prisma.card.aggregate({
+      where: filters.where,
+      _max: { updatedAt: true },
+    }),
   ]);
 
-  res.json({
+  const responsePayload = {
     cards: attachMetadata(cards),
     total,
     page,
     pageSize,
     totalPages: Math.ceil(total / pageSize),
     filters: filterOptions,
-  });
+    version: buildCatalogVersion(total, versionAggregate._max.updatedAt),
+  };
+
+  setCachedPublicCardList(cacheKey, responsePayload);
+  res.json(responsePayload);
 }
 
 function parseAdminCardUpdatePayload(payload) {
@@ -797,6 +1310,59 @@ function parseAdminCardUpdatePayload(payload) {
   return { data };
 }
 
+function serializeCardPriceHistory(entry) {
+  return {
+    id: entry.id,
+    previous_price: entry.previousPrice,
+    next_price: entry.nextPrice,
+    source: entry.source,
+    created_at: entry.createdAt,
+  };
+}
+
+function serializeCardStockHistory(entry) {
+  return {
+    id: entry.id,
+    previous_stock: entry.previousStock,
+    next_stock: entry.nextStock,
+    source: entry.source,
+    created_at: entry.createdAt,
+  };
+}
+
+async function recordCardHistoryEntries(tx, cards, updates, source = "admin") {
+  const priceHistoryRows = [];
+  const stockHistoryRows = [];
+
+  for (const card of cards) {
+    if (updates.price !== undefined && Number(card.price) !== Number(updates.price)) {
+      priceHistoryRows.push({
+        cardId: card.id,
+        previousPrice: Number(card.price),
+        nextPrice: Number(updates.price),
+        source,
+      });
+    }
+
+    if (updates.stock !== undefined && Number(card.stock) !== Number(updates.stock)) {
+      stockHistoryRows.push({
+        cardId: card.id,
+        previousStock: Number(card.stock),
+        nextStock: Number(updates.stock),
+        source,
+      });
+    }
+  }
+
+  if (priceHistoryRows.length) {
+    await tx.cardPriceHistory.createMany({ data: priceHistoryRows });
+  }
+
+  if (stockHistoryRows.length) {
+    await tx.cardStockHistory.createMany({ data: stockHistoryRows });
+  }
+}
+
 function parseAdminOrderShippingPayload(payload) {
   const data = {};
 
@@ -820,7 +1386,7 @@ function parseAdminOrderShippingPayload(payload) {
   return { data };
 }
 
-async function getOrderCardsMap(orders) {
+async function getOrderCardsMap(orders, options = {}) {
   const cardIds = [...new Set(orders.flatMap((order) => order.items.map((item) => item.cardId)))];
   if (cardIds.length === 0) {
     return new Map();
@@ -830,7 +1396,7 @@ async function getOrderCardsMap(orders) {
     where: { id: { in: cardIds } },
   });
 
-  const enrichedCards = attachMetadata(cards);
+  const enrichedCards = attachMetadata(cards, options);
   return new Map(enrichedCards.map((card) => [card.id, card]));
 }
 
@@ -861,6 +1427,18 @@ async function recordActivity(userId, action, req, details) {
       userAgent: req.headers["user-agent"] || null,
       details: safeJsonStringify(details),
     },
+  });
+}
+
+function sendConcurrencyConflict(res, { error, currentResource, context = null, canOverrideConflict = false, requestId = null }) {
+  res.status(409).json({
+    error,
+    code: "CONFLICT",
+    requestId,
+    current_updated_at: currentResource?.updated_at || currentResource?.updatedAt || null,
+    current_resource: currentResource || null,
+    context,
+    can_override_conflict: canOverrideConflict,
   });
 }
 
@@ -1164,15 +1742,192 @@ async function getAppSetting(key, fallbackValue = "") {
   return setting?.value ?? fallbackValue;
 }
 
+async function setAppSetting(key, value) {
+  return prisma.appSetting.upsert({
+    where: { key },
+    update: { value },
+    create: { key, value },
+  });
+}
+
+function parsePositiveInteger(value, fallbackValue, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallbackValue;
+  }
+
+  return Math.min(max, Math.max(min, Math.floor(parsed)));
+}
+
+function parseCatalogScopeMode(value) {
+  const normalized = String(value || "").trim().toUpperCase();
+  return Object.values(CATALOG_SCOPE_MODE).includes(normalized) ? normalized : CATALOG_SCOPE_MODE.ALL;
+}
+
+function normalizeSelectedCardIds(value) {
+  let rawValue = [];
+
+  if (Array.isArray(value)) {
+    rawValue = value;
+  } else if (typeof value === "string" && value.trim()) {
+    try {
+      rawValue = JSON.parse(value);
+    } catch {
+      rawValue = [];
+    }
+  }
+
+  if (!Array.isArray(rawValue)) {
+    return [];
+  }
+
+  return [...new Set(rawValue.map((entry) => Number(entry)).filter(Number.isInteger).filter((entry) => entry > 0))];
+}
+
+async function getCatalogScopeSettings() {
+  return {
+    mode: CATALOG_SCOPE_MODE.ALL,
+    limit: null,
+    selectedCardIds: [],
+  };
+}
+
+async function resolveCatalogScopeWhere(scopeSettings) {
+  return undefined;
+}
+
+function buildAdminCardSearchWhere(search) {
+  const needle = String(search || "").trim();
+  if (!needle) {
+    return undefined;
+  }
+
+  return {
+    OR: [
+      { name: { contains: needle, mode: "insensitive" } },
+      { rarity: { contains: needle, mode: "insensitive" } },
+      { cardType: { contains: needle, mode: "insensitive" } },
+      { setName: { contains: needle, mode: "insensitive" } },
+    ],
+  };
+}
+
+function combineWhereClauses(...clauses) {
+  const filteredClauses = clauses.filter(Boolean);
+  if (filteredClauses.length === 0) {
+    return undefined;
+  }
+
+  if (filteredClauses.length === 1) {
+    return filteredClauses[0];
+  }
+
+  return { AND: filteredClauses };
+}
+
+function readAdminInventoryFilters(source = {}) {
+  return {
+    search: String(source.search || source.q || "").trim(),
+    rarity: String(source.rarity || "").trim(),
+    cardType: String(source.cardType || source.card_type || "").trim(),
+    stockStatus: String(source.stockStatus || source.stock_status || "").trim(),
+    visibility: String(source.visibility || "").trim(),
+  };
+}
+
+async function buildAdminInventoryWhere(source = {}) {
+  const filters = readAdminInventoryFilters(source);
+  const scopeSettings = await getCatalogScopeSettings();
+  const scopeWhere = await resolveCatalogScopeWhere(scopeSettings);
+  const searchWhere = buildAdminCardSearchWhere(filters.search);
+  const filterClauses = [scopeWhere, searchWhere];
+
+  if (filters.rarity && filters.rarity !== "all") {
+    filterClauses.push({ rarity: filters.rarity });
+  }
+
+  if (filters.cardType && filters.cardType !== "all") {
+    filterClauses.push({ cardType: filters.cardType });
+  }
+
+  if (filters.visibility === "visible") {
+    filterClauses.push({ isVisible: true });
+  } else if (filters.visibility === "hidden") {
+    filterClauses.push({ isVisible: false });
+  }
+
+  if (filters.stockStatus === "out_of_stock") {
+    filterClauses.push({ stock: { lte: 0 } });
+  } else if (filters.stockStatus === "available") {
+    filterClauses.push({ stock: { gt: 0 } });
+  }
+
+  const where = combineWhereClauses(...filterClauses);
+
+  let lowStockIds = null;
+  if (filters.stockStatus === "low_stock") {
+    const lowStockRows = await prisma.$queryRaw`
+      SELECT id
+      FROM "Card"
+      WHERE stock > 0 AND stock <= "lowStockThreshold"
+    `;
+    lowStockIds = lowStockRows.map((row) => Number(row.id)).filter(Number.isFinite);
+  }
+
+  return {
+    filters,
+    scopeWhere,
+    finalWhere: lowStockIds
+      ? combineWhereClauses(where, lowStockIds.length ? { id: { in: lowStockIds } } : { id: { in: [-1] } })
+      : where,
+  };
+}
+
+async function resolveAdminCardSelection(selection = {}) {
+  const explicitIds = Array.isArray(selection.ids) ? selection.ids.map(Number).filter(Number.isFinite) : [];
+  if (explicitIds.length) {
+    return explicitIds;
+  }
+
+  if (!selection.select_all_matching) {
+    return [];
+  }
+
+  const { finalWhere } = await buildAdminInventoryWhere(selection.filters || {});
+  const matchingCards = await prisma.card.findMany({
+    where: finalWhere,
+    select: { id: true },
+  });
+
+  return matchingCards.map((card) => card.id);
+}
+
+function serializeCatalogScopeSettings(scopeSettings, appliedCardCount) {
+  return {
+    mode: CATALOG_SCOPE_MODE.ALL,
+    limit: null,
+    selected_card_ids: [],
+    selected_count: 0,
+    applied_card_count: appliedCardCount,
+  };
+}
+
+async function parseCatalogScopePayload(payload) {
+  return { data: await getCatalogScopeSettings() };
+}
+
 async function getPublicStorefrontConfig() {
   const supportWhatsappNumber = await getAppSetting("support_whatsapp_number", "");
+  const supportEmail = await getAppSetting("support_email", "");
   return {
     support_whatsapp_number: supportWhatsappNumber,
+    support_email: supportEmail,
   };
 }
 
 function parseWhatsappSettingsPayload(payload) {
   const supportWhatsappNumber = normalizeWhatsappNumber(payload?.support_whatsapp_number);
+  const supportEmail = typeof payload?.support_email === "string" ? payload.support_email.trim().toLowerCase() : "";
 
   if (!supportWhatsappNumber) {
     return { error: "WhatsApp number is required" };
@@ -1182,7 +1937,94 @@ function parseWhatsappSettingsPayload(payload) {
     return { error: "WhatsApp number is invalid" };
   }
 
-  return { data: { supportWhatsappNumber } };
+  if (supportEmail && !supportEmail.includes("@")) {
+    return { error: "Support email is invalid" };
+  }
+
+  return { data: { supportWhatsappNumber, supportEmail } };
+}
+
+function parseContactRequestPayload(payload) {
+  const name = String(payload?.name || "").trim();
+  const email = normalizeEmail(payload?.email);
+  const subject = String(payload?.subject || "").trim();
+  const message = String(payload?.message || "").trim();
+
+  if (!name) {
+    return { error: "Name is required" };
+  }
+
+  if (!email || !email.includes("@")) {
+    return { error: "Email is invalid" };
+  }
+
+  if (!subject) {
+    return { error: "Subject is required" };
+  }
+
+  if (!message || message.length < 10) {
+    return { error: "Message must contain at least 10 characters" };
+  }
+
+  return {
+    data: {
+      name,
+      email,
+      subject,
+      message,
+    },
+  };
+}
+
+function parseContactRequestStatus(value) {
+  const normalized = String(value || "").trim().toUpperCase();
+  return Object.values(ContactRequestStatus).includes(normalized) ? normalized : null;
+}
+
+function parseContactRequestAdminPayload(payload) {
+  const updates = {};
+
+  if (payload?.status !== undefined) {
+    const nextStatus = parseContactRequestStatus(payload.status);
+    if (!nextStatus) {
+      return { error: "Invalid contact request status" };
+    }
+
+    updates.status = nextStatus;
+  }
+
+  if (payload?.admin_notes !== undefined) {
+    updates.adminNotes = typeof payload.admin_notes === "string" ? payload.admin_notes.trim() : "";
+  }
+
+  if (payload?.response_message !== undefined) {
+    updates.responseMessage = typeof payload.response_message === "string" ? payload.response_message.trim() : "";
+  }
+
+  if (!Object.keys(updates).length) {
+    return { error: "No valid fields to update" };
+  }
+
+  return { data: updates };
+}
+
+function buildContactRequestSummary(contactRequests) {
+  const summary = {
+    total: contactRequests.length,
+    new: 0,
+    in_progress: 0,
+    responded: 0,
+    archived: 0,
+  };
+
+  for (const contactRequest of contactRequests) {
+    const status = String(contactRequest.status || "").toLowerCase();
+    if (status in summary) {
+      summary[status] += 1;
+    }
+  }
+
+  return summary;
 }
 
 function aggregateSeries(orders) {
@@ -1216,7 +2058,7 @@ function aggregateUsersByDay(users) {
 
   return [...counts.entries()]
     .sort((left, right) => left[0].localeCompare(right[0]))
-    .map(([day, total]) => ({ day, total }));
+    .map(([day, count]) => ({ day, count }));
 }
 
 async function buildWorkbook(orders) {
@@ -1267,6 +2109,7 @@ app.get("/api/health", async (_req, res) => {
         api_port: PORT,
         store_port: Number(process.env.STORE_PORT || 5173),
         admin_port: Number(process.env.ADMIN_PORT || 5174),
+        admin_url: String(process.env.ADMIN_URL || "").trim().replace(/\/$/, ""),
       },
       storefront: await getPublicStorefrontConfig(),
     });
@@ -1285,6 +2128,33 @@ app.get("/api/storefront/config", async (_req, res) => {
   }
 });
 
+app.post("/api/contact", async (req, res) => {
+  try {
+    const parsed = parseContactRequestPayload(req.body || {});
+    if (parsed.error) {
+      res.status(400).json({ error: parsed.error });
+      return;
+    }
+
+    const contactRequest = await prisma.contactRequest.create({
+      data: {
+        ...parsed.data,
+        source: "storefront",
+        ipAddress: extractIp(req),
+        userAgent: req.headers["user-agent"] || null,
+      },
+    });
+
+    res.status(201).json({
+      contact_request: toContactRequestResponse(contactRequest),
+      message: "Contact request created",
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to create contact request" });
+  }
+});
+
 app.get("/api/cards", async (req, res) => {
   try {
     await listPublicCards(req, res);
@@ -1296,6 +2166,7 @@ app.get("/api/cards", async (req, res) => {
 
 app.get("/api/cards/filters", async (_req, res) => {
   try {
+    setPublicCatalogCacheHeaders(res);
     res.json({ filters: await getPublicCardFilters() });
   } catch (error) {
     console.error(error);
@@ -1836,7 +2707,7 @@ app.get("/api/auth/orders", requireAuth, async (req, res) => {
       orderBy: { createdAt: "desc" },
     });
 
-    const cardsById = await getOrderCardsMap(orders);
+    const cardsById = await getOrderCardsMap(orders, { adminThumbnail: true });
     res.json({ orders: orders.map((order) => toOrderResponse(order, cardsById)) });
   } catch (error) {
     console.error(error);
@@ -1863,6 +2734,12 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
   try {
     const userId = Number(req.user.sub);
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    const acceptedPrivacy = req.body?.accepted === true;
+
+    if (!acceptedPrivacy) {
+      res.status(400).json({ error: "Debés aceptar la política de privacidad" });
+      return;
+    }
 
     if (!items.length) {
       res.status(400).json({ error: "Cart is empty" });
@@ -1904,16 +2781,25 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
       const cardsById = new Map(attachMetadata(cards).map((card) => [card.id, card]));
       let subtotal = 0;
 
+      const unavailableItems = normalizedItems.filter((item) => {
+        const card = cardMap.get(item.cardId);
+        return !card || !card.isVisible;
+      });
+
+      if (unavailableItems.length > 0) {
+        throw createAppError("Hay cartas del carrito que ya no están disponibles", {
+          code: "CARD_UNAVAILABLE",
+          unavailableCardIds: unavailableItems.map((item) => item.cardId),
+        });
+      }
+
       for (const item of normalizedItems) {
         const card = cardMap.get(item.cardId);
-        if (!card || !card.isVisible) {
-          throw new Error(`Card ${item.cardId} not available`);
-        }
-
         if (card.stock < item.quantity) {
-          const err = new Error(`Insufficient stock for ${card.name}`);
-          err.code = "INSUFFICIENT_STOCK";
-          throw err;
+          throw createAppError(`Insufficient stock for ${card.name}`, {
+            code: "INSUFFICIENT_STOCK",
+            unavailableCardIds: [item.cardId],
+          });
         }
 
         subtotal += card.price * item.quantity;
@@ -1962,11 +2848,32 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
       return { order, cardsById };
     });
 
-    await recordActivity(userId, "CHECKOUT_CREATED", req, { orderId: result.order.id });
-    res.status(201).json({ order: toOrderResponse(result.order, result.cardsById) });
+    const responseOrder = toOrderResponse(result.order, result.cardsById);
+    invalidatePublicCatalogCaches();
+
+    try {
+      await recordActivity(userId, "CHECKOUT_CREATED", req, { orderId: result.order.id });
+    } catch (activityError) {
+      console.error("Failed to record checkout activity", activityError);
+    }
+
+    res.status(201).json({ order: responseOrder });
   } catch (error) {
+    if (error?.code === "CARD_UNAVAILABLE") {
+      res.status(409).json({
+        error: error.message,
+        code: error.code,
+        unavailableCardIds: error.unavailableCardIds || [],
+      });
+      return;
+    }
+
     if (error?.code === "INSUFFICIENT_STOCK") {
-      res.status(409).json({ error: error.message });
+      res.status(409).json({
+        error: error.message,
+        code: error.code,
+        unavailableCardIds: error.unavailableCardIds || [],
+      });
       return;
     }
 
@@ -2075,27 +2982,45 @@ app.post("/api/admin/refresh", async (req, res) => {
 
 app.get("/api/admin/dashboard", requireAdminAuth, async (_req, res) => {
   try {
-    const [cards, orders, users] = await Promise.all([
-      prisma.card.findMany(),
+    const scopeSettings = await getCatalogScopeSettings();
+    const scopeWhere = await resolveCatalogScopeWhere(scopeSettings);
+
+    const [cardMetricsRows, topSellingCardRows, orders, customerCount, staffCount, recentUsers, customerSeriesRows, topCustomerUsers] = await Promise.all([
+      prisma.card.findMany({
+        where: scopeWhere,
+        select: { stock: true, lowStockThreshold: true },
+      }),
+      prisma.card.findMany({
+        where: scopeWhere,
+        orderBy: [{ salesCount: "desc" }, { name: "asc" }],
+        take: 6,
+        select: PUBLIC_CARD_LIST_SELECT,
+      }),
       prisma.order.findMany({
         include: { items: true, user: true, address: true },
         orderBy: { createdAt: "desc" },
       }),
+      prisma.user.count({ where: { role: UserRole.USER } }),
+      prisma.user.count({ where: { role: { in: [UserRole.ADMIN, UserRole.STAFF] } } }),
       prisma.user.findMany({
-        include: {
-          orders: true,
-          activities: { orderBy: { createdAt: "desc" }, take: 3 },
-        },
+        where: { role: UserRole.USER },
+        take: 6,
         orderBy: { createdAt: "desc" },
+      }),
+      prisma.user.findMany({
+        where: { role: UserRole.USER },
+        select: { createdAt: true },
+      }),
+      prisma.user.findMany({
+        where: { role: UserRole.USER },
+        include: { orders: { select: { userId: true, status: true, total: true } } },
       }),
     ]);
 
     const cardsById = await getOrderCardsMap(orders);
     const completedOrders = orders.filter((order) => isBillableStatus(order.status));
-    const lowStockCards = cards.filter((card) => card.stock > 0 && card.stock <= card.lowStockThreshold);
-    const outOfStockCards = cards.filter((card) => card.stock === 0);
-    const customers = users.filter((user) => user.role === UserRole.USER);
-    const staffMembers = users.filter((user) => [UserRole.ADMIN, UserRole.STAFF].includes(user.role));
+    const lowStockCount = cardMetricsRows.filter((card) => card.stock > 0 && card.stock <= card.lowStockThreshold).length;
+    const outOfStockCount = cardMetricsRows.filter((card) => card.stock === 0).length;
     const totalRevenue = completedOrders.reduce((sum, order) => sum + order.total, 0);
     const avgOrderValue = completedOrders.length ? totalRevenue / completedOrders.length : 0;
     const statusCounts = Object.values(OrderStatus).reduce((accumulator, status) => {
@@ -2106,7 +3031,7 @@ app.get("/api/admin/dashboard", requireAdminAuth, async (_req, res) => {
       zone: zone.toLowerCase(),
       orders: orders.filter((order) => order.shippingZone === zone).length,
     }));
-    const topCustomers = customers
+    const topCustomers = topCustomerUsers
       .map((user) => {
         const userOrders = orders.filter((order) => order.userId === user.id);
         const totalSpent = userOrders.filter((order) => isBillableStatus(order.status)).reduce((sum, order) => sum + order.total, 0);
@@ -2123,30 +3048,53 @@ app.get("/api/admin/dashboard", requireAdminAuth, async (_req, res) => {
       metrics: {
         totalRevenue: formatCurrency(totalRevenue),
         totalOrders: orders.length,
-        totalProducts: cards.length,
-        lowStockCount: lowStockCards.length,
-        outOfStockCount: outOfStockCards.length,
-        totalCustomers: customers.length,
-        activeStaffCount: staffMembers.length,
+        totalProducts: cardMetricsRows.length,
+        lowStockCount,
+        outOfStockCount,
+        totalCustomers: customerCount,
+        activeStaffCount: staffCount,
         avgOrderValue: formatCurrency(avgOrderValue),
         pendingPaymentCount: statusCounts.pending_payment || 0,
       },
       recentOrders: orders.slice(0, 6).map((order) => toOrderResponse(order, cardsById, { includeAdminFields: true })),
-      recentUsers: customers.slice(0, 6).map((user) => toUserResponse(user)),
+      recentUsers: recentUsers.map((user) => toUserResponse(user)),
       topCustomers,
-      topSellingCards: attachMetadata(cards)
-        .sort((left, right) => right.sales_count - left.sales_count || left.name.localeCompare(right.name, "es"))
-        .slice(0, 6),
+      topSellingCards: attachMetadata(topSellingCardRows, { adminThumbnail: true }),
       analytics: {
         daily: aggregateSeries(completedOrders),
         statuses: statusCounts,
         zones,
-        usersByDay: aggregateUsersByDay(customers),
+        usersByDay: aggregateUsersByDay(customerSeriesRows),
       },
+      scope: serializeCatalogScopeSettings(scopeSettings, cardMetricsRows.length),
     });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Failed to load dashboard" });
+  }
+});
+
+app.get("/api/admin/settings/catalog-scope", requireAdminAuth, async (_req, res) => {
+  try {
+    const scopeSettings = await getCatalogScopeSettings();
+    const scopeWhere = await resolveCatalogScopeWhere(scopeSettings);
+    const appliedCardCount = await prisma.card.count({ where: scopeWhere });
+    res.json({ settings: serializeCatalogScopeSettings(scopeSettings, appliedCardCount) });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to load catalog scope settings" });
+  }
+});
+
+app.put("/api/admin/settings/catalog-scope", requireAdminAuth, requireAdminRole([UserRole.ADMIN]), async (req, res) => {
+  try {
+    const scopeSettings = await getCatalogScopeSettings();
+    const scopeWhere = await resolveCatalogScopeWhere(scopeSettings);
+    const appliedCardCount = await prisma.card.count({ where: scopeWhere });
+    res.json({ settings: serializeCatalogScopeSettings(scopeSettings, appliedCardCount) });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to update catalog scope settings" });
   }
 });
 
@@ -2160,42 +3108,398 @@ app.get("/api/admin/settings/whatsapp", requireAdminAuth, async (_req, res) => {
 });
 
 app.put("/api/admin/settings/whatsapp", requireAdminAuth, requireAdminRole([UserRole.ADMIN]), async (req, res) => {
+  const requestId = req.requestContext?.requestId || null;
+  let idempotency = null;
   try {
+    const mutationMeta = getMutationMetadata(req);
     const parsed = parseWhatsappSettingsPayload(req.body || {});
     if (parsed.error) {
       res.status(400).json({ error: parsed.error });
       return;
     }
 
-    const setting = await prisma.appSetting.upsert({
-      where: { key: "support_whatsapp_number" },
-      update: { value: parsed.data.supportWhatsappNumber },
-      create: {
-        key: "support_whatsapp_number",
-        value: parsed.data.supportWhatsappNumber,
+    idempotency = await beginIdempotentMutation(req, {
+      payload: {
+        support_whatsapp_number: parsed.data.supportWhatsappNumber,
+        support_email: parsed.data.supportEmail,
       },
     });
 
-    res.json({ settings: { support_whatsapp_number: setting.value } });
+    if (idempotency.replay) {
+      res.status(idempotency.replay.statusCode).json(idempotency.replay.body);
+      return;
+    }
+
+    const responsePayload = await prisma.$transaction(async (tx) => {
+      assertRequestActive(req);
+
+      const existingSettings = await tx.appSetting.findMany({
+        where: {
+          key: {
+            in: ["support_whatsapp_number", "support_email"],
+          },
+        },
+      });
+
+      const before = {
+        support_whatsapp_number: existingSettings.find((setting) => setting.key === "support_whatsapp_number")?.value || "",
+        support_email: existingSettings.find((setting) => setting.key === "support_email")?.value || "",
+      };
+
+      const [whatsappSetting, emailSetting] = await Promise.all([
+        tx.appSetting.upsert({
+          where: { key: "support_whatsapp_number" },
+          update: { value: parsed.data.supportWhatsappNumber },
+          create: {
+            key: "support_whatsapp_number",
+            value: parsed.data.supportWhatsappNumber,
+          },
+        }),
+        tx.appSetting.upsert({
+          where: { key: "support_email" },
+          update: { value: parsed.data.supportEmail },
+          create: {
+            key: "support_email",
+            value: parsed.data.supportEmail,
+          },
+        }),
+      ]);
+
+      const after = {
+        support_whatsapp_number: whatsappSetting.value,
+        support_email: emailSetting.value,
+      };
+
+      await createAdminAuditLog(tx, {
+        actorId: req.user.id,
+        entityType: "app_setting",
+        entityId: "support_channels",
+        action: "ADMIN_WHATSAPP_SETTINGS_UPDATED",
+        req,
+        routeKey: idempotency.routeKey,
+        before,
+        after,
+        metadata: {
+          mutationId: mutationMeta.mutationId,
+          requestId: mutationMeta.requestId,
+        },
+      });
+
+      return { settings: after };
+    });
+
+    try {
+      await recordActivity(req.user.id, "ADMIN_WHATSAPP_SETTINGS_UPDATED", req, {
+        mutationId: mutationMeta.mutationId,
+        requestId: mutationMeta.requestId,
+        supportWhatsappNumber: parsed.data.supportWhatsappNumber,
+        supportEmail: parsed.data.supportEmail,
+      });
+    } catch (activityError) {
+      console.error("Failed to record WhatsApp settings activity", activityError);
+    }
+
+    await finalizeIdempotentMutation(idempotency, 200, responsePayload);
+    res.json(responsePayload);
   } catch (error) {
+    await releaseIdempotentMutation(idempotency);
+
+    if (error?.statusCode) {
+      res.status(error.statusCode).json({
+        error: error.message,
+        code: error.code || "REQUEST_ERROR",
+        requestId,
+        ...(error.details ? { details: error.details } : {}),
+      });
+      return;
+    }
+
     console.error(error);
     res.status(500).json({ error: "Failed to update WhatsApp settings" });
   }
 });
 
+app.get("/api/admin/contact-requests", requireAdminAuth, async (req, res) => {
+  try {
+    const requestedStatus = typeof req.query.status === "string" ? parseContactRequestStatus(req.query.status) : null;
+    const contactRequests = await prisma.contactRequest.findMany({
+      where: requestedStatus ? { status: requestedStatus } : undefined,
+      include: {
+        respondedBy: true,
+      },
+      orderBy: [
+        { createdAt: "desc" },
+      ],
+      take: 200,
+    });
+
+    res.json({
+      contact_requests: contactRequests.map((contactRequest) => toContactRequestResponse(contactRequest)),
+      summary: buildContactRequestSummary(contactRequests),
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to load contact requests" });
+  }
+});
+
+app.patch("/api/admin/contact-requests/:id", requireAdminAuth, requireAdminRole([UserRole.ADMIN, UserRole.STAFF]), async (req, res) => {
+  const requestId = req.requestContext?.requestId || null;
+  let idempotency = null;
+  try {
+    const mutationMeta = getMutationMetadata(req);
+    const contactRequestId = Number(req.params.id);
+    if (!Number.isInteger(contactRequestId) || contactRequestId <= 0) {
+      res.status(400).json({ error: "Invalid contact request id" });
+      return;
+    }
+
+    const expectedUpdatedAt = parseExpectedUpdatedAt(req.body?.expected_updated_at);
+    if (expectedUpdatedAt === "INVALID_DATE") {
+      res.status(400).json({ error: "Invalid expected_updated_at value" });
+      return;
+    }
+
+    const parsed = parseContactRequestAdminPayload(req.body || {});
+    if (parsed.error) {
+      res.status(400).json({ error: parsed.error });
+      return;
+    }
+
+    idempotency = await beginIdempotentMutation(req, {
+      payload: {
+        contactRequestId,
+        body: req.body || {},
+      },
+    });
+
+    if (idempotency.replay) {
+      res.status(idempotency.replay.statusCode).json(idempotency.replay.body);
+      return;
+    }
+
+    const responsePayload = await prisma.$transaction(async (tx) => {
+      assertRequestActive(req);
+
+      const existingContactRequest = await tx.contactRequest.findUnique({
+        where: { id: contactRequestId },
+        include: { respondedBy: true },
+      });
+
+      if (!existingContactRequest) {
+        throw createAppError("Contact request not found", {
+          statusCode: 404,
+          code: "CONTACT_REQUEST_NOT_FOUND",
+        });
+      }
+
+      assertExpectedUpdatedAt(existingContactRequest, expectedUpdatedAt);
+
+      const nextStatus = parsed.data.status || existingContactRequest.status;
+      const isResponded = nextStatus === ContactRequestStatus.RESPONDED;
+      const contactRequest = await tx.contactRequest.update({
+        where: { id: contactRequestId },
+        data: {
+          ...parsed.data,
+          status: nextStatus,
+          respondedAt: isResponded ? existingContactRequest.respondedAt || new Date() : null,
+          respondedById: isResponded ? existingContactRequest.respondedById || req.user.id : null,
+        },
+        include: {
+          respondedBy: true,
+        },
+      });
+
+      await createAdminAuditLog(tx, {
+        actorId: req.user.id,
+        entityType: "contact_request",
+        entityId: contactRequestId,
+        action: "ADMIN_CONTACT_REQUEST_UPDATED",
+        req,
+        routeKey: idempotency.routeKey,
+        before: sanitizeContactRequestForAudit(existingContactRequest),
+        after: sanitizeContactRequestForAudit(contactRequest),
+        metadata: {
+          mutationId: mutationMeta.mutationId,
+          requestId: mutationMeta.requestId,
+          nextStatus,
+        },
+      });
+
+      return { contact_request: toContactRequestResponse(contactRequest) };
+    });
+
+    try {
+      await recordActivity(req.user.id, "ADMIN_CONTACT_REQUEST_UPDATED", req, {
+        mutationId: mutationMeta.mutationId,
+        requestId: mutationMeta.requestId,
+        contactRequestId,
+        nextStatus: responsePayload.contact_request.status,
+      });
+    } catch (activityError) {
+      console.error("Failed to record contact request activity", activityError);
+    }
+
+    await finalizeIdempotentMutation(idempotency, 200, responsePayload);
+    res.json(responsePayload);
+  } catch (error) {
+    await releaseIdempotentMutation(idempotency);
+
+    if (error.message === "CONCURRENT_MODIFICATION") {
+      const currentContactRequest = await prisma.contactRequest.findUnique({
+        where: { id: Number(req.params.id) },
+        include: { respondedBy: true },
+      });
+      sendConcurrencyConflict(res, {
+        error: "La consulta ya fue actualizada por otro operador. Refrescá y reintentá.",
+        currentResource: currentContactRequest ? toContactRequestResponse(currentContactRequest) : null,
+        requestId,
+        context: {
+          entity: "contact_request",
+          operation: "update",
+        },
+      });
+      return;
+    }
+
+    if (error?.statusCode) {
+      res.status(error.statusCode).json({
+        error: error.message,
+        code: error.code || "REQUEST_ERROR",
+        requestId,
+        ...(error.details ? { details: error.details } : {}),
+      });
+      return;
+    }
+
+    console.error(error);
+    res.status(500).json({ error: "Failed to update contact request" });
+  }
+});
+
 app.get("/api/admin/cards", requireAdminAuth, async (_req, res) => {
   try {
-    const cards = await prisma.card.findMany({ orderBy: [{ isFeatured: "desc" }, { salesCount: "desc" }, { name: "asc" }] });
-    res.json({ cards: attachMetadata(cards) });
+    const scopeSettings = await getCatalogScopeSettings();
+    const scopeWhere = await resolveCatalogScopeWhere(scopeSettings);
+    const cards = await prisma.card.findMany({
+      where: scopeWhere,
+      orderBy: [{ isFeatured: "desc" }, { salesCount: "desc" }, { name: "asc" }],
+      select: PUBLIC_CARD_LIST_SELECT,
+    });
+    res.json({ cards: attachMetadata(cards, { adminThumbnail: true }), scope: serializeCatalogScopeSettings(scopeSettings, cards.length) });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Failed to load admin cards" });
   }
 });
 
-app.put("/api/admin/cards/bulk", requireAdminAuth, requireAdminRole([UserRole.ADMIN]), async (req, res) => {
+app.get("/api/admin/cards/inventory", requireAdminAuth, async (req, res) => {
   try {
-    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(Number.isFinite) : [];
+    const scopeSettings = await getCatalogScopeSettings();
+    const page = parsePositiveInteger(req.query.page, 1, { min: 1, max: 10000 });
+    const pageSize = parsePositiveInteger(req.query.pageSize, 20, { min: 1, max: 100 });
+    const { filters, scopeWhere, finalWhere } = await buildAdminInventoryWhere(req.query || {});
+
+    const [total, cards, appliedCardCount, rarityOptions, cardTypeOptions] = await Promise.all([
+      prisma.card.count({ where: finalWhere }),
+      prisma.card.findMany({
+        where: finalWhere,
+        orderBy: [{ isFeatured: "desc" }, { salesCount: "desc" }, { name: "asc" }],
+        select: PUBLIC_CARD_LIST_SELECT,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      prisma.card.count({ where: scopeWhere }),
+      prisma.card.findMany({
+        where: scopeWhere,
+        distinct: ["rarity"],
+        select: { rarity: true },
+        orderBy: { rarity: "asc" },
+      }),
+      prisma.card.findMany({
+        where: scopeWhere,
+        distinct: ["cardType"],
+        select: { cardType: true },
+        orderBy: { cardType: "asc" },
+      }),
+    ]);
+
+    res.json({
+      cards: attachMetadata(cards, { adminThumbnail: true }),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+      search: filters.search,
+      stockStatus: filters.stockStatus,
+      scope: serializeCatalogScopeSettings(scopeSettings, appliedCardCount),
+      filters: {
+        rarities: rarityOptions.map((entry) => entry.rarity).filter(Boolean),
+        cardTypes: cardTypeOptions.map((entry) => entry.cardType).filter(Boolean),
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to load inventory cards" });
+  }
+});
+
+app.get("/api/admin/cards/:id", requireAdminAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      res.status(400).json({ error: "Invalid card id" });
+      return;
+    }
+
+    const card = await prisma.card.findUnique({
+      where: { id },
+      include: {
+        priceHistory: {
+          take: 20,
+          orderBy: { createdAt: "desc" },
+        },
+        stockHistory: {
+          take: 20,
+          orderBy: { createdAt: "desc" },
+        },
+      },
+    });
+
+    if (!card) {
+      res.status(404).json({ error: "Card not found" });
+      return;
+    }
+
+    res.json({
+      card: toPublicCard(card, { adminThumbnail: true }),
+      price_history: card.priceHistory.map(serializeCardPriceHistory),
+      stock_history: card.stockHistory.map(serializeCardStockHistory),
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to load admin card detail" });
+  }
+});
+
+app.post("/api/admin/cards/sync-catalog", requireAdminAuth, requireAdminRole([UserRole.ADMIN]), async (_req, res) => {
+  try {
+    const scopeSettings = await getCatalogScopeSettings();
+    const result = await syncCatalogFromScope(scopeSettings);
+    invalidatePublicCatalogCaches();
+    res.json({ sync: result, settings: serializeCatalogScopeSettings(scopeSettings, result.requestedCount) });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to sync catalog from YGOPRODeck" });
+  }
+});
+
+app.put("/api/admin/cards/bulk", requireAdminAuth, requireAdminRole([UserRole.ADMIN]), async (req, res) => {
+  const requestId = req.requestContext?.requestId || null;
+  let idempotency = null;
+  try {
+    const mutationMeta = getMutationMetadata(req);
+    const ids = await resolveAdminCardSelection(req.body || {});
     if (!ids.length) {
       res.status(400).json({ error: "At least one card id is required" });
       return;
@@ -2207,19 +3511,136 @@ app.put("/api/admin/cards/bulk", requireAdminAuth, requireAdminRole([UserRole.AD
       return;
     }
 
-    await prisma.card.updateMany({ where: { id: { in: ids } }, data: parsed.data });
-    res.json({ updatedCardIds: ids });
+    idempotency = await beginIdempotentMutation(req, {
+      payload: {
+        ids,
+        updates: req.body?.updates || {},
+        resources: req.body?.resources || [],
+      },
+    });
+
+    if (idempotency.replay) {
+      res.status(idempotency.replay.statusCode).json(idempotency.replay.body);
+      return;
+    }
+
+    const expectedUpdatedAtById = getExpectedUpdatedAtMap(req.body || {});
+    const responsePayload = await prisma.$transaction(async (tx) => {
+      assertRequestActive(req);
+
+      const uniqueIds = [...new Set(ids)];
+      const existingCards = await tx.card.findMany({ where: { id: { in: uniqueIds } } });
+      const existingCardsById = new Map(existingCards.map((card) => [card.id, card]));
+      const eligibleCards = [];
+      const failed = [];
+      const conflicts = [];
+
+      for (const id of uniqueIds) {
+        const card = existingCardsById.get(id);
+        if (!card) {
+          failed.push({ id, error: "Card not found" });
+          continue;
+        }
+
+        const expectedUpdatedAtForCard = expectedUpdatedAtById.get(id);
+        if (expectedUpdatedAtForCard && card.updatedAt.getTime() !== expectedUpdatedAtForCard.getTime()) {
+          conflicts.push({
+            id,
+            error: "Concurrent modification",
+            current_updated_at: card.updatedAt,
+            current_resource: toPublicCard(card),
+          });
+          continue;
+        }
+
+        eligibleCards.push(card);
+      }
+
+      const eligibleIds = eligibleCards.map((card) => card.id);
+      if (eligibleIds.length) {
+        await recordCardHistoryEntries(tx, eligibleCards, parsed.data, "admin_bulk");
+        await tx.card.updateMany({ where: { id: { in: eligibleIds } }, data: parsed.data });
+
+        const updatedCards = await tx.card.findMany({ where: { id: { in: eligibleIds } } });
+        const updatedCardsById = new Map(updatedCards.map((card) => [card.id, card]));
+
+        for (const existingCard of eligibleCards) {
+          await createAdminAuditLog(tx, {
+            actorId: req.user.id,
+            entityType: "card",
+            entityId: existingCard.id,
+            action: "ADMIN_CARD_BULK_UPDATED",
+            req,
+            routeKey: idempotency.routeKey,
+            before: sanitizeCardForAudit(existingCard),
+            after: sanitizeCardForAudit(updatedCardsById.get(existingCard.id)),
+            metadata: {
+              mutationId: mutationMeta.mutationId,
+              requestId: mutationMeta.requestId,
+              updatedFields: Object.keys(parsed.data),
+            },
+          });
+        }
+      }
+
+      return {
+        updatedCardIds: eligibleIds,
+        success: eligibleIds.map((id) => ({ id, action: "updated" })),
+        failed,
+        conflicts,
+      };
+    });
+
+    if (responsePayload.updatedCardIds.length) {
+      invalidatePublicCatalogCaches();
+    }
+    try {
+      await recordActivity(req.user.id, "ADMIN_CARDS_BULK_UPDATED", req, {
+        mutationId: mutationMeta.mutationId,
+        requestId: mutationMeta.requestId,
+        cardCount: responsePayload.updatedCardIds.length,
+        updatedFields: Object.keys(parsed.data),
+        failedCount: responsePayload.failed.length,
+        conflictCount: responsePayload.conflicts.length,
+      });
+    } catch (activityError) {
+      console.error("Failed to record bulk card activity", activityError);
+    }
+
+    await finalizeIdempotentMutation(idempotency, 200, responsePayload);
+    res.json(responsePayload);
   } catch (error) {
+    await releaseIdempotentMutation(idempotency);
+
+    if (error?.statusCode) {
+      res.status(error.statusCode).json({
+        error: error.message,
+        code: error.code || "REQUEST_ERROR",
+        requestId,
+        ...(error.details ? { details: error.details } : {}),
+      });
+      return;
+    }
+
     console.error(error);
     res.status(500).json({ error: "Failed to bulk update cards" });
   }
 });
 
 app.put("/api/admin/cards/:id", requireAdminAuth, requireAdminRole([UserRole.ADMIN]), async (req, res) => {
+  const requestId = req.requestContext?.requestId || null;
+  let idempotency = null;
   try {
+    const mutationMeta = getMutationMetadata(req);
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) {
       res.status(400).json({ error: "Invalid card id" });
+      return;
+    }
+
+    const expectedUpdatedAt = parseExpectedUpdatedAt(req.body?.expected_updated_at);
+    if (expectedUpdatedAt === "INVALID_DATE") {
+      res.status(400).json({ error: "Invalid expected_updated_at value" });
       return;
     }
 
@@ -2229,11 +3650,258 @@ app.put("/api/admin/cards/:id", requireAdminAuth, requireAdminRole([UserRole.ADM
       return;
     }
 
-    const card = await prisma.card.update({ where: { id }, data: parsed.data });
-    res.json({ card: toPublicCard(card) });
+    idempotency = await beginIdempotentMutation(req, {
+      payload: {
+        id,
+        body: req.body || {},
+      },
+    });
+
+    if (idempotency.replay) {
+      res.status(idempotency.replay.statusCode).json(idempotency.replay.body);
+      return;
+    }
+
+    const responsePayload = await prisma.$transaction(async (tx) => {
+      assertRequestActive(req);
+
+      const existingCard = await tx.card.findUnique({ where: { id } });
+      if (!existingCard) {
+        throw createAppError("Card not found", {
+          statusCode: 404,
+          code: "CARD_NOT_FOUND",
+        });
+      }
+
+      assertExpectedUpdatedAt(existingCard, expectedUpdatedAt);
+
+      await recordCardHistoryEntries(tx, [existingCard], parsed.data, "admin_single");
+      const card = await tx.card.update({ where: { id }, data: parsed.data });
+
+      await createAdminAuditLog(tx, {
+        actorId: req.user.id,
+        entityType: "card",
+        entityId: id,
+        action: "ADMIN_CARD_UPDATED",
+        req,
+        routeKey: idempotency.routeKey,
+        before: sanitizeCardForAudit(existingCard),
+        after: sanitizeCardForAudit(card),
+        metadata: {
+          mutationId: mutationMeta.mutationId,
+          requestId: mutationMeta.requestId,
+          updatedFields: Object.keys(parsed.data),
+        },
+      });
+
+      return { card: toPublicCard(card) };
+    });
+
+    invalidatePublicCatalogCaches();
+    try {
+      await recordActivity(req.user.id, "ADMIN_CARD_UPDATED", req, {
+        mutationId: mutationMeta.mutationId,
+        requestId: mutationMeta.requestId,
+        cardId: id,
+        updatedFields: Object.keys(parsed.data),
+      });
+    } catch (activityError) {
+      console.error("Failed to record single card activity", activityError);
+    }
+
+    await finalizeIdempotentMutation(idempotency, 200, responsePayload);
+    res.json(responsePayload);
   } catch (error) {
+    await releaseIdempotentMutation(idempotency);
+
+    if (error.message === "CONCURRENT_MODIFICATION") {
+      const currentCard = await prisma.card.findUnique({ where: { id: Number(req.params.id) } });
+      sendConcurrencyConflict(res, {
+        error: "La carta fue modificada por otro operador. Refrescá y reintentá.",
+        currentResource: currentCard ? toPublicCard(currentCard) : null,
+        requestId,
+        context: {
+          entity: "card",
+          operation: "update",
+        },
+      });
+      return;
+    }
+
+    if (error?.statusCode) {
+      res.status(error.statusCode).json({
+        error: error.message,
+        code: error.code || "REQUEST_ERROR",
+        requestId,
+        ...(error.details ? { details: error.details } : {}),
+      });
+      return;
+    }
+
     console.error(error);
     res.status(500).json({ error: "Failed to update card" });
+  }
+});
+
+app.delete("/api/admin/cards", requireAdminAuth, requireAdminRole([UserRole.ADMIN]), async (req, res) => {
+  const requestId = req.requestContext?.requestId || null;
+  let idempotency = null;
+  try {
+    const mutationMeta = getMutationMetadata(req);
+    const ids = await resolveAdminCardSelection(req.body || {});
+    if (!ids.length) {
+      res.status(400).json({ error: "At least one card id is required" });
+      return;
+    }
+
+    idempotency = await beginIdempotentMutation(req, {
+      payload: {
+        ids,
+        resources: req.body?.resources || [],
+      },
+    });
+
+    if (idempotency.replay) {
+      res.status(idempotency.replay.statusCode).json(idempotency.replay.body);
+      return;
+    }
+
+    const expectedUpdatedAtById = getExpectedUpdatedAtMap(req.body || {});
+    const responsePayload = await prisma.$transaction(async (tx) => {
+      assertRequestActive(req);
+
+      const uniqueIds = [...new Set(ids)];
+      const cards = await tx.card.findMany({
+        where: { id: { in: uniqueIds } },
+        include: {
+          _count: {
+            select: { orderItems: true },
+          },
+        },
+      });
+      const cardsById = new Map(cards.map((card) => [card.id, card]));
+      const deletableIds = [];
+      const hiddenIds = [];
+      const failed = [];
+      const conflicts = [];
+
+      for (const id of uniqueIds) {
+        const card = cardsById.get(id);
+        if (!card) {
+          failed.push({ id, error: "Card not found" });
+          continue;
+        }
+
+        const expectedUpdatedAtForCard = expectedUpdatedAtById.get(id);
+        if (expectedUpdatedAtForCard && card.updatedAt.getTime() !== expectedUpdatedAtForCard.getTime()) {
+          conflicts.push({
+            id,
+            error: "Concurrent modification",
+            current_updated_at: card.updatedAt,
+            current_resource: toPublicCard(card),
+          });
+          continue;
+        }
+
+        if (card._count.orderItems === 0) {
+          deletableIds.push(id);
+        } else {
+          hiddenIds.push(id);
+        }
+      }
+
+      if (deletableIds.length) {
+        await tx.card.deleteMany({ where: { id: { in: deletableIds } } });
+      }
+
+      let hiddenCardsById = new Map();
+      if (hiddenIds.length) {
+        await tx.card.updateMany({ where: { id: { in: hiddenIds } }, data: { isVisible: false } });
+        const hiddenCards = await tx.card.findMany({ where: { id: { in: hiddenIds } } });
+        hiddenCardsById = new Map(hiddenCards.map((card) => [card.id, card]));
+      }
+
+      for (const id of deletableIds) {
+        await createAdminAuditLog(tx, {
+          actorId: req.user.id,
+          entityType: "card",
+          entityId: id,
+          action: "ADMIN_CARD_DELETED",
+          req,
+          routeKey: idempotency.routeKey,
+          before: sanitizeCardForAudit(cardsById.get(id)),
+          after: null,
+          metadata: {
+            mutationId: mutationMeta.mutationId,
+            requestId: mutationMeta.requestId,
+            deleteMode: "hard_delete",
+          },
+        });
+      }
+
+      for (const id of hiddenIds) {
+        await createAdminAuditLog(tx, {
+          actorId: req.user.id,
+          entityType: "card",
+          entityId: id,
+          action: "ADMIN_CARD_HIDDEN",
+          req,
+          routeKey: idempotency.routeKey,
+          before: sanitizeCardForAudit(cardsById.get(id)),
+          after: sanitizeCardForAudit(hiddenCardsById.get(id)),
+          metadata: {
+            mutationId: mutationMeta.mutationId,
+            requestId: mutationMeta.requestId,
+            deleteMode: "soft_hide",
+          },
+        });
+      }
+
+      return {
+        deletedCardIds: deletableIds,
+        hiddenCardIds: hiddenIds,
+        success: [
+          ...deletableIds.map((id) => ({ id, action: "deleted" })),
+          ...hiddenIds.map((id) => ({ id, action: "hidden" })),
+        ],
+        failed,
+        conflicts,
+      };
+    });
+
+    if (responsePayload.success.length) {
+      invalidatePublicCatalogCaches();
+    }
+    try {
+      await recordActivity(req.user.id, "ADMIN_CARDS_DELETED", req, {
+        mutationId: mutationMeta.mutationId,
+        requestId: mutationMeta.requestId,
+        deletedCount: responsePayload.deletedCardIds.length,
+        hiddenCount: responsePayload.hiddenCardIds.length,
+        failedCount: responsePayload.failed.length,
+        conflictCount: responsePayload.conflicts.length,
+      });
+    } catch (activityError) {
+      console.error("Failed to record card delete activity", activityError);
+    }
+
+    await finalizeIdempotentMutation(idempotency, 200, responsePayload);
+    res.json(responsePayload);
+  } catch (error) {
+    await releaseIdempotentMutation(idempotency);
+
+    if (error?.statusCode) {
+      res.status(error.statusCode).json({
+        error: error.message,
+        code: error.code || "REQUEST_ERROR",
+        requestId,
+        ...(error.details ? { details: error.details } : {}),
+      });
+      return;
+    }
+
+    console.error(error);
+    res.status(500).json({ error: "Failed to delete cards" });
   }
 });
 
@@ -2442,22 +4110,125 @@ app.get("/api/admin/users", requireAdminAuth, async (_req, res) => {
 });
 
 app.put("/api/admin/users/:id/role", requireAdminAuth, requireAdminRole([UserRole.ADMIN]), async (req, res) => {
+  const requestId = req.requestContext?.requestId || null;
+  const requestedRole = String(req.body?.role || "").trim().toUpperCase();
+  let idempotency = null;
+
   try {
+    const mutationMeta = getMutationMetadata(req);
     const userId = Number(req.params.id);
-    const role = String(req.body?.role || "").trim().toUpperCase();
+    const role = requestedRole;
+    const expectedUpdatedAt = parseExpectedUpdatedAt(req.body?.expected_updated_at);
+    const overrideConflict = req.body?.override_conflict === true;
 
     if (!Number.isFinite(userId) || !Object.values(UserRole).includes(role)) {
       res.status(400).json({ error: "Invalid role update" });
       return;
     }
 
-    const user = await prisma.user.update({
-      where: { id: userId },
-      data: { role },
+    if (expectedUpdatedAt === "INVALID_DATE") {
+      res.status(400).json({ error: "Invalid expected_updated_at value" });
+      return;
+    }
+
+    idempotency = await beginIdempotentMutation(req, {
+      payload: {
+        userId,
+        role,
+        expected_updated_at: req.body?.expected_updated_at || null,
+        override_conflict: overrideConflict,
+      },
     });
 
-    res.json({ user: toUserResponse(user) });
+    if (idempotency.replay) {
+      res.status(idempotency.replay.statusCode).json(idempotency.replay.body);
+      return;
+    }
+
+    const responsePayload = await prisma.$transaction(async (tx) => {
+      assertRequestActive(req);
+
+      const existingUser = await tx.user.findUnique({ where: { id: userId } });
+      if (!existingUser) {
+        throw createAppError("User not found", {
+          statusCode: 404,
+          code: "USER_NOT_FOUND",
+        });
+      }
+
+      if (!overrideConflict) {
+        assertExpectedUpdatedAt(existingUser, expectedUpdatedAt);
+      }
+
+      const user = await tx.user.update({
+        where: { id: userId },
+        data: { role },
+      });
+
+      await createAdminAuditLog(tx, {
+        actorId: req.user.id,
+        entityType: "user",
+        entityId: userId,
+        action: "ADMIN_USER_ROLE_UPDATED",
+        req,
+        routeKey: idempotency.routeKey,
+        before: sanitizeUserForAudit(existingUser),
+        after: sanitizeUserForAudit(user),
+        metadata: {
+          mutationId: mutationMeta.mutationId,
+          requestId: mutationMeta.requestId,
+          previousRole: existingUser.role,
+          nextRole: role,
+          overrideConflict,
+        },
+      });
+
+      return { user: toUserResponse(user) };
+    });
+
+    try {
+      await recordActivity(req.user.id, "ADMIN_USER_ROLE_UPDATED", req, {
+        mutationId: mutationMeta.mutationId,
+        requestId: mutationMeta.requestId,
+        targetUserId: userId,
+        nextRole: role,
+        overrideConflict,
+      });
+    } catch (activityError) {
+      console.error("Failed to record user role activity", activityError);
+    }
+
+    await finalizeIdempotentMutation(idempotency, 200, responsePayload);
+    res.json(responsePayload);
   } catch (error) {
+    await releaseIdempotentMutation(idempotency);
+
+    if (error.message === "CONCURRENT_MODIFICATION") {
+      const currentUser = await prisma.user.findUnique({ where: { id: Number(req.params.id) } });
+      sendConcurrencyConflict(res, {
+        error: "El usuario cambió antes de guardar el nuevo rol. Confirmá si querés forzar el cambio con el estado actual.",
+        currentResource: currentUser ? toUserResponse(currentUser) : null,
+        requestId,
+        canOverrideConflict: true,
+        context: {
+          entity: "user",
+          operation: "role_update",
+          requested_role: requestedRole,
+        },
+      });
+      return;
+    }
+
+    if (error?.statusCode) {
+      res.status(error.statusCode).json({
+        error: error.message,
+        code: error.code || "REQUEST_ERROR",
+        requestId,
+        ...(error.details ? { details: error.details } : {}),
+      });
+      return;
+    }
+
     console.error(error);
     res.status(500).json({ error: "Failed to update user role" });
   }
@@ -2470,7 +4241,7 @@ app.get("/api/admin/orders", requireAdminAuth, async (_req, res) => {
       orderBy: { createdAt: "desc" },
     });
 
-    const cardsById = await getOrderCardsMap(orders);
+    const cardsById = await getOrderCardsMap(orders, { adminThumbnail: true });
     res.json({ orders: orders.map((order) => toOrderResponse(order, cardsById, { includeAdminFields: true })) });
   } catch (error) {
     console.error(error);
@@ -2496,31 +4267,67 @@ app.get("/api/admin/export/orders", requireAdminAuth, async (_req, res) => {
 });
 
 app.put("/api/admin/orders/:id/status", requireAdminAuth, async (req, res) => {
+  const requestId = req.requestContext?.requestId || null;
+  const requestedStatus = normalizeOrderStatus(req.body?.status);
+  let idempotency = null;
+
   try {
+    const mutationMeta = getMutationMetadata(req);
     const orderId = Number(req.params.id);
-    const nextStatus = normalizeOrderStatus(req.body?.status);
+    const nextStatus = requestedStatus;
+    const expectedUpdatedAt = parseExpectedUpdatedAt(req.body?.expected_updated_at);
 
     if (!Number.isFinite(orderId) || !nextStatus) {
       res.status(400).json({ error: "Invalid status update" });
       return;
     }
 
+    if (expectedUpdatedAt === "INVALID_DATE") {
+      res.status(400).json({ error: "Invalid expected_updated_at value" });
+      return;
+    }
+
+    idempotency = await beginIdempotentMutation(req, {
+      payload: {
+        orderId,
+        status: nextStatus,
+        expected_updated_at: req.body?.expected_updated_at || null,
+      },
+    });
+
+    if (idempotency.replay) {
+      res.status(idempotency.replay.statusCode).json(idempotency.replay.body);
+      return;
+    }
+
     const updatedOrder = await prisma.$transaction(async (tx) => {
+      assertRequestActive(req);
+
       const order = await tx.order.findUnique({
         where: { id: orderId },
         include: { items: true, user: true, address: true },
       });
 
       if (!order) {
-        throw new Error("ORDER_NOT_FOUND");
+        throw createAppError("Order not found", {
+          statusCode: 404,
+          code: "ORDER_NOT_FOUND",
+        });
       }
 
-      if (!canTransitionOrder(order.status, nextStatus, req.user.role)) {
-        throw new Error("INVALID_ORDER_TRANSITION");
-      }
+      assertExpectedUpdatedAt(order, expectedUpdatedAt);
 
-      if (order.status === nextStatus) {
-        return order;
+      const allowedNextStatuses = getAllowedOrderTransitions(order.status, req.user.role);
+      if (!allowedNextStatuses.includes(nextStatus)) {
+        throw createAppError("Invalid order transition for current role", {
+          statusCode: 409,
+          code: "INVALID_ORDER_TRANSITION",
+          details: {
+            current_status: order.status,
+            next_status: nextStatus,
+            allowed_next_statuses: allowedNextStatuses,
+          },
+        });
       }
 
       const wasBillable = isBillableStatus(order.status);
@@ -2528,6 +4335,8 @@ app.put("/api/admin/orders/:id/status", requireAdminAuth, async (req, res) => {
       const isCancelling = nextStatus === OrderStatus.CANCELLED;
 
       for (const item of order.items) {
+        assertRequestActive(req);
+
         if (!wasBillable && willBeBillable) {
           await tx.card.update({
             where: { id: item.cardId },
@@ -2550,24 +4359,79 @@ app.put("/api/admin/orders/:id/status", requireAdminAuth, async (req, res) => {
         }
       }
 
-      return tx.order.update({
+      const nextOrder = await tx.order.update({
         where: { id: orderId },
         data: { status: nextStatus },
         include: { items: true, user: true, address: true },
       });
+
+      await createAdminAuditLog(tx, {
+        actorId: req.user.id,
+        entityType: "order",
+        entityId: orderId,
+        action: "ADMIN_ORDER_STATUS_UPDATED",
+        req,
+        routeKey: idempotency.routeKey,
+        before: sanitizeOrderForAudit(order),
+        after: sanitizeOrderForAudit(nextOrder),
+        metadata: {
+          mutationId: mutationMeta.mutationId,
+          requestId: mutationMeta.requestId,
+          previousStatus: order.status,
+          nextStatus,
+        },
+      });
+
+      return nextOrder;
     });
 
-    await recordActivity(updatedOrder.userId, "ORDER_STATUS_UPDATED", req, { orderId, nextStatus });
-    const cardsById = await getOrderCardsMap([updatedOrder]);
-    res.json({ order: toOrderResponse(updatedOrder, cardsById, { includeAdminFields: true }) });
+    try {
+      await recordActivity(req.user.id, "ADMIN_ORDER_STATUS_UPDATED", req, {
+        mutationId: mutationMeta.mutationId,
+        requestId: mutationMeta.requestId,
+        orderId,
+        nextStatus,
+      });
+    } catch (activityError) {
+      console.error("Failed to record order status activity", activityError);
+    }
+
+    invalidatePublicCatalogCaches();
+    const cardsById = await getOrderCardsMap([updatedOrder], { adminThumbnail: true });
+    const responsePayload = { order: toOrderResponse(updatedOrder, cardsById, { includeAdminFields: true }) };
+    await finalizeIdempotentMutation(idempotency, 200, responsePayload);
+    res.json(responsePayload);
   } catch (error) {
-    if (error.message === "ORDER_NOT_FOUND") {
-      res.status(404).json({ error: "Order not found" });
+    await releaseIdempotentMutation(idempotency);
+
+    if (error.message === "CONCURRENT_MODIFICATION") {
+      const currentOrder = await prisma.order.findUnique({
+        where: { id: Number(req.params.id) },
+        include: { items: true, user: true, address: true },
+      });
+      const cardsById = currentOrder ? await getOrderCardsMap([currentOrder], { adminThumbnail: true }) : new Map();
+      sendConcurrencyConflict(res, {
+        error: "El pedido ya cambió en otra sesión. Refrescá y reintentá.",
+        currentResource: currentOrder ? toOrderResponse(currentOrder, cardsById, { includeAdminFields: true }) : null,
+        requestId,
+        context: currentOrder ? {
+          entity: "order",
+          operation: "status_update",
+          current_status: currentOrder.status,
+          next_status: requestedStatus,
+          allowed_next_statuses: getAllowedOrderTransitions(currentOrder.status, req.user.role),
+        } : null,
+      });
       return;
     }
 
-    if (error.message === "INVALID_ORDER_TRANSITION") {
-      res.status(409).json({ error: "Invalid order transition for current role" });
+    if (error?.statusCode) {
+      res.status(error.statusCode).json({
+        error: error.message,
+        code: error.code || "REQUEST_ERROR",
+        requestId,
+        ...(error.details ? error.details : {}),
+      });
       return;
     }
 
@@ -2577,10 +4441,20 @@ app.put("/api/admin/orders/:id/status", requireAdminAuth, async (req, res) => {
 });
 
 app.put("/api/admin/orders/:id/shipping", requireAdminAuth, async (req, res) => {
+  const requestId = req.requestContext?.requestId || null;
+  let idempotency = null;
+
   try {
+    const mutationMeta = getMutationMetadata(req);
     const orderId = Number(req.params.id);
+    const expectedUpdatedAt = parseExpectedUpdatedAt(req.body?.expected_updated_at);
     if (!Number.isFinite(orderId)) {
       res.status(400).json({ error: "Invalid order id" });
+      return;
+    }
+
+    if (expectedUpdatedAt === "INVALID_DATE") {
+      res.status(400).json({ error: "Invalid expected_updated_at value" });
       return;
     }
 
@@ -2590,41 +4464,109 @@ app.put("/api/admin/orders/:id/shipping", requireAdminAuth, async (req, res) => 
       return;
     }
 
+    idempotency = await beginIdempotentMutation(req, {
+      payload: {
+        orderId,
+        body: req.body || {},
+      },
+    });
+
+    if (idempotency.replay) {
+      res.status(idempotency.replay.statusCode).json(idempotency.replay.body);
+      return;
+    }
+
     const updatedOrder = await prisma.$transaction(async (tx) => {
+      assertRequestActive(req);
+
       const order = await tx.order.findUnique({
         where: { id: orderId },
         include: { items: true, user: true, address: true },
       });
 
       if (!order) {
-        throw new Error("ORDER_NOT_FOUND");
+        throw createAppError("Order not found", {
+          statusCode: 404,
+          code: "ORDER_NOT_FOUND",
+        });
       }
+
+      assertExpectedUpdatedAt(order, expectedUpdatedAt);
 
       if (order.shippingZone === ShippingZone.PICKUP) {
-        throw new Error("ORDER_HAS_NO_SHIPPING");
+        throw createAppError("Pickup orders do not support tracking", {
+          statusCode: 409,
+          code: "ORDER_HAS_NO_SHIPPING",
+        });
       }
 
-      return tx.order.update({
+      const nextOrder = await tx.order.update({
         where: { id: orderId },
         data: parsed.data,
         include: { items: true, user: true, address: true },
       });
+
+      await createAdminAuditLog(tx, {
+        actorId: req.user.id,
+        entityType: "order",
+        entityId: orderId,
+        action: "ADMIN_ORDER_SHIPPING_UPDATED",
+        req,
+        routeKey: idempotency.routeKey,
+        before: sanitizeOrderForAudit(order),
+        after: sanitizeOrderForAudit(nextOrder),
+        metadata: {
+          mutationId: mutationMeta.mutationId,
+          requestId: mutationMeta.requestId,
+          trackingVisibleToUser: nextOrder.trackingVisibleToUser,
+        },
+      });
+
+      return nextOrder;
     });
 
-    const cardsById = await getOrderCardsMap([updatedOrder]);
-    await recordActivity(updatedOrder.userId, "ORDER_SHIPPING_UPDATED", req, {
-      orderId,
-      trackingVisibleToUser: updatedOrder.trackingVisibleToUser,
-    });
-    res.json({ order: toOrderResponse(updatedOrder, cardsById, { includeAdminFields: true }) });
+    const cardsById = await getOrderCardsMap([updatedOrder], { adminThumbnail: true });
+    const responsePayload = { order: toOrderResponse(updatedOrder, cardsById, { includeAdminFields: true }) };
+    try {
+      await recordActivity(req.user.id, "ADMIN_ORDER_SHIPPING_UPDATED", req, {
+        mutationId: mutationMeta.mutationId,
+        requestId: mutationMeta.requestId,
+        orderId,
+        trackingVisibleToUser: updatedOrder.trackingVisibleToUser,
+      });
+    } catch (activityError) {
+      console.error("Failed to record order shipping activity", activityError);
+    }
+    await finalizeIdempotentMutation(idempotency, 200, responsePayload);
+    res.json(responsePayload);
   } catch (error) {
-    if (error.message === "ORDER_NOT_FOUND") {
-      res.status(404).json({ error: "Order not found" });
+    await releaseIdempotentMutation(idempotency);
+
+    if (error.message === "CONCURRENT_MODIFICATION") {
+      const currentOrder = await prisma.order.findUnique({
+        where: { id: Number(req.params.id) },
+        include: { items: true, user: true, address: true },
+      });
+      const cardsById = currentOrder ? await getOrderCardsMap([currentOrder], { adminThumbnail: true }) : new Map();
+      sendConcurrencyConflict(res, {
+        error: "El tracking ya cambió en otra sesión. Refrescá y reintentá.",
+        currentResource: currentOrder ? toOrderResponse(currentOrder, cardsById, { includeAdminFields: true }) : null,
+        requestId,
+        context: {
+          entity: "order",
+          operation: "shipping_update",
+        },
+      });
       return;
     }
 
-    if (error.message === "ORDER_HAS_NO_SHIPPING") {
-      res.status(409).json({ error: "Pickup orders do not support tracking" });
+    if (error?.statusCode) {
+      res.status(error.statusCode).json({
+        error: error.message,
+        code: error.code || "REQUEST_ERROR",
+        requestId,
+        ...(error.details ? { details: error.details } : {}),
+      });
       return;
     }
 
@@ -2634,32 +4576,112 @@ app.put("/api/admin/orders/:id/shipping", requireAdminAuth, async (req, res) => 
 });
 
 app.delete("/api/admin/orders/:id", requireAdminAuth, requireAdminRole([UserRole.ADMIN]), async (req, res) => {
+  const requestId = req.requestContext?.requestId || null;
+  let idempotency = null;
+
   try {
+    const mutationMeta = getMutationMetadata(req);
     const orderId = Number(req.params.id);
+    const expectedUpdatedAt = parseExpectedUpdatedAt(req.body?.expected_updated_at);
     if (!Number.isFinite(orderId)) {
       res.status(400).json({ error: "Invalid order id" });
       return;
     }
 
+    if (expectedUpdatedAt === "INVALID_DATE") {
+      res.status(400).json({ error: "Invalid expected_updated_at value" });
+      return;
+    }
+
+    idempotency = await beginIdempotentMutation(req, {
+      payload: {
+        orderId,
+        expected_updated_at: req.body?.expected_updated_at || null,
+      },
+    });
+
+    if (idempotency.replay) {
+      res.status(idempotency.replay.statusCode).json(idempotency.replay.body);
+      return;
+    }
+
     const deletedOrder = await prisma.$transaction(async (tx) => {
+      assertRequestActive(req);
+
       const order = await tx.order.findUnique({
         where: { id: orderId },
         include: { items: true },
       });
 
       if (!order) {
-        throw new Error("ORDER_NOT_FOUND");
+        throw createAppError("Order not found", {
+          statusCode: 404,
+          code: "ORDER_NOT_FOUND",
+        });
       }
 
+      assertExpectedUpdatedAt(order, expectedUpdatedAt);
+
       await rollbackOrderEffects(tx, order);
+      await createAdminAuditLog(tx, {
+        actorId: req.user.id,
+        entityType: "order",
+        entityId: orderId,
+        action: "ADMIN_ORDER_DELETED",
+        req,
+        routeKey: idempotency.routeKey,
+        before: sanitizeOrderForAudit(order),
+        after: null,
+        metadata: {
+          mutationId: mutationMeta.mutationId,
+          requestId: mutationMeta.requestId,
+        },
+      });
       await tx.order.delete({ where: { id: orderId } });
       return order;
     });
 
-    res.json({ deletedOrderId: deletedOrder.id });
+    invalidatePublicCatalogCaches();
+    const responsePayload = { deletedOrderId: deletedOrder.id };
+    try {
+      await recordActivity(req.user.id, "ADMIN_ORDER_DELETED", req, {
+        mutationId: mutationMeta.mutationId,
+        requestId: mutationMeta.requestId,
+        orderId,
+      });
+    } catch (activityError) {
+      console.error("Failed to record order delete activity", activityError);
+    }
+    await finalizeIdempotentMutation(idempotency, 200, responsePayload);
+    res.json(responsePayload);
   } catch (error) {
-    if (error.message === "ORDER_NOT_FOUND") {
-      res.status(404).json({ error: "Order not found" });
+    await releaseIdempotentMutation(idempotency);
+
+    if (error.message === "CONCURRENT_MODIFICATION") {
+      const currentOrder = await prisma.order.findUnique({
+        where: { id: Number(req.params.id) },
+        include: { items: true, user: true, address: true },
+      });
+      const cardsById = currentOrder ? await getOrderCardsMap([currentOrder], { adminThumbnail: true }) : new Map();
+      sendConcurrencyConflict(res, {
+        error: "El pedido cambió antes de eliminarlo. Refrescá y reintentá.",
+        currentResource: currentOrder ? toOrderResponse(currentOrder, cardsById, { includeAdminFields: true }) : null,
+        requestId,
+        context: {
+          entity: "order",
+          operation: "delete",
+        },
+      });
+      return;
+    }
+
+    if (error?.statusCode) {
+      res.status(error.statusCode).json({
+        error: error.message,
+        code: error.code || "REQUEST_ERROR",
+        requestId,
+        ...(error.details ? { details: error.details } : {}),
+      });
       return;
     }
 
@@ -2668,21 +4690,77 @@ app.delete("/api/admin/orders/:id", requireAdminAuth, requireAdminRole([UserRole
   }
 });
 
-app.delete("/api/admin/orders", requireAdminAuth, requireAdminRole([UserRole.ADMIN]), async (_req, res) => {
+app.delete("/api/admin/orders", requireAdminAuth, requireAdminRole([UserRole.ADMIN]), async (req, res) => {
+  const requestId = req.requestContext?.requestId || null;
+  let idempotency = null;
+
   try {
-    const deletedCount = await prisma.$transaction(async (tx) => {
+    const mutationMeta = getMutationMetadata(req);
+    idempotency = await beginIdempotentMutation(req, {
+      payload: {
+        clear: true,
+      },
+    });
+
+    if (idempotency.replay) {
+      res.status(idempotency.replay.statusCode).json(idempotency.replay.body);
+      return;
+    }
+
+    const responsePayload = await prisma.$transaction(async (tx) => {
+      assertRequestActive(req);
+
       const orders = await tx.order.findMany({ include: { items: true } });
 
       for (const order of orders) {
+        assertRequestActive(req);
         await rollbackOrderEffects(tx, order);
+        await createAdminAuditLog(tx, {
+          actorId: req.user.id,
+          entityType: "order",
+          entityId: order.id,
+          action: "ADMIN_ORDER_DELETED",
+          req,
+          routeKey: idempotency.routeKey,
+          before: sanitizeOrderForAudit(order),
+          after: null,
+          metadata: {
+            mutationId: mutationMeta.mutationId,
+            requestId: mutationMeta.requestId,
+            clearAll: true,
+          },
+        });
       }
 
       const result = await tx.order.deleteMany({});
-      return result.count;
+      return { deletedCount: result.count };
     });
 
-    res.json({ deletedCount });
+    invalidatePublicCatalogCaches();
+    try {
+      await recordActivity(req.user.id, "ADMIN_ORDERS_CLEARED", req, {
+        mutationId: mutationMeta.mutationId,
+        requestId: mutationMeta.requestId,
+        deletedCount: responsePayload.deletedCount,
+      });
+    } catch (activityError) {
+      console.error("Failed to record clear orders activity", activityError);
+    }
+    await finalizeIdempotentMutation(idempotency, 200, responsePayload);
+    res.json(responsePayload);
   } catch (error) {
+    await releaseIdempotentMutation(idempotency);
+
+    if (error?.statusCode) {
+      res.status(error.statusCode).json({
+        error: error.message,
+        code: error.code || "REQUEST_ERROR",
+        requestId,
+        ...(error.details ? { details: error.details } : {}),
+      });
+      return;
+    }
+
     console.error(error);
     res.status(500).json({ error: "Failed to clear orders" });
   }

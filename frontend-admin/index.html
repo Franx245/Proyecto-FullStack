@@ -4,6 +4,35 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DuelVault Admin</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --admin-boot-bg: #030712;
+        --admin-boot-fg: #e5eefb;
+      }
+
+      html {
+        min-height: 100%;
+        background: var(--admin-boot-bg);
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at top left, rgba(249, 115, 22, 0.16), transparent 24%),
+          radial-gradient(circle at top right, rgba(14, 165, 233, 0.12), transparent 22%),
+          linear-gradient(180deg, #020617 0%, #030712 100%);
+        color: var(--admin-boot-fg);
+        font-family: "IBM Plex Sans", system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+      }
+
+      #root {
+        min-height: 100vh;
+      }
+    </style>
   </head>
   <body class="bg-slate-950">
     <div id="root"></div>
