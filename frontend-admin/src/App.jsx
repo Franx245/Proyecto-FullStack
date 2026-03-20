@@ -757,21 +757,6 @@ function OperationNotice({ notice, online }) {
   );
 }
 
-function StatCard({ title, value, tone = "default" }) {
-  const toneClass = {
-    default: "border-white/10 bg-white/[0.04]",
-    warn: "border-amber-400/30 bg-amber-400/10",
-    danger: "border-rose-500/30 bg-rose-500/10",
-  }[tone];
-
-  return (
-    <div className={cn("rounded-3xl border p-5 transition hover:-translate-y-0.5", toneClass)}>
-      <p className="text-xs uppercase tracking-[0.24em] text-slate-400">{title}</p>
-      <p className="mt-3 text-3xl font-black text-white">{value}</p>
-    </div>
-  );
-}
-
 function AdminShell({ session, onLogout }) {
   const [section, setSection] = useState(() => getStoredSection());
   const [inventoryPage, setInventoryPage] = useState(() => getStoredInventoryPage());
@@ -949,12 +934,6 @@ function AdminShell({ session, onLogout }) {
       mediaQuery.removeEventListener?.("change", updateCompactState);
     };
   }, []);
-
-  useEffect(() => {
-    if (!isMobileHeaderCompact) {
-      setIsMobileCompactMenuOpen(false);
-    }
-  }, [isMobileHeaderCompact]);
 
   useEffect(() => {
     if (!isMobileCompactMenuOpen) {
@@ -1951,174 +1930,106 @@ function AdminShell({ session, onLogout }) {
 
           <div className="-mx-1 space-y-4 px-1 pb-4 pt-1 lg:static lg:mx-0 lg:space-y-0 lg:bg-none lg:px-0 lg:pb-0 lg:pt-0 lg:backdrop-blur-none">
             <div className="lg:hidden">
-              {isMobileHeaderCompact ? (
-                <div className="sticky top-0 z-30 -mx-1 bg-[linear-gradient(180deg,rgba(5,8,22,0.98)_0%,rgba(5,8,22,0.95)_86%,rgba(5,8,22,0)_100%)] px-1 pb-3 pt-1 backdrop-blur-md">
-                  <div className="glass rounded-[22px] border border-white/10 px-4 py-3">
-                  <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2">
-                    <div className="min-w-0 pr-1">
+              <div className={cn(isMobileHeaderCompact ? "sticky top-0 z-30 -mx-1 bg-[linear-gradient(180deg,rgba(5,8,22,0.98)_0%,rgba(5,8,22,0.95)_86%,rgba(5,8,22,0)_100%)] px-1 pb-3 pt-1 backdrop-blur-md" : "") }>
+                <div className="glass rounded-[22px] border border-white/10 px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0 pr-2">
                       <p className="text-[11px] uppercase tracking-[0.22em] text-amber-300">DuelVault</p>
-                      <h1 className="mt-1 truncate text-lg font-black text-white">Santuario Admin</h1>
-                      <div className="mt-2">
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <h1 className="truncate text-lg font-black text-white">Santuario Admin</h1>
                         <span className="inline-flex max-w-full truncate rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold text-slate-300">{currentSectionLabel}</span>
                       </div>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setIsMobileCompactMenuOpen((current) => !current)}
-                      aria-expanded={isMobileCompactMenuOpen}
-                      aria-label="Abrir menú lateral del panel"
-                      className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-semibold text-slate-200 transition hover:bg-white/[0.06]"
-                    >
-                      <span className="hidden min-[420px]:inline">Menú</span>
-                      <Menu className="h-4 w-4" />
-                    </button>
-
-                    <button
-                      onClick={onLogout}
-                      className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.06]"
-                    >
-                      <LogOut className="h-4 w-4" />
-                      <span className="hidden min-[420px]:inline">Salir</span>
-                    </button>
-                  </div>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div className="glass rounded-[28px] border border-white/10 p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-xs uppercase tracking-[0.24em] text-amber-300">DuelVault</p>
-                        <h1 className="mt-2 text-2xl font-black text-white">Santuario Admin</h1>
-                        <p className="mt-1 text-sm text-slate-400">{session.admin.email}</p>
-                      </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsMobileCompactMenuOpen((current) => !current)}
+                        aria-expanded={isMobileCompactMenuOpen}
+                        aria-label="Abrir menú lateral del panel"
+                        className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-semibold text-slate-200 transition hover:bg-white/[0.06]"
+                      >
+                        <span className="hidden min-[420px]:inline">Menú</span>
+                        <Menu className="h-4 w-4" />
+                      </button>
 
                       <button
                         onClick={onLogout}
-                        className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.06]"
+                        className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.06]"
                       >
                         <LogOut className="h-4 w-4" />
-                        Salir
-                      </button>
-                    </div>
-
-                    <div className="mt-4 flex items-center justify-between gap-3 rounded-3xl border border-white/10 bg-slate-950/30 px-4 py-3">
-                      <div className="min-w-0">
-                        <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Sección activa</p>
-                        <p className="mt-1 truncate text-sm font-semibold text-white">{currentSectionLabel}</p>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => setIsMobileCompactMenuOpen(true)}
-                        aria-expanded={isMobileCompactMenuOpen}
-                        aria-label="Abrir menú lateral del panel"
-                        className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/[0.06]"
-                      >
-                        <span>Menú</span>
-                        <Menu className="h-4 w-4" />
+                        <span className="hidden min-[420px]:inline">Salir</span>
                       </button>
                     </div>
                   </div>
+                </div>
+              </div>
 
-                  {section === "dashboard" ? null : (
-                  <header className="glass rounded-[32px] border border-white/10 p-4 sm:p-6">
-                    <div className="flex flex-wrap items-center justify-between gap-4">
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Sistema local</p>
-                        <h2 className="mt-2 text-2xl font-black text-white sm:text-3xl">{currentSectionMeta.title}</h2>
-                        <p className="mt-2 max-w-2xl text-sm text-slate-400">{currentSectionMeta.description}</p>
+              <button
+                type="button"
+                aria-label="Cerrar menú lateral"
+                onClick={() => setIsMobileCompactMenuOpen(false)}
+                aria-hidden={!isMobileCompactMenuOpen}
+                className={cn(
+                  "fixed inset-0 z-40 bg-slate-950/72 backdrop-blur-sm transition duration-300 lg:hidden",
+                  isMobileCompactMenuOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+                )}
+              />
+              <aside
+                aria-hidden={!isMobileCompactMenuOpen}
+                className={cn(
+                  "fixed inset-y-0 right-0 z-50 flex w-[min(88vw,372px)] flex-col border-l border-white/10 bg-[linear-gradient(180deg,rgba(10,14,31,0.98),rgba(8,12,26,0.95))] shadow-[-24px_0_90px_rgba(0,0,0,0.42)] backdrop-blur-xl transition duration-300 ease-out lg:hidden",
+                  isMobileCompactMenuOpen ? "translate-x-0 opacity-100" : "pointer-events-none translate-x-[104%] opacity-0"
+                )}
+              >
+                <div className="border-b border-white/10 px-5 pb-4 pt-5">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-[11px] uppercase tracking-[0.24em] text-amber-300">Navegación</p>
+                      <h2 className="mt-2 text-[1.35rem] font-black text-white">Santuario Admin</h2>
+                      <p className="mt-1 truncate text-sm text-slate-400">{session.admin.email}</p>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label="Cerrar menú"
+                      onClick={() => setIsMobileCompactMenuOpen(false)}
+                      className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-slate-300 transition duration-200 hover:bg-white/[0.08]"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <div className="mt-4 rounded-[28px] border border-white/10 bg-white/[0.03] px-4 py-4 text-sm text-slate-300">
+                    <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Vista activa</p>
+                    <p className="mt-2 text-lg font-bold text-white">{currentSectionMeta.title}</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-400">{currentSectionMeta.description}</p>
+                  </div>
+                </div>
+
+                <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5">
+                  <div className="rounded-[28px] border border-white/10 bg-slate-950/35 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+                    <MobileSectionNav section={section} onSectionChange={handleSectionChange} onSectionIntent={handleSectionIntent} />
+                  </div>
+
+                  <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-300">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="font-semibold text-white">Radar rápido</p>
+                      <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-[11px] font-semibold text-emerald-300">En línea</span>
+                    </div>
+                    <div className="mt-4 grid grid-cols-2 gap-3">
+                      <div className="rounded-2xl border border-amber-400/15 bg-amber-400/[0.05] px-4 py-3">
+                        <p className="text-[11px] uppercase tracking-[0.2em] text-amber-200/80">Stock bajo</p>
+                        <p className="mt-2 text-2xl font-black text-white">{dashboard.metrics.lowStockCount}</p>
                       </div>
-                      <div className="flex items-center gap-3 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-4 py-2 text-sm font-semibold text-emerald-300">
-                        <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
-                        🟢 API + Supabase activos
+                      <div className="rounded-2xl border border-rose-400/15 bg-rose-400/[0.05] px-4 py-3">
+                        <p className="text-[11px] uppercase tracking-[0.2em] text-rose-200/80">Agotadas</p>
+                        <p className="mt-2 text-2xl font-black text-white">{dashboard.metrics.outOfStockCount}</p>
                       </div>
                     </div>
-                    <div className="mt-4 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))] xl:hidden">
-                      <StatCard title="⚠️ Stock bajo" value={dashboard.metrics.lowStockCount} tone="warn" />
-                      <StatCard title="☠️ Agotadas" value={dashboard.metrics.outOfStockCount} tone="danger" />
-                    </div>
-                    {!isAdmin ? (
-                      <div className="mt-4 flex items-start gap-3 rounded-2xl border border-sky-400/20 bg-sky-400/10 px-4 py-3 text-sm text-sky-200">
-                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                        Tu cuenta STAFF tiene acceso de consulta y actualización operativa de pedidos, pero no puede hacer ediciones críticas de inventario ni cancelaciones.
-                      </div>
-                    ) : null}
-                  </header>
-                  )}
-                </>
-              )}
+                  </div>
+                </div>
+              </aside>
             </div>
-
-            {isMobileHeaderCompact ? (
-              <>
-                <button
-                  type="button"
-                  aria-label="Cerrar menú lateral"
-                  onClick={() => setIsMobileCompactMenuOpen(false)}
-                  aria-hidden={!isMobileCompactMenuOpen}
-                  className={cn(
-                    "fixed inset-0 z-40 bg-slate-950/72 backdrop-blur-sm transition duration-300 lg:hidden",
-                    isMobileCompactMenuOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
-                  )}
-                />
-                <aside
-                  aria-hidden={!isMobileCompactMenuOpen}
-                  className={cn(
-                    "fixed inset-y-0 right-0 z-50 flex w-[min(88vw,372px)] flex-col border-l border-white/10 bg-[linear-gradient(180deg,rgba(10,14,31,0.98),rgba(8,12,26,0.95))] shadow-[-24px_0_90px_rgba(0,0,0,0.42)] backdrop-blur-xl transition duration-300 ease-out lg:hidden",
-                    isMobileCompactMenuOpen ? "translate-x-0 opacity-100" : "pointer-events-none translate-x-[104%] opacity-0"
-                  )}
-                >
-                  <div className="border-b border-white/10 px-5 pb-4 pt-5">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="min-w-0">
-                        <p className="text-[11px] uppercase tracking-[0.24em] text-amber-300">Navegación</p>
-                        <h2 className="mt-2 text-[1.35rem] font-black text-white">Santuario Admin</h2>
-                        <p className="mt-1 truncate text-sm text-slate-400">{session.admin.email}</p>
-                      </div>
-                      <button
-                        type="button"
-                        aria-label="Cerrar menú"
-                        onClick={() => setIsMobileCompactMenuOpen(false)}
-                        className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-slate-300 transition duration-200 hover:bg-white/[0.08]"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-
-                    <div className="mt-4 rounded-[28px] border border-white/10 bg-white/[0.03] px-4 py-4 text-sm text-slate-300">
-                      <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Vista activa</p>
-                      <p className="mt-2 text-lg font-bold text-white">{currentSectionMeta.title}</p>
-                      <p className="mt-2 text-sm leading-6 text-slate-400">{currentSectionMeta.description}</p>
-                    </div>
-                  </div>
-
-                  <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5">
-                    <div className="rounded-[28px] border border-white/10 bg-slate-950/35 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-                      <MobileSectionNav section={section} onSectionChange={handleSectionChange} onSectionIntent={handleSectionIntent} />
-                    </div>
-
-                    <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-300">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="font-semibold text-white">Radar rápido</p>
-                        <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-[11px] font-semibold text-emerald-300">En línea</span>
-                      </div>
-                      <div className="mt-4 grid grid-cols-2 gap-3">
-                        <div className="rounded-2xl border border-amber-400/15 bg-amber-400/[0.05] px-4 py-3">
-                          <p className="text-[11px] uppercase tracking-[0.2em] text-amber-200/80">Stock bajo</p>
-                          <p className="mt-2 text-2xl font-black text-white">{dashboard.metrics.lowStockCount}</p>
-                        </div>
-                        <div className="rounded-2xl border border-rose-400/15 bg-rose-400/[0.05] px-4 py-3">
-                          <p className="text-[11px] uppercase tracking-[0.2em] text-rose-200/80">Agotadas</p>
-                          <p className="mt-2 text-2xl font-black text-white">{dashboard.metrics.outOfStockCount}</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </aside>
-              </>
-            ) : null}
 
             <header className={cn("glass rounded-[32px] border border-white/10 p-4 sm:p-6 hidden lg:block", section === "dashboard" ? "lg:hidden" : "") }>
               <div className="flex flex-wrap items-center justify-between gap-4">
