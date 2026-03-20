@@ -539,13 +539,13 @@ function SectionNav({ section, onSectionChange, onSectionIntent, className = "" 
 
 function MobileSectionNav({ section, onSectionChange, onSectionIntent }) {
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Navegación</p>
         <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[11px] font-semibold text-slate-300">{sections.find((entry) => entry.key === section)?.label || "Panel"}</span>
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-2 gap-2.5">
         {sections.map(({ key, label, icon: Icon }) => (
           <button
             key={key}
@@ -553,12 +553,16 @@ function MobileSectionNav({ section, onSectionChange, onSectionIntent }) {
             onClick={() => onSectionChange(key)}
             onTouchStart={() => onSectionIntent?.(key)}
             className={cn(
-              "flex min-h-11 items-center gap-3 rounded-xl border px-3.5 py-2.5 text-left text-sm font-medium transition",
-              section === key ? "border-amber-400/30 bg-amber-400/12 text-amber-100" : "border-transparent bg-white/[0.02] text-slate-300 hover:border-white/10 hover:bg-white/[0.05]"
+              "flex min-h-[56px] items-center gap-3 rounded-2xl border px-4 py-3 text-left text-sm font-medium transition duration-200",
+              section === key
+                ? "border-amber-400/30 bg-[linear-gradient(135deg,rgba(245,158,11,0.16),rgba(245,158,11,0.05))] text-amber-100 shadow-[0_12px_30px_rgba(245,158,11,0.12)]"
+                : "border-white/5 bg-white/[0.02] text-slate-300 hover:border-white/10 hover:bg-white/[0.05]"
             )}
           >
-            <Icon className="h-4 w-4 shrink-0" />
-            <span className="truncate">{label}</span>
+            <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border", section === key ? "border-amber-400/20 bg-amber-300/10 text-amber-200" : "border-white/10 bg-slate-950/55 text-slate-400")}>
+              <Icon className="h-4 w-4 shrink-0" />
+            </span>
+            <span className="truncate leading-tight">{label}</span>
           </button>
         ))}
       </div>
@@ -2029,47 +2033,68 @@ function AdminShell({ session, onLogout }) {
               )}
             </div>
 
-            {isMobileHeaderCompact && isMobileCompactMenuOpen ? (
+            {isMobileHeaderCompact ? (
               <>
                 <button
                   type="button"
                   aria-label="Cerrar menú lateral"
                   onClick={() => setIsMobileCompactMenuOpen(false)}
-                  className="fixed inset-0 z-40 bg-slate-950/72 backdrop-blur-sm lg:hidden"
+                  aria-hidden={!isMobileCompactMenuOpen}
+                  className={cn(
+                    "fixed inset-0 z-40 bg-slate-950/72 backdrop-blur-sm transition duration-300 lg:hidden",
+                    isMobileCompactMenuOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+                  )}
                 />
-                <aside className="fixed inset-y-0 right-0 z-50 flex w-[min(88vw,360px)] flex-col border-l border-white/10 bg-[#090d1f]/96 shadow-[-24px_0_80px_rgba(0,0,0,0.45)] backdrop-blur-xl lg:hidden">
-                  <div className="flex items-start justify-between gap-4 border-b border-white/10 px-5 py-5">
-                    <div className="min-w-0">
-                      <p className="text-[11px] uppercase tracking-[0.24em] text-amber-300">Navegación</p>
-                      <h2 className="mt-2 text-xl font-black text-white">Santuario Admin</h2>
-                      <p className="mt-2 truncate text-sm text-slate-400">{session.admin.email}</p>
+                <aside
+                  aria-hidden={!isMobileCompactMenuOpen}
+                  className={cn(
+                    "fixed inset-y-0 right-0 z-50 flex w-[min(88vw,372px)] flex-col border-l border-white/10 bg-[linear-gradient(180deg,rgba(10,14,31,0.98),rgba(8,12,26,0.95))] shadow-[-24px_0_90px_rgba(0,0,0,0.42)] backdrop-blur-xl transition duration-300 ease-out lg:hidden",
+                    isMobileCompactMenuOpen ? "translate-x-0 opacity-100" : "pointer-events-none translate-x-[104%] opacity-0"
+                  )}
+                >
+                  <div className="border-b border-white/10 px-5 pb-4 pt-5">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="text-[11px] uppercase tracking-[0.24em] text-amber-300">Navegación</p>
+                        <h2 className="mt-2 text-[1.35rem] font-black text-white">Santuario Admin</h2>
+                        <p className="mt-1 truncate text-sm text-slate-400">{session.admin.email}</p>
+                      </div>
+                      <button
+                        type="button"
+                        aria-label="Cerrar menú"
+                        onClick={() => setIsMobileCompactMenuOpen(false)}
+                        className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-slate-300 transition duration-200 hover:bg-white/[0.08]"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      aria-label="Cerrar menú"
-                      onClick={() => setIsMobileCompactMenuOpen(false)}
-                      className="rounded-2xl border border-white/10 p-3 text-slate-300 transition duration-200 hover:bg-white/[0.06]"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
 
-                  <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
-                    <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-300">
+                    <div className="mt-4 rounded-[28px] border border-white/10 bg-white/[0.03] px-4 py-4 text-sm text-slate-300">
                       <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Vista activa</p>
                       <p className="mt-2 text-lg font-bold text-white">{currentSectionMeta.title}</p>
                       <p className="mt-2 text-sm leading-6 text-slate-400">{currentSectionMeta.description}</p>
                     </div>
+                  </div>
 
-                    <div className="rounded-3xl border border-white/10 bg-slate-950/35 p-4">
+                  <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5">
+                    <div className="rounded-[28px] border border-white/10 bg-slate-950/35 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
                       <MobileSectionNav section={section} onSectionChange={handleSectionChange} onSectionIntent={handleSectionIntent} />
                     </div>
 
-                    <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-300">
-                      <p className="font-semibold text-white">Radar rápido</p>
-                      <div className="mt-3 space-y-2">
-                        <p>Stock bajo: <span className="font-semibold text-amber-200">{dashboard.metrics.lowStockCount}</span></p>
-                        <p>Agotadas: <span className="font-semibold text-rose-200">{dashboard.metrics.outOfStockCount}</span></p>
+                    <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-300">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="font-semibold text-white">Radar rápido</p>
+                        <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-[11px] font-semibold text-emerald-300">En línea</span>
+                      </div>
+                      <div className="mt-4 grid grid-cols-2 gap-3">
+                        <div className="rounded-2xl border border-amber-400/15 bg-amber-400/[0.05] px-4 py-3">
+                          <p className="text-[11px] uppercase tracking-[0.2em] text-amber-200/80">Stock bajo</p>
+                          <p className="mt-2 text-2xl font-black text-white">{dashboard.metrics.lowStockCount}</p>
+                        </div>
+                        <div className="rounded-2xl border border-rose-400/15 bg-rose-400/[0.05] px-4 py-3">
+                          <p className="text-[11px] uppercase tracking-[0.2em] text-rose-200/80">Agotadas</p>
+                          <p className="mt-2 text-2xl font-black text-white">{dashboard.metrics.outOfStockCount}</p>
+                        </div>
                       </div>
                     </div>
                   </div>
