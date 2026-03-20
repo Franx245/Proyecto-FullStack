@@ -914,25 +914,7 @@ function AdminShell({ session, onLogout }) {
   }, []);
 
   useEffect(() => {
-    const mediaQuery = window.matchMedia("(max-width: 1023px)");
-
-    const updateCompactState = () => {
-      if (!mediaQuery.matches) {
-        setIsMobileHeaderCompact(false);
-        return;
-      }
-
-      setIsMobileHeaderCompact(window.scrollY > 72);
-    };
-
-    updateCompactState();
-    window.addEventListener("scroll", updateCompactState, { passive: true });
-    mediaQuery.addEventListener?.("change", updateCompactState);
-
-    return () => {
-      window.removeEventListener("scroll", updateCompactState);
-      mediaQuery.removeEventListener?.("change", updateCompactState);
-    };
+    setIsMobileHeaderCompact(false);
   }, []);
 
   useEffect(() => {
