@@ -459,7 +459,7 @@ export default function DashboardView({
   const [confirmState, setConfirmState] = useState(null);
   const [showActivity, setShowActivity] = useState(() => Boolean(persistedState.showActivity));
   const [insightsReady, setInsightsReady] = useState(false);
-  const [isHeaderCompact, setIsHeaderCompact] = useState(false);
+  const isHeaderCompact = false;
   const deferredSearch = useDeferredValue(globalSearch);
 
   useEffect(() => {
@@ -483,33 +483,6 @@ export default function DashboardView({
   useEffect(() => {
     const cancel = scheduleIdleTask(() => setInsightsReady(true));
     return cancel;
-  }, []);
-
-  useEffect(() => {
-    const scrollContainer = dashboardRootRef.current?.parentElement;
-    if (!scrollContainer) {
-      return undefined;
-    }
-
-    const mediaQuery = window.matchMedia("(min-width: 1024px)");
-
-    const handleScroll = () => {
-      if (!mediaQuery.matches) {
-        setIsHeaderCompact(false);
-        return;
-      }
-
-      setIsHeaderCompact(scrollContainer.scrollTop > 56);
-    };
-
-    handleScroll();
-    scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
-    mediaQuery.addEventListener?.("change", handleScroll);
-
-    return () => {
-      scrollContainer.removeEventListener("scroll", handleScroll);
-      mediaQuery.removeEventListener?.("change", handleScroll);
-    };
   }, []);
 
   const cutoffDate = useMemo(() => getCutoffDate(dateRange), [dateRange]);
@@ -696,7 +669,7 @@ export default function DashboardView({
     <>
       <div ref={dashboardRootRef} className="grid gap-4 lg:gap-6">
         <div className={cn(
-          "-mx-1 bg-[linear-gradient(180deg,rgba(5,8,22,0.98)_0%,rgba(5,8,22,0.95)_86%,rgba(5,8,22,0)_100%)] px-1 transition-[padding,gap] duration-200 lg:sticky lg:top-0 lg:z-20 lg:backdrop-blur-md",
+          "-mx-1 bg-[linear-gradient(180deg,rgba(5,8,22,0.98)_0%,rgba(5,8,22,0.95)_86%,rgba(5,8,22,0)_100%)] px-1 transition-[padding,gap] duration-200",
           isHeaderCompact ? "space-y-3 pb-3 pt-1" : "space-y-4 pb-4 pt-1"
         )}>
           <DashboardPanel eyebrow="Panel operativo" title="Centro de mando comercial" className="overflow-visible">
