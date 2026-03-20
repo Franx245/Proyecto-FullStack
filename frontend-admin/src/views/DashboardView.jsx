@@ -227,7 +227,7 @@ function OrderListRow({
 
   return (
     <article className="rounded-2xl border border-white/10 bg-slate-950/25 px-4 py-4">
-      <div className="grid gap-3 xl:grid-cols-[minmax(0,1.3fr)_auto_auto] xl:items-center">
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1.3fr)_auto] xl:items-center">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-base font-bold text-white">Pedido #{order.id}</p>
@@ -241,11 +241,11 @@ function OrderListRow({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+        <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-center xl:justify-end">
           <button
             type="button"
             onClick={() => onOpen(order.id)}
-            className="min-h-11 rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-200 transition duration-200 hover:bg-white/[0.06]"
+            className="min-h-11 w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-200 transition duration-200 hover:bg-white/[0.06] sm:w-auto"
           >
             Ver detalle
           </button>
@@ -259,7 +259,7 @@ function OrderListRow({
               idleLabel="Marcar pagado"
               pendingLabel="Guardando..."
               successLabel="Pago confirmado"
-              className="bg-sky-500 text-slate-950 hover:bg-sky-400"
+              className="w-full bg-sky-500 text-slate-950 hover:bg-sky-400 sm:w-auto"
             />
           ) : null}
 
@@ -272,7 +272,7 @@ function OrderListRow({
               idleLabel="Marcar enviado"
               pendingLabel="Guardando..."
               successLabel="Enviado"
-              className="bg-emerald-500 text-slate-950 hover:bg-emerald-400"
+              className="w-full bg-emerald-500 text-slate-950 hover:bg-emerald-400 sm:w-auto"
             />
           ) : null}
 
@@ -281,7 +281,7 @@ function OrderListRow({
               type="button"
               onClick={() => onRequestCancel(order.id)}
               disabled={isBusy}
-              className="min-h-11 rounded-xl border border-rose-500/20 px-4 py-3 text-sm font-semibold text-rose-200 transition duration-200 hover:bg-rose-500/10 disabled:opacity-60"
+              className="min-h-11 w-full rounded-xl border border-rose-500/20 px-4 py-3 text-sm font-semibold text-rose-200 transition duration-200 hover:bg-rose-500/10 disabled:opacity-60 sm:w-auto"
             >
               Cancelar
             </button>

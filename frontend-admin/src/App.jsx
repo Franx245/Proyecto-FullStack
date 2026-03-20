@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   BarChart3,
   Boxes,
+  ChevronDown,
   LogOut,
   MessageCircle,
   PackageSearch,
@@ -795,6 +796,7 @@ function AdminShell({ session, onLogout }) {
   const [operationNotice, setOperationNotice] = useState(null);
   const [isOnline, setIsOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [isMobileHeaderCompact, setIsMobileHeaderCompact] = useState(false);
+  const [isMobileCompactMenuOpen, setIsMobileCompactMenuOpen] = useState(false);
   const clearedLegacyCacheRef = useRef(false);
 
   useEffect(() => {
@@ -951,6 +953,12 @@ function AdminShell({ session, onLogout }) {
     };
   }, []);
 
+  useEffect(() => {
+    if (!isMobileHeaderCompact) {
+      setIsMobileCompactMenuOpen(false);
+    }
+  }, [isMobileHeaderCompact]);
+
   const sectionRequirements = SECTION_REQUIREMENTS[section] || SECTION_REQUIREMENTS.dashboard;
 
   const handleSectionIntent = (nextSection) => {
@@ -1031,6 +1039,7 @@ function AdminShell({ session, onLogout }) {
       from: section,
       to: nextSection,
     });
+    setIsMobileCompactMenuOpen(false);
     handleSectionIntent(nextSection);
     syncSectionPath(nextSection);
     setSection(nextSection);
@@ -1935,14 +1944,32 @@ function AdminShell({ session, onLogout }) {
                         <span className="truncate text-sm font-semibold text-slate-300">{currentSectionLabel}</span>
                       </div>
                     </div>
-                    <button
-                      onClick={onLogout}
-                      className="flex shrink-0 items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.06]"
-                    >
-                      <LogOut className="h-4 w-4" />
-                      Salir
-                    </button>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsMobileCompactMenuOpen((current) => !current)}
+                        aria-expanded={isMobileCompactMenuOpen}
+                        aria-label="Abrir navegación del panel"
+                        className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-semibold text-slate-200 transition hover:bg-white/[0.06]"
+                      >
+                        <span className="max-w-[92px] truncate">Menú</span>
+                        <ChevronDown className={cn("h-4 w-4 transition duration-200", isMobileCompactMenuOpen ? "rotate-180" : "rotate-0")} />
+                      </button>
+                      <button
+                        onClick={onLogout}
+                        className="flex min-h-11 items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.06]"
+                      >
+                        <LogOut className="h-4 w-4" />
+                        <span>Salir</span>
+                      </button>
+                    </div>
                   </div>
+
+                  {isMobileCompactMenuOpen ? (
+                    <div className="mt-3 rounded-3xl border border-white/10 bg-slate-950/35 p-3">
+                      <MobileSectionNav section={section} onSectionChange={handleSectionChange} onSectionIntent={handleSectionIntent} />
+                    </div>
+                  ) : null}
                 </div>
               ) : (
                 <>
