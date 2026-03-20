@@ -651,6 +651,7 @@ export default function DashboardView({
     low_stock: lowStockCards,
     out_of_stock: outOfStockCards,
   }[alertMode] || lowStockCards;
+  const hasVisibleAlerts = visibleAlerts.length > 0;
 
   const alertMeta = ALERT_COPY[alertMode];
   const activeFilterChips = [
@@ -665,101 +666,103 @@ export default function DashboardView({
   return (
     <>
       <div className="grid gap-4 lg:gap-6">
-        <DashboardPanel eyebrow="Panel operativo" title="Centro de mando comercial" className="overflow-visible">
-          <div className="grid gap-4 xl:grid-cols-12 xl:items-end">
-            <div className="xl:col-span-4">
-              <p className="max-w-2xl text-sm leading-6 text-slate-400">
-                Priorizá cobros, pedidos y alertas sin perder contexto del recorte activo. El resumen superior responde a tus filtros actuales.
-              </p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <InlineFilterChip>Base global: {currency(globalMetrics.totalRevenue)}</InlineFilterChip>
-                <InlineFilterChip>{globalMetrics.totalOrders || 0} pedidos históricos</InlineFilterChip>
-                <InlineFilterChip tone="warn">{globalMetrics.pendingPaymentCount || 0} pagos pendientes</InlineFilterChip>
+        <div className="sticky top-0 z-20 -mx-1 space-y-4 bg-[linear-gradient(180deg,rgba(5,8,22,0.98)_0%,rgba(5,8,22,0.95)_86%,rgba(5,8,22,0)_100%)] px-1 pb-4 pt-1 backdrop-blur-md">
+          <DashboardPanel eyebrow="Panel operativo" title="Centro de mando comercial" className="overflow-visible">
+            <div className="grid gap-4 xl:grid-cols-12 xl:items-end">
+              <div className="xl:col-span-4">
+                <p className="max-w-2xl text-sm leading-6 text-slate-400">
+                  Priorizá cobros, pedidos y alertas sin perder contexto del recorte activo. El resumen superior responde a tus filtros actuales.
+                </p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <InlineFilterChip>Base global: {currency(globalMetrics.totalRevenue)}</InlineFilterChip>
+                  <InlineFilterChip>{globalMetrics.totalOrders || 0} pedidos históricos</InlineFilterChip>
+                  <InlineFilterChip tone="warn">{globalMetrics.pendingPaymentCount || 0} pagos pendientes</InlineFilterChip>
+                </div>
+              </div>
+
+              <div className="xl:col-span-8 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div className="relative min-w-0 md:col-span-2 xl:col-span-1">
+                  <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                  <input
+                    value={globalSearch}
+                    onChange={(event) => setGlobalSearch(event.target.value)}
+                    placeholder="Buscar pedidos, usuarios o productos"
+                    className="h-12 w-full rounded-xl border border-white/10 bg-slate-950/70 pl-11 pr-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400"
+                  />
+                </div>
+
+                <select
+                  value={dateRange}
+                  onChange={(event) => setDateRange(event.target.value)}
+                  className="h-12 rounded-xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400"
+                >
+                  {DATE_RANGE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+
+                <select
+                  value={statusFilter}
+                  onChange={(event) => setStatusFilter(event.target.value)}
+                  className="h-12 rounded-xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400"
+                >
+                  {STATUS_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+
+                <select
+                  value={userFilter}
+                  onChange={(event) => setUserFilter(event.target.value)}
+                  className="h-12 rounded-xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400"
+                >
+                  <option value="all">Todos los usuarios</option>
+                  {customerOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
               </div>
             </div>
 
-            <div className="xl:col-span-8 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <div className="relative min-w-0 md:col-span-2 xl:col-span-1">
-                <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                <input
-                  value={globalSearch}
-                  onChange={(event) => setGlobalSearch(event.target.value)}
-                  placeholder="Buscar pedidos, usuarios o productos"
-                  className="h-12 w-full rounded-xl border border-white/10 bg-slate-950/70 pl-11 pr-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400"
-                />
-              </div>
-
-              <select
-                value={dateRange}
-                onChange={(event) => setDateRange(event.target.value)}
-                className="h-12 rounded-xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400"
-              >
-                {DATE_RANGE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-
-              <select
-                value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value)}
-                className="h-12 rounded-xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400"
-              >
-                {STATUS_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-
-              <select
-                value={userFilter}
-                onChange={(event) => setUserFilter(event.target.value)}
-                className="h-12 rounded-xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400"
-              >
-                <option value="all">Todos los usuarios</option>
-                {customerOptions.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <InlineFilterChip>{metrics.visibleOrders} pedidos visibles</InlineFilterChip>
+              <InlineFilterChip>{metrics.visibleUsers} usuarios visibles</InlineFilterChip>
+              <InlineFilterChip>{metrics.visibleCards} cartas analizadas</InlineFilterChip>
+              {activeFilterChips.map((chip) => <InlineFilterChip key={chip}>{chip}</InlineFilterChip>)}
             </div>
-          </div>
+          </DashboardPanel>
 
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <InlineFilterChip>{metrics.visibleOrders} pedidos visibles</InlineFilterChip>
-            <InlineFilterChip>{metrics.visibleUsers} usuarios visibles</InlineFilterChip>
-            <InlineFilterChip>{metrics.visibleCards} cartas analizadas</InlineFilterChip>
-            {activeFilterChips.map((chip) => <InlineFilterChip key={chip}>{chip}</InlineFilterChip>)}
-          </div>
-        </DashboardPanel>
-
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <KpiCard
-            label="Pagos pendientes"
-            value={metrics.pendingPaymentCount}
-            helper="Cobros por resolver"
-            tone={metrics.pendingPaymentCount ? "danger" : "default"}
-            onClick={() => setStatusFilter("pending_payment")}
-          />
-          <KpiCard
-            label="Pedidos hoy"
-            value={metrics.ordersToday}
-            helper="Ingresados desde las 00:00"
-            tone="info"
-          />
-          <KpiCard
-            label="Ingresos"
-            value={currency(metrics.revenue)}
-            helper="Solo pedidos que contabilizan"
-            tone="success"
-          />
-          <KpiCard
-            label="Usuarios activos"
-            value={metrics.activeUsers}
-            helper="Clientes con pedidos en el recorte"
-            onClick={() => onNavigateSection("users")}
-          />
-        </section>
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <KpiCard
+              label="Pagos pendientes"
+              value={metrics.pendingPaymentCount}
+              helper="Cobros por resolver"
+              tone={metrics.pendingPaymentCount ? "danger" : "default"}
+              onClick={() => setStatusFilter("pending_payment")}
+            />
+            <KpiCard
+              label="Pedidos hoy"
+              value={metrics.ordersToday}
+              helper="Ingresados desde las 00:00"
+              tone="info"
+            />
+            <KpiCard
+              label="Ingresos"
+              value={currency(metrics.revenue)}
+              helper="Solo pedidos que contabilizan"
+              tone="success"
+            />
+            <KpiCard
+              label="Usuarios activos"
+              value={metrics.activeUsers}
+              helper="Clientes con pedidos en el recorte"
+              onClick={() => onNavigateSection("users")}
+            />
+          </section>
+        </div>
 
         <section className="grid gap-4 xl:grid-cols-12">
-          <div className="xl:col-span-8">
+          <div className={hasVisibleAlerts ? "xl:col-span-8" : "xl:col-span-12"}>
             <DashboardPanel
               eyebrow="Operaciones"
               title="Pedidos recientes"
@@ -801,7 +804,7 @@ export default function DashboardView({
           </div>
 
           <div className="xl:col-span-4 grid content-start gap-4">
-            {visibleAlerts.length > 0 ? (
+            {hasVisibleAlerts ? (
               <DashboardPanel
                 eyebrow={alertMeta.eyebrow}
                 title={alertMeta.title}
