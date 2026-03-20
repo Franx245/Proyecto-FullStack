@@ -794,6 +794,7 @@ function AdminShell({ session, onLogout }) {
   const [catalogSyncToken, setCatalogSyncToken] = useState(0);
   const [operationNotice, setOperationNotice] = useState(null);
   const [isOnline, setIsOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
+  const [isMobileHeaderCompact, setIsMobileHeaderCompact] = useState(false);
   const clearedLegacyCacheRef = useRef(false);
 
   useEffect(() => {
@@ -925,6 +926,28 @@ function AdminShell({ session, onLogout }) {
     return () => {
       window.removeEventListener("online", goOnline);
       window.removeEventListener("offline", goOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 1023px)");
+
+    const updateCompactState = () => {
+      if (!mediaQuery.matches) {
+        setIsMobileHeaderCompact(false);
+        return;
+      }
+
+      setIsMobileHeaderCompact(window.scrollY > 72);
+    };
+
+    updateCompactState();
+    window.addEventListener("scroll", updateCompactState, { passive: true });
+    mediaQuery.addEventListener?.("change", updateCompactState);
+
+    return () => {
+      window.removeEventListener("scroll", updateCompactState);
+      mediaQuery.removeEventListener?.("change", updateCompactState);
     };
   }, []);
 
@@ -1627,6 +1650,7 @@ function AdminShell({ session, onLogout }) {
   const customProducts = customProductsQuery.data?.products || [];
   const isAdmin = session.admin.role === "ADMIN";
   const currentSectionMeta = SECTION_META[section] || SECTION_META.dashboard;
+  const currentSectionLabel = sections.find((entry) => entry.key === section)?.label || currentSectionMeta.title;
   const renderSection = () => {
     if (section === "dashboard") {
       return (
@@ -1899,48 +1923,94 @@ function AdminShell({ session, onLogout }) {
           <OperationNotice notice={operationNotice} online={isOnline} />
 
           <div className="sticky top-0 z-30 -mx-1 space-y-4 bg-[linear-gradient(180deg,rgba(5,8,22,0.98)_0%,rgba(5,8,22,0.95)_86%,rgba(5,8,22,0)_100%)] px-1 pb-4 pt-1 backdrop-blur-md lg:static lg:mx-0 lg:space-y-0 lg:bg-none lg:px-0 lg:pb-0 lg:pt-0 lg:backdrop-blur-none">
-            <div className="glass rounded-[28px] border border-white/10 p-3 sm:p-4 lg:hidden">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.24em] text-amber-300">DuelVault</p>
-                  <h1 className="mt-2 text-2xl font-black text-white">Santuario Admin</h1>
-                  <p className="mt-1 text-sm text-slate-400">{session.admin.email}</p>
+            <div className="lg:hidden">
+              {isMobileHeaderCompact ? (
+                <div className="glass rounded-[22px] border border-white/10 px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[11px] uppercase tracking-[0.22em] text-amber-300">DuelVault</p>
+                      <div className="mt-1 flex items-center gap-2 text-white">
+                        <h1 className="truncate text-lg font-black">Santuario Admin</h1>
+                        <span className="text-slate-500">|</span>
+                        <span className="truncate text-sm font-semibold text-slate-300">{currentSectionLabel}</span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={onLogout}
+                      className="flex shrink-0 items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.06]"
+                    >
+                      <LogOut className="h-4 w-4" />
+                      Salir
+                    </button>
+                  </div>
                 </div>
-                <button
-                  onClick={onLogout}
-                  className="flex items-center gap-2 rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.06]"
-                >
-                  <LogOut className="h-4 w-4" />
-                  Salir
-                </button>
-              </div>
-              <div className="mt-4 rounded-3xl border border-white/10 bg-slate-950/30 p-3">
-                <MobileSectionNav section={section} onSectionChange={handleSectionChange} onSectionIntent={handleSectionIntent} />
-              </div>
+              ) : (
+                <>
+                  <div className="glass rounded-[28px] border border-white/10 p-3 sm:p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.24em] text-amber-300">DuelVault</p>
+                        <h1 className="mt-2 text-2xl font-black text-white">Santuario Admin</h1>
+                        <p className="mt-1 text-sm text-slate-400">{session.admin.email}</p>
+                      </div>
+                      <button
+                        onClick={onLogout}
+                        className="flex items-center gap-2 rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.06]"
+                      >
+                        <LogOut className="h-4 w-4" />
+                        Salir
+                      </button>
+                    </div>
+                    <div className="mt-4 rounded-3xl border border-white/10 bg-slate-950/30 p-3">
+                      <MobileSectionNav section={section} onSectionChange={handleSectionChange} onSectionIntent={handleSectionIntent} />
+                    </div>
+                  </div>
+
+                  <header className="glass rounded-[32px] border border-white/10 p-4 sm:p-6">
+                    <div className="flex flex-wrap items-center justify-between gap-4">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Sistema local</p>
+                        <h2 className="mt-2 text-2xl font-black text-white sm:text-3xl">{currentSectionMeta.title}</h2>
+                        <p className="mt-2 max-w-2xl text-sm text-slate-400">{currentSectionMeta.description}</p>
+                      </div>
+                      <div className="flex items-center gap-3 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-4 py-2 text-sm font-semibold text-emerald-300">
+                        <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+                        🟢 API + Supabase activos
+                      </div>
+                    </div>
+                    <div className="mt-4 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))] xl:hidden">
+                      <StatCard title="⚠️ Stock bajo" value={dashboard.metrics.lowStockCount} tone="warn" />
+                      <StatCard title="☠️ Agotadas" value={dashboard.metrics.outOfStockCount} tone="danger" />
+                    </div>
+                    {!isAdmin ? (
+                      <div className="mt-4 flex items-start gap-3 rounded-2xl border border-sky-400/20 bg-sky-400/10 px-4 py-3 text-sm text-sky-200">
+                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                        Tu cuenta STAFF tiene acceso de consulta y actualización operativa de pedidos, pero no puede hacer ediciones críticas de inventario ni cancelaciones.
+                      </div>
+                    ) : null}
+                  </header>
+                </>
+              )}
             </div>
 
-            <header className={cn("glass rounded-[32px] border border-white/10 p-4 sm:p-6", section === "dashboard" ? "lg:hidden" : "") }>
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Sistema local</p>
-                <h2 className="mt-2 text-2xl font-black text-white sm:text-3xl">{currentSectionMeta.title}</h2>
-                <p className="mt-2 max-w-2xl text-sm text-slate-400">{currentSectionMeta.description}</p>
+            <header className={cn("glass rounded-[32px] border border-white/10 p-4 sm:p-6", section === "dashboard" ? "hidden lg:block" : "hidden lg:block") }>
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Sistema local</p>
+                  <h2 className="mt-2 text-2xl font-black text-white sm:text-3xl">{currentSectionMeta.title}</h2>
+                  <p className="mt-2 max-w-2xl text-sm text-slate-400">{currentSectionMeta.description}</p>
+                </div>
+                <div className="flex items-center gap-3 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-4 py-2 text-sm font-semibold text-emerald-300">
+                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+                  🟢 API + Supabase activos
+                </div>
               </div>
-              <div className="flex items-center gap-3 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-4 py-2 text-sm font-semibold text-emerald-300">
-                <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
-                🟢 API + Supabase activos
-              </div>
-            </div>
-            <div className="mt-4 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))] xl:hidden">
-              <StatCard title="⚠️ Stock bajo" value={dashboard.metrics.lowStockCount} tone="warn" />
-              <StatCard title="☠️ Agotadas" value={dashboard.metrics.outOfStockCount} tone="danger" />
-            </div>
-            {!isAdmin ? (
-              <div className="mt-4 flex items-start gap-3 rounded-2xl border border-sky-400/20 bg-sky-400/10 px-4 py-3 text-sm text-sky-200">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                Tu cuenta STAFF tiene acceso de consulta y actualización operativa de pedidos, pero no puede hacer ediciones críticas de inventario ni cancelaciones.
-              </div>
-            ) : null}
+              {!isAdmin ? (
+                <div className="mt-4 flex items-start gap-3 rounded-2xl border border-sky-400/20 bg-sky-400/10 px-4 py-3 text-sm text-sky-200">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  Tu cuenta STAFF tiene acceso de consulta y actualización operativa de pedidos, pero no puede hacer ediciones críticas de inventario ni cancelaciones.
+                </div>
+              ) : null}
             </header>
           </div>
 
