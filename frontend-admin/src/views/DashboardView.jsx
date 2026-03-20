@@ -185,10 +185,14 @@ function KpiCard({ label, value, helper, tone = "default", onClick }) {
   }[tone];
 
   const content = (
-    <div className={cn("h-full rounded-2xl border px-4 py-4 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]", toneClass)}>
-      <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{label}</p>
-      <p className="mt-3 text-3xl font-black text-white">{value}</p>
-      {helper ? <p className="mt-2 text-sm text-slate-400">{helper}</p> : null}
+    <div className={cn("h-full rounded-2xl border px-4 py-3 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] sm:px-5 sm:py-4", toneClass)}>
+      <div className="flex items-end justify-between gap-4 sm:block">
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500 sm:text-[11px]">{label}</p>
+          {helper ? <p className="mt-2 text-xs leading-5 text-slate-400 sm:text-sm">{helper}</p> : null}
+        </div>
+        <p className="shrink-0 text-2xl font-black text-white sm:mt-3 sm:text-3xl">{value}</p>
+      </div>
     </div>
   );
 
