@@ -540,18 +540,10 @@ function SectionNav({ section, onSectionChange, onSectionIntent, className = "" 
 function MobileSectionNav({ section, onSectionChange, onSectionIntent }) {
   return (
     <div className="space-y-3">
-      <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-        Sección actual
-      </label>
-      <select
-        value={section}
-        onChange={(event) => onSectionChange(event.target.value)}
-        className="h-12 w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm font-semibold text-white outline-none transition focus:border-amber-400"
-      >
-        {sections.map(({ key, label }) => (
-          <option key={key} value={key}>{label}</option>
-        ))}
-      </select>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Navegación</p>
+        <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[11px] font-semibold text-slate-300">{sections.find((entry) => entry.key === section)?.label || "Panel"}</span>
+      </div>
 
       <div className="grid grid-cols-2 gap-2">
         {sections.map(({ key, label, icon: Icon }) => (

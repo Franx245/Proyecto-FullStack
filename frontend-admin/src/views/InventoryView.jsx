@@ -47,6 +47,25 @@ const VISIBILITY_OPTIONS = [
 const ROW_HEIGHT = 78;
 const OVERSCAN = 8;
 
+function formatCatalogLabel(value, fallback) {
+  const normalized = String(value || "").trim();
+
+  if (!normalized) {
+    return fallback;
+  }
+
+  const lowered = normalized.toLowerCase();
+  if (lowered === "unknown" || lowered === "n/a" || lowered === "null" || lowered === "undefined") {
+    return fallback;
+  }
+
+  return normalized;
+}
+
+function normalizeCatalogOptions(values, fallback) {
+  return [...new Set((values || []).map((value) => formatCatalogLabel(value, fallback)).filter(Boolean))];
+}
+
 function getStatusMeta(card) {
   if ((card.stock || 0) <= 0) {
     return {
@@ -228,13 +247,13 @@ const InventoryRow = memo(function InventoryRow({
         <img {...getAdminCardImageProps(card.image)} alt={card.name} className="h-12 w-9 rounded-lg object-cover" />
         <div className="min-w-0">
           <p className="truncate font-semibold text-white">{card.name}</p>
-          <p className="truncate text-xs text-slate-500">{card.card_type || "Unknown"}</p>
+          <p className="truncate text-xs text-slate-500">{formatCatalogLabel(card.card_type, "Carta")}</p>
         </div>
       </button>
 
       <div className="flex items-center px-4">
         <span className="inline-flex max-w-full truncate rounded-full border border-violet-400/20 bg-violet-400/10 px-2.5 py-1 text-[11px] font-semibold text-violet-200">
-          {card.rarity || "Unknown"}
+          {formatCatalogLabel(card.rarity, "Sin especificar")}
         </span>
       </div>
 
@@ -393,7 +412,7 @@ function InventoryDrawer({ card, onClose, onSave, onRequestDelete, canEditInvent
           <div>
             <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Detalle de carta</p>
             <h3 className="mt-2 text-2xl font-black text-white">{detailCard.name}</h3>
-            <p className="mt-2 text-sm text-slate-400">{detailCard.rarity || "Unknown"} · {detailCard.card_type || "Unknown"}</p>
+            <p className="mt-2 text-sm text-slate-400">{formatCatalogLabel(detailCard.rarity, "Sin especificar")} · {formatCatalogLabel(detailCard.card_type, "Carta")}</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-2xl border border-white/10 p-3 text-slate-300 transition duration-200 hover:bg-white/[0.06]">
             <X className="h-4 w-4" />
@@ -556,8 +575,8 @@ export default function InventoryView({
   const cards = cardsPage?.cards || [];
   const total = cardsPage?.total || 0;
   const totalPages = cardsPage?.totalPages || 1;
-  const rarityOptions = cardsPage?.filters?.rarities || [];
-  const cardTypeOptions = cardsPage?.filters?.cardTypes || [];
+  const rarityOptions = useMemo(() => normalizeCatalogOptions(cardsPage?.filters?.rarities || [], "Sin especificar"), [cardsPage?.filters?.rarities]);
+  const cardTypeOptions = useMemo(() => normalizeCatalogOptions(cardsPage?.filters?.cardTypes || [], "Carta"), [cardsPage?.filters?.cardTypes]);
   const activeCard = useMemo(() => cards.find((card) => card.id === activeCardId) || null, [activeCardId, cards]);
 
   useEffect(() => {
