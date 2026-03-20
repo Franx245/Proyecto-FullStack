@@ -1985,23 +1985,39 @@ function AdminShell({ session, onLogout }) {
                 </div>
               ) : (
                 <>
-                  <div className="glass rounded-[28px] border border-white/10 p-3 sm:p-4">
+                  <div className="glass rounded-[28px] border border-white/10 p-4">
                     <div className="flex items-start justify-between gap-3">
-                      <div>
+                      <div className="min-w-0">
                         <p className="text-xs uppercase tracking-[0.24em] text-amber-300">DuelVault</p>
                         <h1 className="mt-2 text-2xl font-black text-white">Santuario Admin</h1>
                         <p className="mt-1 text-sm text-slate-400">{session.admin.email}</p>
                       </div>
+
                       <button
                         onClick={onLogout}
-                        className="flex items-center gap-2 rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.06]"
+                        className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.06]"
                       >
                         <LogOut className="h-4 w-4" />
                         Salir
                       </button>
                     </div>
-                    <div className="mt-4 rounded-3xl border border-white/10 bg-slate-950/30 p-3">
-                      <MobileSectionNav section={section} onSectionChange={handleSectionChange} onSectionIntent={handleSectionIntent} />
+
+                    <div className="mt-4 flex items-center justify-between gap-3 rounded-3xl border border-white/10 bg-slate-950/30 px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Sección activa</p>
+                        <p className="mt-1 truncate text-sm font-semibold text-white">{currentSectionLabel}</p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setIsMobileCompactMenuOpen(true)}
+                        aria-expanded={isMobileCompactMenuOpen}
+                        aria-label="Abrir menú lateral del panel"
+                        className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/[0.06]"
+                      >
+                        <span>Menú</span>
+                        <Menu className="h-4 w-4" />
+                      </button>
                     </div>
                   </div>
 
