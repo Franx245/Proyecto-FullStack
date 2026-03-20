@@ -326,7 +326,7 @@ function InventoryDrawer({ card, onClose, onSave, onRequestDelete, canEditInvent
 
   useEffect(() => {
     setStockAdjustment(1);
-  }, [card?.id]);
+  }, [card?.id, card?.updated_at]);
 
   useEffect(() => {
     if (!card?.id) {
@@ -455,7 +455,7 @@ function InventoryDrawer({ card, onClose, onSave, onRequestDelete, canEditInvent
               <button
                 type="button"
                 disabled={!canEditInventory}
-                onClick={() => onSave(detailCard.id, { ...detailCard, stock: Math.max(0, Number(detailCard.stock || 0) + Number(stockAdjustment || 0)) })}
+                onClick={() => onSave(detailCard.id, { stock: Math.max(0, Number(detailCard.stock || 0) + Number(stockAdjustment || 0)) })}
                 className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm font-semibold text-emerald-200 transition duration-200 hover:bg-emerald-400/15 disabled:opacity-60"
               >
                 Ajustar stock
@@ -501,7 +501,7 @@ export default function InventoryView({
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [selectionMode, setSelectionMode] = useState("manual");
   const [bulkDraft, setBulkDraft] = useState({ price: "", stock: "", visibility: "visible" });
-  const [activeCard, setActiveCard] = useState(null);
+  const [activeCardId, setActiveCardId] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(620);
@@ -514,6 +514,7 @@ export default function InventoryView({
   const totalPages = cardsPage?.totalPages || 1;
   const rarityOptions = cardsPage?.filters?.rarities || [];
   const cardTypeOptions = cardsPage?.filters?.cardTypes || [];
+  const activeCard = useMemo(() => cards.find((card) => card.id === activeCardId) || null, [activeCardId, cards]);
 
   useEffect(() => {
     setSearchInput(filters.search || "");
@@ -536,7 +537,7 @@ export default function InventoryView({
   useEffect(() => {
     setSelectionMode("manual");
     setSelectedIds(new Set());
-    setActiveCard(null);
+    setActiveCardId(null);
   }, [filters.search, filters.rarity, filters.cardType, filters.stockStatus, filters.visibility]);
 
   useEffect(() => {
@@ -690,7 +691,7 @@ export default function InventoryView({
     await onDeleteCards(buildSelectionPayload());
     setSelectedIds(new Set());
     setSelectionMode("manual");
-    setActiveCard(null);
+    setActiveCardId(null);
     setConfirmState(null);
   }, [buildSelectionPayload, onDeleteCards, selectedCount]);
 
@@ -701,7 +702,7 @@ export default function InventoryView({
       next.delete(cardId);
       return next;
     });
-    setActiveCard((current) => (current?.id === cardId ? null : current));
+    setActiveCardId((current) => (current === cardId ? null : current));
     setConfirmState(null);
   }, [onDeleteCards]);
 
@@ -922,7 +923,7 @@ export default function InventoryView({
                           isSelected={allFilteredSelected || selectedIds.has(card.id)}
                           isDeletingCards={isDeletingCards}
                           onSelectedChange={handleSelectedChange}
-                          onOpen={setActiveCard}
+                          onOpen={(nextCard) => setActiveCardId(nextCard.id)}
                           onRequestDelete={(nextCard) => setConfirmState({ type: "single-delete", card: nextCard })}
                           onSave={handleSaveCard}
                         />
@@ -980,7 +981,7 @@ export default function InventoryView({
 
       <InventoryDrawer
         card={activeCard}
-        onClose={() => setActiveCard(null)}
+        onClose={() => setActiveCardId(null)}
         onSave={handleSaveCard}
         onRequestDelete={(card) => setConfirmState({ type: "single-delete", card })}
         canEditInventory={canEditInventory}
