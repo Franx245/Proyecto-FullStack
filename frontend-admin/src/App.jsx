@@ -2021,6 +2021,7 @@ function AdminShell({ session, onLogout }) {
                     </div>
                   </div>
 
+                  {section === "dashboard" ? null : (
                   <header className="glass rounded-[32px] border border-white/10 p-4 sm:p-6">
                     <div className="flex flex-wrap items-center justify-between gap-4">
                       <div>
@@ -2044,6 +2045,7 @@ function AdminShell({ session, onLogout }) {
                       </div>
                     ) : null}
                   </header>
+                  )}
                 </>
               )}
             </div>
@@ -2117,7 +2119,7 @@ function AdminShell({ session, onLogout }) {
               </>
             ) : null}
 
-            <header className={cn("glass rounded-[32px] border border-white/10 p-4 sm:p-6", section === "dashboard" ? "hidden lg:block" : "hidden lg:block") }>
+            <header className={cn("glass rounded-[32px] border border-white/10 p-4 sm:p-6 hidden lg:block", section === "dashboard" ? "lg:hidden" : "") }>
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
                   <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Sistema local</p>
