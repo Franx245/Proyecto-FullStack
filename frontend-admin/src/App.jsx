@@ -4,8 +4,8 @@ import {
   AlertTriangle,
   BarChart3,
   Boxes,
-  ChevronDown,
   LogOut,
+  Menu,
   MessageCircle,
   PackageSearch,
   ReceiptText,
@@ -13,6 +13,7 @@ import {
   Star,
   TrendingUp,
   Users,
+  X,
 } from "lucide-react";
 import {
   clearStoredSession,
@@ -958,6 +959,27 @@ function AdminShell({ session, onLogout }) {
       setIsMobileCompactMenuOpen(false);
     }
   }, [isMobileHeaderCompact]);
+
+  useEffect(() => {
+    if (!isMobileCompactMenuOpen) {
+      return undefined;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        setIsMobileCompactMenuOpen(false);
+      }
+    };
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isMobileCompactMenuOpen]);
 
   const sectionRequirements = SECTION_REQUIREMENTS[section] || SECTION_REQUIREMENTS.dashboard;
 
@@ -1949,11 +1971,11 @@ function AdminShell({ session, onLogout }) {
                         type="button"
                         onClick={() => setIsMobileCompactMenuOpen((current) => !current)}
                         aria-expanded={isMobileCompactMenuOpen}
-                        aria-label="Abrir navegación del panel"
+                        aria-label="Abrir menú lateral del panel"
                         className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-semibold text-slate-200 transition hover:bg-white/[0.06]"
                       >
                         <span className="max-w-[92px] truncate">Menú</span>
-                        <ChevronDown className={cn("h-4 w-4 transition duration-200", isMobileCompactMenuOpen ? "rotate-180" : "rotate-0")} />
+                        <Menu className="h-4 w-4" />
                       </button>
                       <button
                         onClick={onLogout}
@@ -1965,11 +1987,6 @@ function AdminShell({ session, onLogout }) {
                     </div>
                   </div>
 
-                  {isMobileCompactMenuOpen ? (
-                    <div className="mt-3 rounded-3xl border border-white/10 bg-slate-950/35 p-3">
-                      <MobileSectionNav section={section} onSectionChange={handleSectionChange} onSectionIntent={handleSectionIntent} />
-                    </div>
-                  ) : null}
                 </div>
               ) : (
                 <>
@@ -2047,6 +2064,54 @@ function AdminShell({ session, onLogout }) {
     </div>
   );
 }
+
+            {isMobileHeaderCompact && isMobileCompactMenuOpen ? (
+              <>
+                <button
+                  type="button"
+                  aria-label="Cerrar menú lateral"
+                  onClick={() => setIsMobileCompactMenuOpen(false)}
+                  className="fixed inset-0 z-40 bg-slate-950/72 backdrop-blur-sm lg:hidden"
+                />
+                <aside className="fixed inset-y-0 right-0 z-50 flex w-[min(88vw,360px)] flex-col border-l border-white/10 bg-[#090d1f]/96 shadow-[-24px_0_80px_rgba(0,0,0,0.45)] backdrop-blur-xl lg:hidden">
+                  <div className="flex items-start justify-between gap-4 border-b border-white/10 px-5 py-5">
+                    <div className="min-w-0">
+                      <p className="text-[11px] uppercase tracking-[0.24em] text-amber-300">Navegación</p>
+                      <h2 className="mt-2 text-xl font-black text-white">Santuario Admin</h2>
+                      <p className="mt-2 truncate text-sm text-slate-400">{session.admin.email}</p>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label="Cerrar menú"
+                      onClick={() => setIsMobileCompactMenuOpen(false)}
+                      className="rounded-2xl border border-white/10 p-3 text-slate-300 transition duration-200 hover:bg-white/[0.06]"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
+                    <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-300">
+                      <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Vista activa</p>
+                      <p className="mt-2 text-lg font-bold text-white">{currentSectionMeta.title}</p>
+                      <p className="mt-2 text-sm leading-6 text-slate-400">{currentSectionMeta.description}</p>
+                    </div>
+
+                    <div className="rounded-3xl border border-white/10 bg-slate-950/35 p-4">
+                      <MobileSectionNav section={section} onSectionChange={handleSectionChange} onSectionIntent={handleSectionIntent} />
+                    </div>
+
+                    <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-300">
+                      <p className="font-semibold text-white">Radar rápido</p>
+                      <div className="mt-3 space-y-2">
+                        <p>Stock bajo: <span className="font-semibold text-amber-200">{dashboard.metrics.lowStockCount}</span></p>
+                        <p>Agotadas: <span className="font-semibold text-rose-200">{dashboard.metrics.outOfStockCount}</span></p>
+                      </div>
+                    </div>
+                  </div>
+                </aside>
+              </>
+            ) : null}
 
 export default function App() {
   const [session, setSession] = useState(() => getBootstrapSession() || getStoredSession());
