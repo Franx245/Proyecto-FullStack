@@ -2,6 +2,7 @@ import { QueryClient, dehydrate, hydrate } from "@tanstack/react-query";
 
 const QUERY_CACHE_KEY = "duelvault_admin_query_cache_v4";
 const QUERY_CACHE_MAX_AGE = 1000 * 60 * 60 * 12;
+let flushPersistedCache = null;
 
 function canUseStorage() {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
@@ -79,6 +80,8 @@ function persistQueryCache(queryClient) {
     }
   };
 
+  flushPersistedCache = flush;
+
   const scheduleFlush = () => {
     if (timeoutId !== null) {
       return;
@@ -99,6 +102,9 @@ function persistQueryCache(queryClient) {
     unsubscribeQueryCache();
     unsubscribeMutationCache();
     window.removeEventListener("beforeunload", flush);
+    if (flushPersistedCache === flush) {
+      flushPersistedCache = null;
+    }
   };
 }
 
@@ -108,6 +114,12 @@ export function clearPersistedAdminQueryCache() {
   }
 
   window.localStorage.removeItem(QUERY_CACHE_KEY);
+}
+
+export function persistAdminQueryCacheNow() {
+  if (typeof flushPersistedCache === "function") {
+    flushPersistedCache();
+  }
 }
 
 export function createAdminQueryClient() {

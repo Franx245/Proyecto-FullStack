@@ -47,7 +47,7 @@ import {
   isConflictError,
   isTimeoutError,
 } from "./lib/api";
-import { clearPersistedAdminQueryCache } from "./lib/queryClient";
+import { clearPersistedAdminQueryCache, persistAdminQueryCacheNow } from "./lib/queryClient";
 import { generateClientMutationId, recordAdminEvent, startAdminFlow } from "./lib/observability";
 import { userRoleLabel } from "./views/shared";
 
@@ -1128,6 +1128,7 @@ function AdminShell({ session, onLogout }) {
 
       queryClient.setQueryData(cardsQueryKey, (current) => updateCardsResponse(current, (card) => (card.id === variables.cardId ? applyCardUpdates(card, updatedCard) : card)));
       queryClient.setQueriesData({ queryKey: ["inventory-cards", session.admin.id] }, (current) => updateCardsResponse(current, (card) => (card.id === variables.cardId ? applyCardUpdates(card, updatedCard) : card)));
+      persistAdminQueryCacheNow();
       publishNotice("success", `Carta #${variables.cardId} actualizada.`);
     },
     onSettled: () => {
