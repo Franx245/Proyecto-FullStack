@@ -1953,34 +1953,33 @@ function AdminShell({ session, onLogout }) {
             <div className="lg:hidden">
               {isMobileHeaderCompact ? (
                 <div className="glass rounded-[22px] border border-white/10 px-4 py-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2">
+                    <div className="min-w-0 pr-1">
                       <p className="text-[11px] uppercase tracking-[0.22em] text-amber-300">DuelVault</p>
-                      <div className="mt-1 flex items-center gap-2 text-white">
-                        <h1 className="truncate text-lg font-black">Santuario Admin</h1>
-                        <span className="text-slate-500">|</span>
-                        <span className="truncate text-sm font-semibold text-slate-300">{currentSectionLabel}</span>
+                      <h1 className="mt-1 truncate text-lg font-black text-white">Santuario Admin</h1>
+                      <div className="mt-2">
+                        <span className="inline-flex max-w-full truncate rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold text-slate-300">{currentSectionLabel}</span>
                       </div>
                     </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setIsMobileCompactMenuOpen((current) => !current)}
-                        aria-expanded={isMobileCompactMenuOpen}
-                        aria-label="Abrir menú lateral del panel"
-                        className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-semibold text-slate-200 transition hover:bg-white/[0.06]"
-                      >
-                        <span className="max-w-[92px] truncate">Menú</span>
-                        <Menu className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={onLogout}
-                        className="flex min-h-11 items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.06]"
-                      >
-                        <LogOut className="h-4 w-4" />
-                        <span>Salir</span>
-                      </button>
-                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsMobileCompactMenuOpen((current) => !current)}
+                      aria-expanded={isMobileCompactMenuOpen}
+                      aria-label="Abrir menú lateral del panel"
+                      className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-semibold text-slate-200 transition hover:bg-white/[0.06]"
+                    >
+                      <span className="hidden min-[420px]:inline">Menú</span>
+                      <Menu className="h-4 w-4" />
+                    </button>
+
+                    <button
+                      onClick={onLogout}
+                      className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.06]"
+                    >
+                      <LogOut className="h-4 w-4" />
+                      <span className="hidden min-[420px]:inline">Salir</span>
+                    </button>
                   </div>
 
                 </div>
