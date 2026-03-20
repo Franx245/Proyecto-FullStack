@@ -60,13 +60,6 @@ const STATUS_OPTIONS = [
 ];
 
 const ALERT_COPY = {
-  pending_payment: {
-    eyebrow: "Cobros trabados",
-    title: "Pagos pendientes",
-    empty: "No hay pagos pendientes con los filtros actuales.",
-    cta: "Resolver",
-    tone: "danger",
-  },
   low_stock: {
     eyebrow: "Reposición urgente",
     title: "Stock bajo",
@@ -426,11 +419,12 @@ export default function DashboardView({
   onNavigateSectionIntent,
   onStatusChange,
 }) {
+  const persistedAlertMode = readDashboardViewState().alertMode;
   const [globalSearch, setGlobalSearch] = useState(() => readDashboardViewState().globalSearch || "");
   const [dateRange, setDateRange] = useState(() => readDashboardViewState().dateRange || "30d");
   const [statusFilter, setStatusFilter] = useState(() => readDashboardViewState().statusFilter || "all");
   const [userFilter, setUserFilter] = useState(() => readDashboardViewState().userFilter || "all");
-  const [alertMode, setAlertMode] = useState(() => readDashboardViewState().alertMode || "pending_payment");
+  const [alertMode, setAlertMode] = useState(() => (persistedAlertMode === "out_of_stock" ? "out_of_stock" : "low_stock"));
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
   const [showNotifications, setShowNotifications] = useState(() => Boolean(readDashboardViewState().showNotifications));
@@ -631,10 +625,9 @@ export default function DashboardView({
   }, [orders, selectedOrderId]);
 
   const visibleAlerts = {
-    pending_payment: pendingPayments,
     low_stock: lowStockCards,
     out_of_stock: outOfStockCards,
-  }[alertMode];
+  }[alertMode] || lowStockCards;
 
   const alertMeta = ALERT_COPY[alertMode];
   const dashboardTitle = dashboard?.metrics?.totalRevenue ? "Centro de mando comercial" : "Centro de mando operativo";
@@ -769,8 +762,8 @@ export default function DashboardView({
             tone={metrics.pendingPaymentCount ? "danger" : "default"}
             helper="Cobros por resolver ahora"
             onClick={() => {
-              setAlertMode("pending_payment");
               setStatusFilter("pending_payment");
+              setSelectedOrderId(pendingPayments[0]?.id || null);
             }}
           />
           <StatusStripButton
@@ -943,16 +936,6 @@ export default function DashboardView({
               title={alertMeta.title}
               action={
                 <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setAlertMode("pending_payment")}
-                    className={cn(
-                      "rounded-full px-3 py-2 text-xs font-semibold transition duration-200",
-                      alertMode === "pending_payment" ? "bg-rose-500 text-white" : "border border-white/10 text-slate-300 hover:bg-white/[0.06]"
-                    )}
-                  >
-                    Pagos
-                  </button>
                   <button
                     type="button"
                     onClick={() => setAlertMode("low_stock")}
