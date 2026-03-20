@@ -81,6 +81,22 @@ function formatDateTime(value) {
   });
 }
 
+function HistoryPanel({ title, emptyMessage, entries, renderEntry }) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4">
+      <div className="flex items-center gap-2 text-white">
+        <History className="h-4 w-4 text-slate-400" />
+        <p className="font-semibold">{title}</p>
+      </div>
+      <div className="mt-4 max-h-64 space-y-2 overflow-y-auto pr-1">
+        {entries.length === 0 ? (
+          <div className="rounded-2xl border border-white/10 bg-slate-950/30 px-4 py-3 text-sm text-slate-400">{emptyMessage}</div>
+        ) : entries.map((entry) => renderEntry(entry))}
+      </div>
+    </div>
+  );
+}
+
 function numberField(value, fallback = 0) {
   const nextValue = Number(value);
   return Number.isFinite(nextValue) ? nextValue : fallback;
@@ -409,38 +425,30 @@ function InventoryDrawer({ card, onClose, onSave, onRequestDelete, canEditInvent
             </div>
           </div>
 
-          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4">
-            <div className="flex items-center gap-2 text-white">
-              <History className="h-4 w-4 text-slate-400" />
-              <p className="font-semibold">Historial de precio</p>
-            </div>
-            <div className="mt-4 space-y-2">
-              {priceHistory.length === 0 ? (
-                <div className="rounded-2xl border border-white/10 bg-slate-950/30 px-4 py-3 text-sm text-slate-400">Todavía no hay cambios de precio registrados.</div>
-              ) : priceHistory.map((entry) => (
+          <div className="grid gap-4 xl:grid-cols-2">
+            <HistoryPanel
+              title="Historial de precio"
+              emptyMessage="Todavía no hay cambios de precio registrados."
+              entries={priceHistory}
+              renderEntry={(entry) => (
                 <div key={entry.id} className="rounded-2xl border border-white/10 bg-slate-950/30 px-4 py-3 text-sm text-slate-300">
                   <p className="font-semibold text-white">{currency(entry.previous_price)} → {currency(entry.next_price)}</p>
                   <p className="mt-1 text-xs text-slate-500">{formatDateTime(entry.created_at)} · {entry.source}</p>
                 </div>
-              ))}
-            </div>
-          </div>
+              )}
+            />
 
-          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4">
-            <div className="flex items-center gap-2 text-white">
-              <History className="h-4 w-4 text-slate-400" />
-              <p className="font-semibold">Historial de stock</p>
-            </div>
-            <div className="mt-4 space-y-2">
-              {stockHistory.length === 0 ? (
-                <div className="rounded-2xl border border-white/10 bg-slate-950/30 px-4 py-3 text-sm text-slate-400">Todavía no hay cambios de stock registrados.</div>
-              ) : stockHistory.map((entry) => (
+            <HistoryPanel
+              title="Historial de stock"
+              emptyMessage="Todavía no hay cambios de stock registrados."
+              entries={stockHistory}
+              renderEntry={(entry) => (
                 <div key={entry.id} className="rounded-2xl border border-white/10 bg-slate-950/30 px-4 py-3 text-sm text-slate-300">
                   <p className="font-semibold text-white">{entry.previous_stock} → {entry.next_stock} unidades</p>
                   <p className="mt-1 text-xs text-slate-500">{formatDateTime(entry.created_at)} · {entry.source}</p>
                 </div>
-              ))}
-            </div>
+              )}
+            />
           </div>
 
           <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4">
