@@ -1949,10 +1949,11 @@ function AdminShell({ session, onLogout }) {
         <main className={cn("min-w-0", section === "dashboard" ? "space-y-4 sm:space-y-4 lg:flex lg:h-[calc(100vh-1.5rem)] lg:flex-col lg:overflow-hidden" : "space-y-4 sm:space-y-6")}>
           <OperationNotice notice={operationNotice} online={isOnline} />
 
-          <div className="sticky top-0 z-30 -mx-1 space-y-4 bg-[linear-gradient(180deg,rgba(5,8,22,0.98)_0%,rgba(5,8,22,0.95)_86%,rgba(5,8,22,0)_100%)] px-1 pb-4 pt-1 backdrop-blur-md lg:static lg:mx-0 lg:space-y-0 lg:bg-none lg:px-0 lg:pb-0 lg:pt-0 lg:backdrop-blur-none">
+          <div className="-mx-1 space-y-4 px-1 pb-4 pt-1 lg:static lg:mx-0 lg:space-y-0 lg:bg-none lg:px-0 lg:pb-0 lg:pt-0 lg:backdrop-blur-none">
             <div className="lg:hidden">
               {isMobileHeaderCompact ? (
-                <div className="glass rounded-[22px] border border-white/10 px-4 py-3">
+                <div className="sticky top-0 z-30 -mx-1 bg-[linear-gradient(180deg,rgba(5,8,22,0.98)_0%,rgba(5,8,22,0.95)_86%,rgba(5,8,22,0)_100%)] px-1 pb-3 pt-1 backdrop-blur-md">
+                  <div className="glass rounded-[22px] border border-white/10 px-4 py-3">
                   <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2">
                     <div className="min-w-0 pr-1">
                       <p className="text-[11px] uppercase tracking-[0.22em] text-amber-300">DuelVault</p>
@@ -1981,7 +1982,7 @@ function AdminShell({ session, onLogout }) {
                       <span className="hidden min-[420px]:inline">Salir</span>
                     </button>
                   </div>
-
+                  </div>
                 </div>
               ) : (
                 <>
