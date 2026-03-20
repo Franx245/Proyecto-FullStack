@@ -790,7 +790,7 @@ export default function DashboardView({
                   description="Ajustá filtros o rango para recuperar la operación visible sin salir del tablero."
                 />
               ) : (
-                <div className="space-y-3 overflow-y-auto pr-1 xl:max-h-[620px]">
+                <div className="space-y-3 overflow-y-auto pr-1 max-h-[420px] md:max-h-[520px] xl:max-h-[620px]">
                   {recentOrders.map((order) => (
                     <OrderListRow
                       key={order.id}
@@ -824,7 +824,7 @@ export default function DashboardView({
                     description="Cuando existan pedidos dentro del recorte activo, acá vas a ver el mix que más tracciona."
                   />
                 ) : (
-                  <div className="grid gap-3 md:grid-cols-2">
+                  <div className="grid gap-3 overflow-y-auto pr-1 max-h-[360px] md:max-h-[440px] md:grid-cols-2 xl:max-h-none">
                     {topSellingProducts.map((product) => (
                       <div key={product.id} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/25 px-4 py-3">
                         <img {...getAdminCardImageProps(product.image)} alt={product.name} className="h-16 w-11 rounded-xl object-cover" />
@@ -932,7 +932,7 @@ export default function DashboardView({
                   No hay actividad reciente para los filtros elegidos.
                 </div>
               ) : (
-                <div className="space-y-2 overflow-y-auto pr-1 xl:max-h-[360px]">
+                <div className="space-y-2 overflow-y-auto pr-1 max-h-[320px] md:max-h-[360px] xl:max-h-[360px]">
                   {recentActivity.map((activity) => {
                     const Icon = activity.icon;
                     return (
