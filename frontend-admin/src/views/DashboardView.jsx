@@ -160,7 +160,7 @@ function matchesGlobalSearch({ needle, order, user, card }) {
 
 function DashboardPanel({ eyebrow, title, action, children, className = "" }) {
   return (
-    <section className={cn("glass rounded-[30px] border border-white/10 p-4 sm:p-5", className)}>
+    <section className={cn("glass relative overflow-hidden rounded-[30px] border border-white/10 p-4 sm:p-5", className)}>
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">{eyebrow}</p>
@@ -202,7 +202,7 @@ function StatusStripButton({ label, count, tone = "default", onClick, helper }) 
     <button
       type="button"
       onClick={onClick}
-      className={cn("group min-w-[220px] rounded-3xl border px-4 py-4 text-left transition duration-200 xl:min-w-0 xl:px-3 xl:py-3", toneClass)}
+      className={cn("group h-full min-w-0 rounded-3xl border px-4 py-4 text-left transition duration-200 xl:px-3 xl:py-3", toneClass)}
     >
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -239,12 +239,12 @@ function IncrementalListPanel({
   const canLoadMore = visibleCount < items.length;
 
   return (
-    <DashboardPanel eyebrow={eyebrow} title={title} action={action} className="h-full min-h-0">
+    <DashboardPanel eyebrow={eyebrow} title={title} action={action}>
       {items.length === 0 ? (
         empty
       ) : (
         <div
-          className={cn("admin-scroll-row overflow-y-auto pr-1 xl:h-full", maxHeight)}
+          className={cn("admin-scroll-row overflow-y-auto pr-1", maxHeight)}
           onScroll={(event) => {
             if (!canLoadMore) {
               return;
@@ -641,9 +641,9 @@ export default function DashboardView({
 
   return (
     <>
-      <div className="space-y-4 xl:grid xl:h-full xl:grid-cols-[minmax(0,1.06fr)_minmax(0,0.94fr)_minmax(320px,0.9fr)] xl:grid-rows-[auto_auto_auto_minmax(0,1fr)] xl:gap-4 xl:space-y-0 xl:overflow-hidden">
-        <div className="glass rounded-[30px] border border-white/10 px-4 py-4 shadow-[0_18px_50px_rgba(0,0,0,0.25)] backdrop-blur-xl sm:px-6 xl:col-span-3 xl:px-5 xl:py-3.5">
-          <div className="mb-3 flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+      <div className="space-y-4 2xl:space-y-5">
+        <div className="glass relative overflow-visible rounded-[30px] border border-white/10 px-4 py-4 shadow-[0_18px_50px_rgba(0,0,0,0.25)] backdrop-blur-xl sm:px-6 xl:px-5 xl:py-4">
+          <div className="mb-4 flex flex-col gap-2 xl:flex-row xl:items-start xl:justify-between">
             <div>
               <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Panel operativo</p>
               <h2 className="mt-1 text-xl font-black text-white xl:text-2xl">{dashboardTitle}</h2>
@@ -651,9 +651,9 @@ export default function DashboardView({
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            <div className="flex min-w-0 flex-1 flex-col gap-3 xl:flex-row xl:items-center">
-              <div className="relative min-w-0 flex-1 xl:max-w-[360px]">
+          <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-start 2xl:justify-between">
+            <div className="grid min-w-0 flex-1 gap-3 xl:grid-cols-[minmax(0,1.1fr)_repeat(3,minmax(180px,1fr))]">
+              <div className="relative min-w-0 xl:col-span-1">
                 <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
                 <input
                   value={globalSearch}
@@ -663,7 +663,7 @@ export default function DashboardView({
                 />
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-3 xl:min-w-[540px] xl:flex-1">
+              <div className="contents xl:col-span-3">
                 <select
                   value={dateRange}
                   onChange={(event) => setDateRange(event.target.value)}
@@ -695,7 +695,7 @@ export default function DashboardView({
               </div>
             </div>
 
-            <div className="flex items-center gap-3 self-end xl:self-auto">
+            <div className="flex items-center gap-3 self-end 2xl:self-auto">
               <div className="relative">
                 <button
                   type="button"
@@ -762,7 +762,7 @@ export default function DashboardView({
           </div>
         </div>
 
-        <div className="flex gap-3 overflow-x-auto pb-1 admin-scroll-row xl:col-span-3 xl:grid xl:grid-cols-4 xl:overflow-visible xl:pb-0">
+        <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4 xl:grid-cols-4">
           <StatusStripButton
             label="pagos pendientes"
             count={metrics.pendingPaymentCount}
@@ -796,14 +796,14 @@ export default function DashboardView({
           />
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4 xl:col-span-3 xl:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4 xl:grid-cols-4">
           <MetricTile label="Ingresos" value={currency(metrics.revenue)} helper="Filtrado por búsqueda y rango" />
           <MetricTile label="Pedidos" value={metrics.orders} accent="info" helper="Volumen operativo visible" />
           <MetricTile label="Ticket promedio" value={currency(metrics.avgTicket)} accent="warn" helper="Solo pedidos que contabilizan" />
           <MetricTile label="Clientes activos" value={metrics.activeCustomers} accent="default" helper="Clientes tocados por el recorte" />
         </div>
 
-        <div className="grid gap-4 xl:col-span-3 xl:min-h-0 xl:grid-cols-[minmax(0,1.06fr)_minmax(0,0.94fr)_minmax(320px,0.9fr)]">
+        <div className="grid gap-4 2xl:grid-cols-[minmax(0,1.12fr)_minmax(0,0.95fr)_minmax(300px,0.88fr)]">
           <IncrementalListPanel
             eyebrow="Operación central"
             title="Pedidos recientes"
@@ -820,7 +820,7 @@ export default function DashboardView({
             }
             items={recentOrders}
             empty={<div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-sm text-slate-400">Sin pedidos para este recorte.</div>}
-            maxHeight="max-h-[360px] xl:h-full"
+            maxHeight="max-h-[520px]"
             renderItem={(order) => (
               <button
                 key={order.id}
@@ -843,7 +843,7 @@ export default function DashboardView({
             )}
           />
 
-          <div className="grid gap-4 xl:min-h-0 xl:grid-rows-[minmax(0,1fr)_minmax(0,1fr)]">
+          <div className="grid content-start gap-4">
             <IncrementalListPanel
               eyebrow="Cobros trabados"
               title="Pagos pendientes"
@@ -861,7 +861,7 @@ export default function DashboardView({
               }
               items={pendingPayments}
               empty={<div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-sm text-slate-400">No hay pagos pendientes con los filtros actuales.</div>}
-              maxHeight="max-h-[260px] xl:h-full"
+              maxHeight="max-h-[280px]"
               renderItem={(order) => (
                 <button
                   key={order.id}
@@ -887,7 +887,7 @@ export default function DashboardView({
               action={<Clock3 className="h-5 w-5 text-sky-300" />}
               items={recentActivity}
               empty={<div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-sm text-slate-400">No hay actividad reciente para los filtros elegidos.</div>}
-              maxHeight="max-h-[260px] xl:h-full"
+              maxHeight="max-h-[300px]"
               renderItem={(activity) => {
                 const Icon = activity.icon;
                 return (
@@ -909,19 +909,18 @@ export default function DashboardView({
             />
           </div>
 
-          <div className="grid gap-4 xl:min-h-0 xl:grid-rows-[minmax(0,1fr)_minmax(0,1fr)]">
+          <div className="grid content-start gap-4">
             <DashboardPanel
               eyebrow="Insights"
               title="Top selling products"
               action={<PackageSearch className="h-5 w-5 text-amber-300" />}
-              className="min-h-0"
             >
               {topSellingProducts.length === 0 ? (
                 <div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-sm text-slate-400">
                   No hay productos vendidos para el recorte actual.
                 </div>
               ) : (
-                <div className="admin-scroll-row space-y-2 overflow-y-auto xl:h-full xl:pr-1">
+                <div className="admin-scroll-row max-h-[240px] space-y-2 overflow-y-auto pr-1">
                   {topSellingProducts.slice(0, 6).map((product) => (
                     <div key={product.id} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/35 px-3 py-2.5">
                       <img {...getAdminCardImageProps(product.image)} alt={product.name} className="h-14 w-10 rounded-xl object-cover" />
@@ -942,7 +941,6 @@ export default function DashboardView({
             <DashboardPanel
               eyebrow={alertMeta.eyebrow}
               title={alertMeta.title}
-              className="min-h-0"
               action={
                 <div className="flex flex-wrap gap-2">
                   <button
@@ -983,7 +981,7 @@ export default function DashboardView({
                   {alertMeta.empty}
                 </div>
               ) : (
-                <div className="admin-scroll-row space-y-2 overflow-y-auto xl:h-full xl:pr-1">
+                <div className="admin-scroll-row max-h-[280px] space-y-2 overflow-y-auto pr-1">
                   {visibleAlerts.slice(0, 6).map((entry) => (
                     <div key={`${alertMode}-${entry.id}`} className={cn(
                       "rounded-2xl border px-3.5 py-3",
@@ -1026,8 +1024,8 @@ export default function DashboardView({
                 </div>
               )}
             </DashboardPanel>
-            <DashboardPanel eyebrow="Acciones y radar" title="Control rápido" className="min-h-0">
-              <div className="admin-scroll-row space-y-4 overflow-y-auto xl:h-full xl:pr-1">
+            <DashboardPanel eyebrow="Acciones y radar" title="Control rápido">
+              <div className="space-y-4">
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3.5">
                     <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Resultados</p>

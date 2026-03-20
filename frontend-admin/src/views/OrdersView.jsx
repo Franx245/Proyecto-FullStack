@@ -192,7 +192,7 @@ export default function OrdersView({ orders, onStatusChange, onDeleteOrder, onCl
           <StatCard title="Resultados" value={filteredOrders.length} />
         </div>
 
-        <div className="mt-4 grid gap-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4 md:grid-cols-[minmax(0,1fr)_220px]">
+        <div className="mt-4 grid gap-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4 lg:grid-cols-[minmax(0,1fr)_240px]">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
             <input
@@ -205,7 +205,7 @@ export default function OrdersView({ orders, onStatusChange, onDeleteOrder, onCl
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value)}
-            className="h-11 rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition focus:border-amber-400"
+            className="h-11 min-w-0 rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition focus:border-amber-400"
           >
             <option value="all">Todos los estados</option>
             {allowedStatuses.map((status) => (

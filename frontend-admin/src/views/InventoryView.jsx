@@ -750,10 +750,10 @@ export default function InventoryView({
     <>
       <div className="space-y-4">
         <div className="glass sticky top-3 z-20 rounded-[30px] border border-white/10 px-4 py-4 shadow-[0_18px_50px_rgba(0,0,0,0.25)] backdrop-blur-xl sm:px-6">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-                <div className="relative min-w-0 flex-1 xl:max-w-xl">
+          <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_minmax(320px,auto)] 2xl:items-start">
+            <div className="min-w-0">
+              <div className="grid gap-3 xl:grid-cols-2 2xl:grid-cols-[minmax(0,1.2fr)_repeat(4,minmax(170px,1fr))]">
+                <div className="relative min-w-0 xl:col-span-2 2xl:col-span-1">
                   <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
                   <input
                     value={searchInput}
@@ -763,22 +763,20 @@ export default function InventoryView({
                   />
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4 xl:min-w-[720px]">
-                  <select value={filters.rarity} onChange={(event) => handleFilterSelect("rarity", event.target.value)} className="h-12 rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400">
-                    <option value="all">Toda rareza</option>
-                    {rarityOptions.map((rarity) => <option key={rarity} value={rarity}>{rarity}</option>)}
-                  </select>
-                  <select value={filters.cardType} onChange={(event) => handleFilterSelect("cardType", event.target.value)} className="h-12 rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400">
-                    <option value="all">Todo tipo</option>
-                    {cardTypeOptions.map((cardType) => <option key={cardType} value={cardType}>{cardType}</option>)}
-                  </select>
-                  <select value={filters.stockStatus} onChange={(event) => handleFilterSelect("stockStatus", event.target.value)} className="h-12 rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400">
-                    {STOCK_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
-                  <select value={filters.visibility} onChange={(event) => handleFilterSelect("visibility", event.target.value)} className="h-12 rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400">
-                    {VISIBILITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
-                </div>
+                <select value={filters.rarity} onChange={(event) => handleFilterSelect("rarity", event.target.value)} className="h-12 rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400">
+                  <option value="all">Toda rareza</option>
+                  {rarityOptions.map((rarity) => <option key={rarity} value={rarity}>{rarity}</option>)}
+                </select>
+                <select value={filters.cardType} onChange={(event) => handleFilterSelect("cardType", event.target.value)} className="h-12 rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400">
+                  <option value="all">Todo tipo</option>
+                  {cardTypeOptions.map((cardType) => <option key={cardType} value={cardType}>{cardType}</option>)}
+                </select>
+                <select value={filters.stockStatus} onChange={(event) => handleFilterSelect("stockStatus", event.target.value)} className="h-12 rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400">
+                  {STOCK_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+                <select value={filters.visibility} onChange={(event) => handleFilterSelect("visibility", event.target.value)} className="h-12 rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400">
+                  {VISIBILITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
               </div>
 
               <div className="mt-4 flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.18em] text-slate-500">
@@ -788,7 +786,7 @@ export default function InventoryView({
                 {catalogSyncToken ? <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-emerald-300">Catálogo sincronizado</span> : null}
               </div>
 
-              <div className="mt-4 grid gap-3 sm:grid-cols-2 2xl:grid-cols-5 xl:grid-cols-5">
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
                   <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Visibles</p>
                   <p className="mt-2 text-xl font-black text-white">{inventoryMetrics.visibleOnPage}</p>
@@ -817,7 +815,7 @@ export default function InventoryView({
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-2 xl:max-w-[420px] xl:justify-end">
+            <div className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-1 2xl:justify-items-stretch">
               <button
                 type="button"
                 onClick={clearFilters}
