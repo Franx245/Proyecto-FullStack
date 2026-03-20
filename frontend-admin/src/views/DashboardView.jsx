@@ -801,59 +801,6 @@ export default function DashboardView({
           </div>
 
           <div className="xl:col-span-4 grid content-start gap-4">
-            <DashboardPanel
-              eyebrow="Cobros"
-              title="Pagos pendientes"
-              action={
-                <button
-                  type="button"
-                  onClick={() => setStatusFilter("pending_payment")}
-                  className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-2 text-sm font-semibold text-rose-100 transition duration-200 hover:bg-rose-500/15"
-                >
-                  Filtrar cobros
-                </button>
-              }
-            >
-              {pendingPayments.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-sm text-slate-400">
-                  No hay pagos pendientes con los filtros actuales.
-                </div>
-              ) : (
-                <div className="space-y-2 overflow-y-auto pr-1 xl:max-h-[300px]">
-                  {pendingPayments.map((order) => (
-                    <div key={order.id} className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="font-semibold text-white">Pedido #{order.id}</p>
-                          <p className="truncate text-sm text-rose-100/80">{order.customer_name || order.customer_email || "Cliente"}</p>
-                        </div>
-                        <span className="text-sm font-bold text-white">{currency(order.total)}</span>
-                      </div>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedOrderId(order.id)}
-                          className="rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-white transition duration-200 hover:bg-white/[0.08]"
-                        >
-                          Abrir
-                        </button>
-                        <ActionStatusButton
-                          onClick={() => onStatusChange(order.id, "paid")}
-                          disabled={updatingOrderId === order.id}
-                          pending={updatingOrderId === order.id}
-                          success={completedOrderActionKey === `${order.id}:paid`}
-                          idleLabel="Marcar pagado"
-                          pendingLabel="Guardando..."
-                          successLabel="Pago confirmado"
-                          className="min-h-10 bg-sky-500 px-3 py-2 text-slate-950 hover:bg-sky-400"
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </DashboardPanel>
-
             {visibleAlerts.length > 0 ? (
               <DashboardPanel
                 eyebrow={alertMeta.eyebrow}
