@@ -1942,7 +1942,7 @@ function AdminShell({ session, onLogout }) {
             ) : null}
           </header>
 
-          {section === "dashboard" ? <div className="min-h-0 lg:flex-1">{renderSection()}</div> : renderSection()}
+          {section === "dashboard" ? <div className="min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">{renderSection()}</div> : renderSection()}
         </main>
       </div>
     </div>
