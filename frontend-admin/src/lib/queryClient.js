@@ -118,7 +118,7 @@ export function createAdminQueryClient() {
         gcTime: QUERY_CACHE_MAX_AGE,
         refetchOnWindowFocus: false,
         refetchOnReconnect: true,
-        refetchOnMount: true,
+        refetchOnMount: false,
         retry: shouldRetryQuery,
         retryDelay: (attempt) => Math.min(1000 * attempt, 2500),
       },

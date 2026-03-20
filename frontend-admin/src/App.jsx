@@ -254,6 +254,17 @@ function applyCardUpdates(card, updates) {
   return nextCard;
 }
 
+function findCardSnapshot(cardId, ...sources) {
+  for (const source of sources) {
+    const foundCard = source?.find?.((card) => card.id === cardId);
+    if (foundCard) {
+      return foundCard;
+    }
+  }
+
+  return null;
+}
+
 function updateCardsResponse(response, updater) {
   if (!response || !Array.isArray(response.cards)) {
     return response;
@@ -1032,7 +1043,6 @@ function AdminShell({ session, onLogout }) {
     queryFn: () => getInventoryCards({ page: inventoryPage, pageSize: 100, ...inventoryFilters }),
     placeholderData: (previousData) => previousData ?? queryClient.getQueryData(inventoryCardsQueryKey),
     staleTime: 1000 * 60 * 3,
-    refetchOnMount: "always",
     refetchOnReconnect: true,
     enabled: Boolean(sectionRequirements.inventoryCards),
     ...getCachedQueryOptions(queryClient, inventoryCardsQueryKey),
@@ -1110,13 +1120,19 @@ function AdminShell({ session, onLogout }) {
       restoreQuerySnapshots(queryClient, context?.previousInventory);
       publishNotice("error", `Carta #${variables.cardId}: ${getReadableMutationError(error)}`);
     },
+    onSuccess: (data, variables) => {
+      const updatedCard = data?.card;
+      if (!updatedCard) {
+        return;
+      }
+
+      queryClient.setQueryData(cardsQueryKey, (current) => updateCardsResponse(current, (card) => (card.id === variables.cardId ? applyCardUpdates(card, updatedCard) : card)));
+      queryClient.setQueriesData({ queryKey: ["inventory-cards", session.admin.id] }, (current) => updateCardsResponse(current, (card) => (card.id === variables.cardId ? applyCardUpdates(card, updatedCard) : card)));
+      publishNotice("success", `Carta #${variables.cardId} actualizada.`);
+    },
     onSettled: () => {
       setSavingCardId(null);
-      void Promise.allSettled([
-        queryClient.invalidateQueries({ queryKey: cardsQueryKey }),
-        queryClient.invalidateQueries({ queryKey: ["inventory-cards", session.admin.id] }),
-        queryClient.invalidateQueries({ queryKey: dashboardQueryKey }),
-      ]);
+      void queryClient.invalidateQueries({ queryKey: dashboardQueryKey });
     },
   });
 
@@ -1666,7 +1682,7 @@ function AdminShell({ session, onLogout }) {
             onDeleteCards={(selection) => deleteCardsMutation.mutateAsync(selection)}
             onSave={(cardId, draft) => updateCardMutation.mutateAsync({
               cardId,
-              expectedUpdatedAt: getResourceUpdatedAt(cards.find((card) => card.id === cardId) || inventoryCardsQuery.data?.cards?.find((card) => card.id === cardId)),
+              expectedUpdatedAt: getResourceUpdatedAt(findCardSnapshot(cardId, inventoryCardsQuery.data?.cards, cards)),
               updates: {
                 price: Number(draft.price),
                 stock: Number(draft.stock),
