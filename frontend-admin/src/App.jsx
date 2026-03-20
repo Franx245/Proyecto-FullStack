@@ -82,14 +82,14 @@ const UsersView = lazyWithPreload(() => import("./views/UsersView"));
 const WhatsappSettingsView = lazyWithPreload(() => import("./views/WhatsappSettingsView"));
 
 const sections = [
-  { key: "dashboard", label: "🃏 Panel", icon: BarChart3 },
-  { key: "inventory", label: "📦 Inventario", icon: Boxes },
-  { key: "home", label: "✨ Portada", icon: Star },
-  { key: "custom", label: "🛍️ Tienda custom", icon: PackageSearch },
-  { key: "analytics", label: "📈 Analíticas", icon: TrendingUp },
-  { key: "orders", label: "🧾 Pedidos", icon: ReceiptText },
-  { key: "whatsapp", label: "📬 Contacto", icon: MessageCircle },
-  { key: "users", label: "👥 Usuarios", icon: Users },
+  { key: "dashboard", label: "Panel", icon: BarChart3 },
+  { key: "inventory", label: "Inventario", icon: Boxes },
+  { key: "home", label: "Portada", icon: Star },
+  { key: "custom", label: "Tienda custom", icon: PackageSearch },
+  { key: "analytics", label: "Analíticas", icon: TrendingUp },
+  { key: "orders", label: "Pedidos", icon: ReceiptText },
+  { key: "whatsapp", label: "Contacto", icon: MessageCircle },
+  { key: "users", label: "Usuarios", icon: Users },
 ];
 
 const SECTION_PATHS = {
@@ -115,35 +115,35 @@ const DEFAULT_INVENTORY_FILTERS = {
 
 const SECTION_META = {
   dashboard: {
-    title: "🃏 Panel central",
+    title: "Panel central",
     description: "Resumen del duelo comercial con métricas, ventas y alertas críticas.",
   },
   inventory: {
-    title: "📦 Inventario",
+    title: "Inventario",
     description: "Precios, stock, visibilidad y sincronización del catálogo principal.",
   },
   home: {
-    title: "✨ Portada",
+    title: "Portada",
     description: "Control de destacadas y últimos ingresos para la tienda pública.",
   },
   custom: {
-    title: "🛍️ Tienda custom",
+    title: "Tienda custom",
     description: "Categorías y publicaciones propias fuera del catálogo principal.",
   },
   analytics: {
-    title: "📈 Analíticas",
+    title: "Analíticas",
     description: "Ingresos, altas y comportamiento comercial histórico del negocio.",
   },
   orders: {
-    title: "🧾 Pedidos",
+    title: "Pedidos",
     description: "Cobros, estados, tracking y limpieza operativa.",
   },
   whatsapp: {
-    title: "📬 Contacto",
+    title: "Contacto",
     description: "Canales de soporte e inbox de consultas recibidas.",
   },
   users: {
-    title: "👥 Usuarios",
+    title: "Usuarios",
     description: "Roles, actividad y resumen comercial por cliente.",
   },
 };
@@ -523,8 +523,8 @@ function SectionNav({ section, onSectionChange, onSectionIntent, className = "" 
           onMouseEnter={() => onSectionIntent?.(key)}
           onFocus={() => onSectionIntent?.(key)}
           className={cn(
-            "flex min-h-12 shrink-0 items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-semibold transition whitespace-nowrap lg:w-full",
-            section === key ? "bg-amber-500 text-slate-950" : "bg-white/[0.03] text-slate-300 hover:bg-white/[0.08]"
+            "flex min-h-11 shrink-0 items-center gap-3 rounded-xl border px-3.5 py-2.5 text-left text-sm font-medium transition whitespace-nowrap lg:w-full",
+            section === key ? "border-amber-400/30 bg-amber-400/12 text-amber-100" : "border-transparent bg-white/[0.02] text-slate-300 hover:border-white/10 hover:bg-white/[0.05]"
           )}
         >
           <Icon className="h-4 w-4 shrink-0" />
@@ -559,8 +559,8 @@ function MobileSectionNav({ section, onSectionChange, onSectionIntent }) {
             onClick={() => onSectionChange(key)}
             onTouchStart={() => onSectionIntent?.(key)}
             className={cn(
-              "flex min-h-12 items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-semibold transition",
-              section === key ? "bg-amber-500 text-slate-950" : "bg-white/[0.03] text-slate-300 hover:bg-white/[0.08]"
+              "flex min-h-11 items-center gap-3 rounded-xl border px-3.5 py-2.5 text-left text-sm font-medium transition",
+              section === key ? "border-amber-400/30 bg-amber-400/12 text-amber-100" : "border-transparent bg-white/[0.02] text-slate-300 hover:border-white/10 hover:bg-white/[0.05]"
             )}
           >
             <Icon className="h-4 w-4 shrink-0" />
@@ -1863,30 +1863,32 @@ function AdminShell({ session, onLogout }) {
 
   return (
     <div className="w-full min-h-screen px-3 py-3 sm:px-4 md:px-6 md:py-4">
-      <div className="grid w-full gap-4 lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-6">
-        <aside className="hidden glass self-start rounded-[32px] border border-white/10 p-5 lg:sticky lg:top-4 lg:block lg:h-fit">
-          <div className="mb-8">
+      <div className="grid w-full gap-4 lg:grid-cols-[248px_minmax(0,1fr)] lg:gap-5 xl:grid-cols-[256px_minmax(0,1fr)]">
+        <aside className="hidden glass self-start rounded-[24px] border border-white/10 p-4 lg:sticky lg:top-4 lg:block lg:h-fit">
+          <div className="mb-6">
             <p className="text-xs uppercase tracking-[0.24em] text-amber-300">DuelVault</p>
-                <h1 className="mt-3 text-2xl font-black text-white">Santuario Admin</h1>
-                <p className="mt-2 text-sm text-slate-400">Inventario, alertas y métricas en un tablero de duelo.</p>
+                <h1 className="mt-2 text-xl font-black text-white">Santuario Admin</h1>
+                <p className="mt-2 text-sm text-slate-400">Operación diaria, inventario y control comercial.</p>
           </div>
 
-          <div className="mb-6 rounded-3xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-slate-300">
+          <div className="mb-5 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">
             <p className="font-semibold text-white">{session.admin.email}</p>
-            <p className="mt-1 inline-flex rounded-full border border-white/10 px-3 py-1 text-[11px] font-bold tracking-[0.2em] text-amber-300">{userRoleLabel(session.admin.role)}</p>
+            <p className="mt-1 inline-flex rounded-full border border-white/10 px-3 py-1 text-[11px] font-semibold tracking-[0.18em] text-amber-300">{userRoleLabel(session.admin.role)}</p>
           </div>
 
           <SectionNav section={section} onSectionChange={handleSectionChange} onSectionIntent={handleSectionIntent} className="space-y-2" />
 
-          <div className="mt-8 rounded-3xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-100">
-            <p className="font-semibold">⚠️ Alertas</p>
-            <p className="mt-2">Stock bajo: {dashboard.metrics.lowStockCount}</p>
-            <p>Agotadas: {dashboard.metrics.outOfStockCount}</p>
+          <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-300">
+            <p className="font-semibold text-white">Radar rápido</p>
+            <div className="mt-3 space-y-2 text-sm">
+              <p>Stock bajo: <span className="font-semibold text-amber-200">{dashboard.metrics.lowStockCount}</span></p>
+              <p>Agotadas: <span className="font-semibold text-rose-200">{dashboard.metrics.outOfStockCount}</span></p>
+            </div>
           </div>
 
           <button
             onClick={onLogout}
-            className="mt-8 flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.06]"
+            className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.06]"
           >
             <LogOut className="h-4 w-4" />
             Cerrar sesión

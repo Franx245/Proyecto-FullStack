@@ -1,16 +1,12 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
-  Bell,
   Boxes,
-  ChevronDown,
   Clock3,
   PackageSearch,
   ReceiptText,
   Search,
   ShieldAlert,
   Truck,
-  UserRound,
-  Users,
   X,
 } from "lucide-react";
 import {
@@ -25,7 +21,7 @@ import {
   userRoleLabel,
 } from "./shared";
 
-const DASHBOARD_VIEW_STATE_KEY = "duelvault_admin_dashboard_view_state_v1";
+const DASHBOARD_VIEW_STATE_KEY = "duelvault_admin_dashboard_view_state_v2";
 
 function canUseStorage() {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
@@ -41,6 +37,20 @@ function readDashboardViewState() {
   } catch {
     return {};
   }
+}
+
+function scheduleIdleTask(callback) {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+
+  if ("requestIdleCallback" in window) {
+    const callbackId = window.requestIdleCallback(callback, { timeout: 1200 });
+    return () => window.cancelIdleCallback?.(callbackId);
+  }
+
+  const timeoutId = window.setTimeout(callback, 180);
+  return () => window.clearTimeout(timeoutId);
 }
 
 const DATE_RANGE_OPTIONS = [
@@ -61,17 +71,17 @@ const STATUS_OPTIONS = [
 
 const ALERT_COPY = {
   low_stock: {
-    eyebrow: "Reposición urgente",
+    eyebrow: "Alertas de inventario",
     title: "Stock bajo",
-    empty: "No hay cartas en stock bajo con los filtros actuales.",
-    cta: "Reponer",
+    empty: "No hay cartas con stock bajo para el recorte actual.",
+    cta: "Revisar",
     tone: "warn",
   },
   out_of_stock: {
-    eyebrow: "Fricción de catálogo",
-    title: "Sin stock",
-    empty: "No hay cartas agotadas con los filtros actuales.",
-    cta: "Ver",
+    eyebrow: "Alertas de inventario",
+    title: "Agotadas",
+    empty: "No hay cartas agotadas para el recorte actual.",
+    cta: "Revisar",
     tone: "danger",
   },
 };
@@ -153,11 +163,11 @@ function matchesGlobalSearch({ needle, order, user, card }) {
 
 function DashboardPanel({ eyebrow, title, action, children, className = "" }) {
   return (
-    <section className={cn("glass relative overflow-hidden rounded-[30px] border border-white/10 p-4 sm:p-5", className)}>
-      <div className="flex items-start justify-between gap-4">
+    <section className={cn("glass rounded-2xl border border-white/10 p-4 shadow-[0_8px_30px_rgba(8,12,24,0.22)] md:p-5", className)}>
+      <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">{eyebrow}</p>
-          <h3 className="mt-1.5 text-lg font-black text-white sm:text-xl">{title}</h3>
+          {eyebrow ? <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">{eyebrow}</p> : null}
+          <h3 className="mt-1 text-lg font-black text-white">{title}</h3>
         </div>
         {action}
       </div>
@@ -166,100 +176,119 @@ function DashboardPanel({ eyebrow, title, action, children, className = "" }) {
   );
 }
 
-function MetricTile({ label, value, accent = "default", helper }) {
-  const accentClass = {
-    default: "border-white/10 bg-white/[0.04]",
-    info: "border-sky-400/20 bg-sky-400/10",
-    warn: "border-amber-400/20 bg-amber-400/10",
-    danger: "border-rose-500/20 bg-rose-500/10",
-  }[accent];
-
-  return (
-    <div className={cn("rounded-3xl border px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]", accentClass)}>
-      <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">{label}</p>
-      <p className="mt-2.5 text-2xl font-black text-white">{value}</p>
-      {helper ? <p className="mt-1.5 text-xs text-slate-400">{helper}</p> : null}
-    </div>
-  );
-}
-
-function StatusStripButton({ label, count, tone = "default", onClick, helper }) {
+function KpiCard({ label, value, helper, tone = "default", onClick }) {
   const toneClass = {
-    default: "border-white/10 bg-white/[0.04] hover:border-white/20 hover:bg-white/[0.08]",
-    warn: "border-amber-400/20 bg-amber-400/10 hover:border-amber-300/35 hover:bg-amber-400/15",
-    danger: "border-rose-500/20 bg-rose-500/10 hover:border-rose-300/35 hover:bg-rose-500/15",
-    success: "border-emerald-400/20 bg-emerald-400/10 hover:border-emerald-300/35 hover:bg-emerald-400/15",
+    default: "border-white/10 bg-white/[0.03]",
+    danger: "border-rose-500/20 bg-rose-500/10",
+    success: "border-emerald-400/20 bg-emerald-400/10",
+    info: "border-sky-400/20 bg-sky-400/10",
   }[tone];
 
+  const content = (
+    <div className={cn("h-full rounded-2xl border px-4 py-4 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]", toneClass)}>
+      <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{label}</p>
+      <p className="mt-3 text-3xl font-black text-white">{value}</p>
+      {helper ? <p className="mt-2 text-sm text-slate-400">{helper}</p> : null}
+    </div>
+  );
+
+  if (typeof onClick !== "function") {
+    return content;
+  }
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn("group h-full min-w-0 rounded-3xl border px-4 py-4 text-left transition duration-200 xl:px-3 xl:py-3", toneClass)}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-2xl font-black text-white">{count}</p>
-          <p className="mt-1 text-sm font-semibold text-slate-200">{label}</p>
-        </div>
-        <span className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.22em] text-slate-300 transition group-hover:border-white/20">
-          Ver
-        </span>
-      </div>
-      {helper ? <p className="mt-3 text-xs text-slate-400">{helper}</p> : null}
+    <button type="button" onClick={onClick} className="text-left transition duration-200 hover:-translate-y-0.5 hover:opacity-100">
+      {content}
     </button>
   );
 }
 
-function IncrementalListPanel({
-  eyebrow,
-  title,
-  action,
-  items,
-  empty,
-  maxHeight = "max-h-[340px] xl:max-h-none",
-  initialCount = 6,
-  step = 6,
-  renderItem,
+function InlineFilterChip({ children, tone = "default" }) {
+  const toneClass = {
+    default: "border-white/10 bg-white/[0.03] text-slate-300",
+    warn: "border-amber-400/20 bg-amber-400/10 text-amber-100",
+  }[tone];
+
+  return <span className={cn("rounded-full border px-3 py-1.5 text-xs", toneClass)}>{children}</span>;
+}
+
+function OrderListRow({
+  order,
+  onOpen,
+  onStatusChange,
+  onRequestCancel,
+  canCancelOrders,
+  updatingOrderId,
+  completedOrderActionKey,
 }) {
-  const [visibleCount, setVisibleCount] = useState(initialCount);
-
-  useEffect(() => {
-    setVisibleCount(initialCount);
-  }, [initialCount, items]);
-
-  const visibleItems = items.slice(0, visibleCount);
-  const canLoadMore = visibleCount < items.length;
+  const isBusy = updatingOrderId === order.id;
+  const canMarkPaid = order.status === "pending_payment";
+  const canMarkShipped = order.status === "paid";
 
   return (
-    <DashboardPanel eyebrow={eyebrow} title={title} action={action}>
-      {items.length === 0 ? (
-        empty
-      ) : (
-        <div
-          className={cn("admin-scroll-row overflow-y-auto pr-1", maxHeight)}
-          onScroll={(event) => {
-            if (!canLoadMore) {
-              return;
-            }
-
-            const { scrollTop, clientHeight, scrollHeight } = event.currentTarget;
-            if (scrollTop + clientHeight >= scrollHeight - 80) {
-              setVisibleCount((current) => Math.min(items.length, current + step));
-            }
-          }}
-        >
-          <div className="space-y-2">
-            {visibleItems.map((item, index) => renderItem(item, index))}
+    <article className="rounded-2xl border border-white/10 bg-slate-950/25 px-4 py-4">
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1.3fr)_auto_auto] xl:items-center">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-base font-bold text-white">Pedido #{order.id}</p>
+            <StatusBadge status={order.status} />
           </div>
-          {canLoadMore ? (
-            <div className="mt-3 rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-3 text-center text-xs uppercase tracking-[0.22em] text-slate-500">
-              Scroll para cargar más
-            </div>
+          <p className="mt-2 truncate text-sm text-slate-300">{order.customer_name || order.customer_email || "Cliente sin nombre"}</p>
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+            <span>{new Date(order.created_at).toLocaleString("es-AR")}</span>
+            <span>{order.shipping_label || "Envío"}</span>
+            <span>{currency(order.total)}</span>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+          <button
+            type="button"
+            onClick={() => onOpen(order.id)}
+            className="min-h-11 rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-200 transition duration-200 hover:bg-white/[0.06]"
+          >
+            Ver detalle
+          </button>
+
+          {canMarkPaid ? (
+            <ActionStatusButton
+              onClick={() => onStatusChange(order.id, "paid")}
+              disabled={isBusy}
+              pending={isBusy}
+              success={completedOrderActionKey === `${order.id}:paid`}
+              idleLabel="Marcar pagado"
+              pendingLabel="Guardando..."
+              successLabel="Pago confirmado"
+              className="bg-sky-500 text-slate-950 hover:bg-sky-400"
+            />
+          ) : null}
+
+          {canMarkShipped ? (
+            <ActionStatusButton
+              onClick={() => onStatusChange(order.id, "shipped")}
+              disabled={isBusy}
+              pending={isBusy}
+              success={completedOrderActionKey === `${order.id}:shipped`}
+              idleLabel="Marcar enviado"
+              pendingLabel="Guardando..."
+              successLabel="Enviado"
+              className="bg-emerald-500 text-slate-950 hover:bg-emerald-400"
+            />
+          ) : null}
+
+          {canCancelOrders && order.status !== "cancelled" ? (
+            <button
+              type="button"
+              onClick={() => onRequestCancel(order.id)}
+              disabled={isBusy}
+              className="min-h-11 rounded-xl border border-rose-500/20 px-4 py-3 text-sm font-semibold text-rose-200 transition duration-200 hover:bg-rose-500/10 disabled:opacity-60"
+            >
+              Cancelar
+            </button>
           ) : null}
         </div>
-      )}
-    </DashboardPanel>
+      </div>
+    </article>
   );
 }
 
@@ -305,13 +334,13 @@ function OrderDrawer({
 
         <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5 sm:px-6">
           <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4">
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
               <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Cliente</p>
               <p className="mt-3 text-lg font-bold text-white">{order.customer_name || "Cliente sin nombre"}</p>
               <p className="mt-1 text-sm text-slate-400">{order.customer_email || "Sin email"}</p>
               {order.customer_phone ? <p className="mt-1 text-sm text-slate-500">{order.customer_phone}</p> : null}
             </div>
-            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4">
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
               <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Cobro y envío</p>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <StatusBadge status={order.status} />
@@ -324,7 +353,7 @@ function OrderDrawer({
             </div>
           </div>
 
-          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Acciones rápidas</p>
@@ -374,7 +403,7 @@ function OrderDrawer({
             </div>
           </div>
 
-          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
             <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Productos</p>
             <div className="mt-4 space-y-3">
               {(order.items || []).map((item) => (
@@ -396,7 +425,7 @@ function OrderDrawer({
             </div>
           </div>
 
-          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
             <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Entrega</p>
             <p className="mt-3 text-sm text-slate-300">{order.shipping_address || "Sin dirección registrada"}</p>
           </div>
@@ -419,15 +448,16 @@ export default function DashboardView({
   onNavigateSectionIntent,
   onStatusChange,
 }) {
-  const persistedAlertMode = readDashboardViewState().alertMode;
-  const [globalSearch, setGlobalSearch] = useState(() => readDashboardViewState().globalSearch || "");
-  const [dateRange, setDateRange] = useState(() => readDashboardViewState().dateRange || "30d");
-  const [statusFilter, setStatusFilter] = useState(() => readDashboardViewState().statusFilter || "all");
-  const [userFilter, setUserFilter] = useState(() => readDashboardViewState().userFilter || "all");
-  const [alertMode, setAlertMode] = useState(() => (persistedAlertMode === "out_of_stock" ? "out_of_stock" : "low_stock"));
+  const persistedState = readDashboardViewState();
+  const [globalSearch, setGlobalSearch] = useState(() => persistedState.globalSearch || "");
+  const [dateRange, setDateRange] = useState(() => persistedState.dateRange || "30d");
+  const [statusFilter, setStatusFilter] = useState(() => persistedState.statusFilter || "all");
+  const [userFilter, setUserFilter] = useState(() => persistedState.userFilter || "all");
+  const [alertMode, setAlertMode] = useState(() => (persistedState.alertMode === "out_of_stock" ? "out_of_stock" : "low_stock"));
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
-  const [showNotifications, setShowNotifications] = useState(() => Boolean(readDashboardViewState().showNotifications));
+  const [showActivity, setShowActivity] = useState(() => Boolean(persistedState.showActivity));
+  const [insightsReady, setInsightsReady] = useState(false);
   const deferredSearch = useDeferredValue(globalSearch);
 
   useEffect(() => {
@@ -443,10 +473,15 @@ export default function DashboardView({
         statusFilter,
         userFilter,
         alertMode,
-        showNotifications,
+        showActivity,
       })
     );
-  }, [alertMode, dateRange, globalSearch, showNotifications, statusFilter, userFilter]);
+  }, [alertMode, dateRange, globalSearch, showActivity, statusFilter, userFilter]);
+
+  useEffect(() => {
+    const cancel = scheduleIdleTask(() => setInsightsReady(true));
+    return cancel;
+  }, []);
 
   const cutoffDate = useMemo(() => getCutoffDate(dateRange), [dateRange]);
 
@@ -509,17 +544,46 @@ export default function DashboardView({
   const metrics = useMemo(() => {
     const countedOrders = filteredOrders.filter((order) => order.counts_for_dashboard && order.status !== "cancelled");
     const revenue = countedOrders.reduce((accumulator, order) => accumulator + Number(order.total || 0), 0);
-    const activeCustomers = new Set(filteredOrders.map((order) => getCustomerFilterValue(order))).size;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const ordersToday = filteredOrders.filter((order) => {
+      const createdAt = order.created_at ? new Date(order.created_at) : null;
+      return createdAt && createdAt >= today;
+    }).length;
+    const activeUsers = new Set(filteredOrders.map((order) => getCustomerFilterValue(order))).size;
     const pendingPaymentCount = filteredOrders.filter((order) => order.status === "pending_payment").length;
 
     return {
       revenue,
-      orders: filteredOrders.length,
-      avgTicket: countedOrders.length ? revenue / countedOrders.length : 0,
-      activeCustomers,
+      ordersToday,
+      activeUsers,
       pendingPaymentCount,
+      visibleOrders: filteredOrders.length,
+      visibleUsers: filteredUsers.length,
+      visibleCards: filteredCards.length,
+      avgTicket: countedOrders.length ? revenue / countedOrders.length : 0,
     };
-  }, [filteredOrders]);
+  }, [filteredCards.length, filteredOrders, filteredUsers.length]);
+
+  const recentOrders = useMemo(
+    () => [...filteredOrders].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 8),
+    [filteredOrders]
+  );
+
+  const pendingPayments = useMemo(
+    () => filteredOrders.filter((order) => order.status === "pending_payment").slice(0, 6),
+    [filteredOrders]
+  );
+
+  const lowStockCards = useMemo(
+    () => filteredCards.filter((card) => card.status === "low_stock").slice(0, 6),
+    [filteredCards]
+  );
+
+  const outOfStockCards = useMemo(
+    () => filteredCards.filter((card) => card.status === "out_of_stock").slice(0, 6),
+    [filteredCards]
+  );
 
   const topSellingProducts = useMemo(() => {
     const cardsById = new Map(cards.map((card) => [card.id, card]));
@@ -548,13 +612,8 @@ export default function DashboardView({
       .slice(0, 6);
   }, [cards, filteredOrders]);
 
-  const recentOrders = useMemo(
-    () => [...filteredOrders].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 8),
-    [filteredOrders]
-  );
-
   const recentActivity = useMemo(() => {
-    const orderActivity = filteredOrders.slice(0, 12).map((order) => ({
+    const orderActivity = filteredOrders.slice(0, 10).map((order) => ({
       id: `order-${order.id}`,
       title: `Pedido #${order.id}`,
       description: `${order.customer_name || order.customer_email || "Cliente"} · ${orderStatusLabel(order.status)}`,
@@ -563,55 +622,19 @@ export default function DashboardView({
       icon: ReceiptText,
     }));
 
-    const userActivity = filteredUsers.slice(0, 8).map((user) => ({
+    const userActivity = filteredUsers.slice(0, 6).map((user) => ({
       id: `user-${user.id}`,
       title: user.full_name || user.username || user.email || `Usuario ${user.id}`,
-      description: `Alta nueva · ${userRoleLabel(user.role)}`,
+      description: `Actividad de ${userRoleLabel(user.role)}`,
       createdAt: user.created_at,
       tone: "default",
-      icon: Users,
+      icon: ShieldAlert,
     }));
 
     return [...orderActivity, ...userActivity]
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-      .slice(0, 7);
+      .slice(0, 10);
   }, [filteredOrders, filteredUsers]);
-
-  const lowStockCards = useMemo(
-    () => filteredCards.filter((card) => card.status === "low_stock").slice(0, 6),
-    [filteredCards]
-  );
-  const outOfStockCards = useMemo(
-    () => filteredCards.filter((card) => card.status === "out_of_stock").slice(0, 6),
-    [filteredCards]
-  );
-  const pendingPayments = useMemo(
-    () => filteredOrders.filter((order) => order.status === "pending_payment").slice(0, 6),
-    [filteredOrders]
-  );
-  const readyToShipCount = useMemo(
-    () => filteredOrders.filter((order) => order.status === "paid").length,
-    [filteredOrders]
-  );
-
-  const notifications = useMemo(() => {
-    const items = [];
-
-    if (metrics.pendingPaymentCount) {
-      items.push({ id: "pending", label: `${metrics.pendingPaymentCount} pagos pendientes`, tone: "danger" });
-    }
-    if (outOfStockCards.length) {
-      items.push({ id: "out", label: `${outOfStockCards.length} cartas agotadas`, tone: "danger" });
-    }
-    if (lowStockCards.length) {
-      items.push({ id: "low", label: `${lowStockCards.length} cartas en stock bajo`, tone: "warn" });
-    }
-    if (readyToShipCount) {
-      items.push({ id: "ship", label: `${readyToShipCount} pedidos listos para envío`, tone: "default" });
-    }
-
-    return items;
-  }, [lowStockCards.length, metrics.pendingPaymentCount, outOfStockCards.length, readyToShipCount]);
 
   const selectedOrder = useMemo(
     () => orders.find((order) => order.id === selectedOrderId) || null,
@@ -630,300 +653,200 @@ export default function DashboardView({
   }[alertMode] || lowStockCards;
 
   const alertMeta = ALERT_COPY[alertMode];
-  const dashboardTitle = dashboard?.metrics?.totalRevenue ? "Centro de mando comercial" : "Centro de mando operativo";
+  const activeFilterChips = [
+    DATE_RANGE_OPTIONS.find((option) => option.value === dateRange)?.label,
+    statusFilter !== "all" ? STATUS_OPTIONS.find((option) => option.value === statusFilter)?.label : null,
+    userFilter !== "all" ? customerOptions.find((option) => option.value === userFilter)?.label : null,
+    globalSearch.trim() ? `Busqueda: ${globalSearch.trim()}` : null,
+  ].filter(Boolean);
+
+  const globalMetrics = dashboard?.metrics || {};
 
   return (
     <>
-      <div className="space-y-4 2xl:space-y-5">
-        <div className="glass relative overflow-visible rounded-[30px] border border-white/10 px-4 py-4 shadow-[0_18px_50px_rgba(0,0,0,0.25)] backdrop-blur-xl sm:px-6 xl:px-5 xl:py-4">
-          <div className="mb-4 flex flex-col gap-2 xl:flex-row xl:items-start xl:justify-between">
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Panel operativo</p>
-              <h2 className="mt-1 text-xl font-black text-white xl:text-2xl">{dashboardTitle}</h2>
-              <p className="mt-1 text-sm text-slate-400">Buscá, filtrá y accioná sin salir del flujo del operador.</p>
+      <div className="grid gap-4 lg:gap-6">
+        <DashboardPanel eyebrow="Panel operativo" title="Centro de mando comercial" className="overflow-visible">
+          <div className="grid gap-4 xl:grid-cols-12 xl:items-end">
+            <div className="xl:col-span-4">
+              <p className="max-w-2xl text-sm leading-6 text-slate-400">
+                Priorizá cobros, pedidos y alertas sin perder contexto del recorte activo. El resumen superior responde a tus filtros actuales.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <InlineFilterChip>Base global: {currency(globalMetrics.totalRevenue)}</InlineFilterChip>
+                <InlineFilterChip>{globalMetrics.totalOrders || 0} pedidos históricos</InlineFilterChip>
+                <InlineFilterChip tone="warn">{globalMetrics.pendingPaymentCount || 0} pagos pendientes</InlineFilterChip>
+              </div>
             </div>
-          </div>
 
-          <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-start 2xl:justify-between">
-            <div className="grid min-w-0 flex-1 gap-3 xl:grid-cols-[minmax(0,1.1fr)_repeat(3,minmax(180px,1fr))]">
-              <div className="relative min-w-0 xl:col-span-1">
+            <div className="xl:col-span-8 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className="relative min-w-0 md:col-span-2 xl:col-span-1">
                 <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
                 <input
                   value={globalSearch}
                   onChange={(event) => setGlobalSearch(event.target.value)}
                   placeholder="Buscar pedidos, usuarios o productos"
-                  className="h-11 w-full rounded-2xl border border-white/10 bg-slate-950/70 pl-11 pr-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400"
+                  className="h-12 w-full rounded-xl border border-white/10 bg-slate-950/70 pl-11 pr-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400"
                 />
               </div>
 
-              <div className="contents xl:col-span-3">
-                <select
-                  value={dateRange}
-                  onChange={(event) => setDateRange(event.target.value)}
-                  className="h-11 rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400"
-                >
-                  {DATE_RANGE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-                <select
-                  value={statusFilter}
-                  onChange={(event) => setStatusFilter(event.target.value)}
-                  className="h-11 rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400"
-                >
-                  {STATUS_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-                <select
-                  value={userFilter}
-                  onChange={(event) => setUserFilter(event.target.value)}
-                  className="h-11 rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400"
-                >
-                  <option value="all">Todos los usuarios</option>
-                  {customerOptions.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
+              <select
+                value={dateRange}
+                onChange={(event) => setDateRange(event.target.value)}
+                className="h-12 rounded-xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400"
+              >
+                {DATE_RANGE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
 
-            <div className="flex items-center gap-3 self-end 2xl:self-auto">
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setShowNotifications((current) => !current)}
-                  className="relative rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-slate-200 transition duration-200 hover:bg-white/[0.08]"
-                >
-                  <Bell className="h-5 w-5" />
-                  {notifications.length ? (
-                    <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white">
-                      {notifications.length}
-                    </span>
-                  ) : null}
-                </button>
+              <select
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value)}
+                className="h-12 rounded-xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400"
+              >
+                {STATUS_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
 
-                {showNotifications ? (
-                  <div className="absolute right-0 top-[calc(100%+12px)] z-30 w-[320px] rounded-3xl border border-white/10 bg-[#090d1f]/96 p-4 shadow-2xl">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-semibold text-white">Notificaciones</p>
-                      <button type="button" onClick={() => setShowNotifications(false)} className="text-slate-400 transition hover:text-white">
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-                    <div className="mt-3 space-y-2">
-                      {notifications.length === 0 ? (
-                        <p className="rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-slate-400">Sin alertas críticas para este recorte.</p>
-                      ) : notifications.map((item) => (
-                        <div key={item.id} className={cn(
-                          "rounded-2xl border px-3 py-3 text-sm",
-                          item.tone === "danger" ? "border-rose-500/20 bg-rose-500/10 text-rose-100" : item.tone === "warn" ? "border-amber-400/20 bg-amber-400/10 text-amber-100" : "border-white/10 bg-white/[0.03] text-slate-200"
-                        )}>
-                          {item.label}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-
-              <details className="relative">
-                <summary className="flex cursor-pointer list-none items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-sm text-slate-200 transition duration-200 hover:bg-white/[0.08]">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-300">
-                    <UserRound className="h-4 w-4" />
-                  </div>
-                  <div className="hidden text-left sm:block">
-                    <p className="font-semibold text-white">{admin.email}</p>
-                    <p className="text-xs text-slate-400">{userRoleLabel(admin.role)}</p>
-                  </div>
-                  <ChevronDown className="h-4 w-4 text-slate-400" />
-                </summary>
-                <div className="absolute right-0 top-[calc(100%+12px)] z-30 w-[260px] rounded-3xl border border-white/10 bg-[#090d1f]/96 p-4 shadow-2xl">
-                  <p className="text-sm font-semibold text-white">Sesión activa</p>
-                  <p className="mt-1 text-xs text-slate-400">Operador: {userRoleLabel(admin.role)}</p>
-                  <div className="mt-4 space-y-2 text-sm">
-                    <button type="button" onMouseEnter={() => onNavigateSectionIntent?.("users")} onFocus={() => onNavigateSectionIntent?.("users")} onClick={() => onNavigateSection("users")} className="w-full rounded-2xl border border-white/10 px-3 py-3 text-left text-slate-200 transition duration-200 hover:bg-white/[0.06]">
-                      Ver usuarios
-                    </button>
-                    <button type="button" onMouseEnter={() => onNavigateSectionIntent?.("orders")} onFocus={() => onNavigateSectionIntent?.("orders")} onClick={() => onNavigateSection("orders")} className="w-full rounded-2xl border border-white/10 px-3 py-3 text-left text-slate-200 transition duration-200 hover:bg-white/[0.06]">
-                      Ir a pedidos
-                    </button>
-                  </div>
-                </div>
-              </details>
+              <select
+                value={userFilter}
+                onChange={(event) => setUserFilter(event.target.value)}
+                className="h-12 rounded-xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400"
+              >
+                <option value="all">Todos los usuarios</option>
+                {customerOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
             </div>
           </div>
-        </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4 xl:grid-cols-4">
-          <StatusStripButton
-            label="pagos pendientes"
-            count={metrics.pendingPaymentCount}
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <InlineFilterChip>{metrics.visibleOrders} pedidos visibles</InlineFilterChip>
+            <InlineFilterChip>{metrics.visibleUsers} usuarios visibles</InlineFilterChip>
+            <InlineFilterChip>{metrics.visibleCards} cartas analizadas</InlineFilterChip>
+            {activeFilterChips.map((chip) => <InlineFilterChip key={chip}>{chip}</InlineFilterChip>)}
+          </div>
+        </DashboardPanel>
+
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <KpiCard
+            label="Pagos pendientes"
+            value={metrics.pendingPaymentCount}
+            helper="Cobros por resolver"
             tone={metrics.pendingPaymentCount ? "danger" : "default"}
-            helper="Cobros por resolver ahora"
-            onClick={() => {
-              setStatusFilter("pending_payment");
-              setSelectedOrderId(pendingPayments[0]?.id || null);
-            }}
+            onClick={() => setStatusFilter("pending_payment")}
           />
-          <StatusStripButton
-            label="cartas agotadas"
-            count={outOfStockCards.length}
-            tone={outOfStockCards.length ? "danger" : "default"}
-            helper="Productos que ya cortan ventas"
-            onClick={() => setAlertMode("out_of_stock")}
+          <KpiCard
+            label="Pedidos hoy"
+            value={metrics.ordersToday}
+            helper="Ingresados desde las 00:00"
+            tone="info"
           />
-          <StatusStripButton
-            label="stock bajo"
-            count={lowStockCards.length}
-            tone={lowStockCards.length ? "warn" : "default"}
-            helper="Reposiciones a vigilar"
-            onClick={() => setAlertMode("low_stock")}
+          <KpiCard
+            label="Ingresos"
+            value={currency(metrics.revenue)}
+            helper="Solo pedidos que contabilizan"
+            tone="success"
           />
-          <StatusStripButton
-            label="listos para envío"
-            count={readyToShipCount}
-            tone={readyToShipCount ? "success" : "default"}
-            helper="Pedidos ya cobrados"
-            onClick={() => setStatusFilter("paid")}
+          <KpiCard
+            label="Usuarios activos"
+            value={metrics.activeUsers}
+            helper="Clientes con pedidos en el recorte"
+            onClick={() => onNavigateSection("users")}
           />
-        </div>
+        </section>
 
-        <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4 xl:grid-cols-4">
-          <MetricTile label="Ingresos" value={currency(metrics.revenue)} helper="Filtrado por búsqueda y rango" />
-          <MetricTile label="Pedidos" value={metrics.orders} accent="info" helper="Volumen operativo visible" />
-          <MetricTile label="Ticket promedio" value={currency(metrics.avgTicket)} accent="warn" helper="Solo pedidos que contabilizan" />
-          <MetricTile label="Clientes activos" value={metrics.activeCustomers} accent="default" helper="Clientes tocados por el recorte" />
-        </div>
-
-        <div className="grid gap-4 2xl:grid-cols-[minmax(0,1.12fr)_minmax(0,0.95fr)_minmax(300px,0.88fr)]">
-          <IncrementalListPanel
-            eyebrow="Operación central"
-            title="Pedidos recientes"
-            action={
-              <button
-                type="button"
-                onMouseEnter={() => onNavigateSectionIntent?.("orders")}
-                onFocus={() => onNavigateSectionIntent?.("orders")}
-                onClick={() => onNavigateSection("orders")}
-                className="rounded-2xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-200 transition duration-200 hover:bg-white/[0.06]"
-              >
-                Ver pedidos
-              </button>
-            }
-            items={recentOrders}
-            empty={<div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-sm text-slate-400">Sin pedidos para este recorte.</div>}
-            maxHeight="max-h-[520px]"
-            renderItem={(order) => (
-              <button
-                key={order.id}
-                type="button"
-                onClick={() => setSelectedOrderId(order.id)}
-                className="grid w-full gap-2 rounded-2xl border border-white/10 bg-slate-950/35 px-3.5 py-3 text-left transition duration-200 hover:border-white/20 hover:bg-white/[0.05]"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-black text-white">Pedido #{order.id}</p>
-                    <p className="truncate text-sm text-slate-400">{order.customer_name || order.customer_email || "Cliente sin nombre"}</p>
-                  </div>
-                  <StatusBadge status={order.status} />
+        <section className="grid gap-4 xl:grid-cols-12">
+          <div className="xl:col-span-8">
+            <DashboardPanel
+              eyebrow="Operaciones"
+              title="Pedidos recientes"
+              action={
+                <button
+                  type="button"
+                  onMouseEnter={() => onNavigateSectionIntent?.("orders")}
+                  onFocus={() => onNavigateSectionIntent?.("orders")}
+                  onClick={() => onNavigateSection("orders")}
+                  className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-200 transition duration-200 hover:bg-white/[0.06]"
+                >
+                  Ver pedidos
+                </button>
+              }
+            >
+              {recentOrders.length === 0 ? (
+                <EmptyState
+                  icon={ReceiptText}
+                  title="No hay pedidos para este recorte"
+                  description="Ajustá filtros o rango para recuperar la operación visible sin salir del tablero."
+                />
+              ) : (
+                <div className="space-y-3 overflow-y-auto pr-1 xl:max-h-[620px]">
+                  {recentOrders.map((order) => (
+                    <OrderListRow
+                      key={order.id}
+                      order={order}
+                      onOpen={setSelectedOrderId}
+                      onStatusChange={onStatusChange}
+                      onRequestCancel={(orderId) => setConfirmState({ type: "cancel-order", orderId })}
+                      canCancelOrders={canCancelOrders}
+                      updatingOrderId={updatingOrderId}
+                      completedOrderActionKey={completedOrderActionKey}
+                    />
+                  ))}
                 </div>
-                <div className="flex items-center justify-between gap-3 text-xs text-slate-500">
-                  <span>{new Date(order.created_at).toLocaleString("es-AR")}</span>
-                  <span className="font-semibold text-white">{currency(order.total)}</span>
-                </div>
-              </button>
-            )}
-          />
+              )}
+            </DashboardPanel>
+          </div>
 
-          <div className="grid content-start gap-4">
-            <IncrementalListPanel
-              eyebrow="Cobros trabados"
+          <div className="xl:col-span-4 grid content-start gap-4">
+            <DashboardPanel
+              eyebrow="Cobros"
               title="Pagos pendientes"
               action={
                 <button
                   type="button"
-                  onClick={() => {
-                    setAlertMode("pending_payment");
-                    setStatusFilter("pending_payment");
-                  }}
-                  className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-sm font-semibold text-rose-100 transition duration-200 hover:bg-rose-500/15"
+                  onClick={() => setStatusFilter("pending_payment")}
+                  className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-2 text-sm font-semibold text-rose-100 transition duration-200 hover:bg-rose-500/15"
                 >
-                  Enfocar pagos
+                  Filtrar cobros
                 </button>
               }
-              items={pendingPayments}
-              empty={<div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-sm text-slate-400">No hay pagos pendientes con los filtros actuales.</div>}
-              maxHeight="max-h-[280px]"
-              renderItem={(order) => (
-                <button
-                  key={order.id}
-                  type="button"
-                  onClick={() => setSelectedOrderId(order.id)}
-                  className="w-full rounded-2xl border border-rose-500/20 bg-rose-500/10 px-3.5 py-3 text-left transition duration-200 hover:bg-rose-500/15"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="font-semibold text-white">Pedido #{order.id}</p>
-                      <p className="truncate text-sm text-rose-100/80">{order.customer_name || order.customer_email || "Cliente"}</p>
-                    </div>
-                    <span className="text-sm font-bold text-white">{currency(order.total)}</span>
-                  </div>
-                  <p className="mt-2 text-xs uppercase tracking-[0.2em] text-rose-200/70">Pendiente de pago</p>
-                </button>
-              )}
-            />
-
-            <IncrementalListPanel
-              eyebrow="Movimiento reciente"
-              title="Actividad"
-              action={<Clock3 className="h-5 w-5 text-sky-300" />}
-              items={recentActivity}
-              empty={<div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-sm text-slate-400">No hay actividad reciente para los filtros elegidos.</div>}
-              maxHeight="max-h-[300px]"
-              renderItem={(activity) => {
-                const Icon = activity.icon;
-                return (
-                  <div key={activity.id} className="flex items-start gap-3 rounded-2xl border border-white/10 bg-slate-950/35 px-3.5 py-3">
-                    <div className={cn(
-                      "flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl",
-                      activity.tone === "danger" ? "bg-rose-500/15 text-rose-300" : activity.tone === "warn" ? "bg-amber-400/15 text-amber-300" : "bg-white/[0.06] text-slate-300"
-                    )}>
-                      <Icon className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-white">{activity.title}</p>
-                      <p className="mt-1 text-sm text-slate-400">{activity.description}</p>
-                    </div>
-                    <p className="text-xs text-slate-500">{new Date(activity.createdAt).toLocaleDateString("es-AR")}</p>
-                  </div>
-                );
-              }}
-            />
-          </div>
-
-          <div className="grid content-start gap-4">
-            <DashboardPanel
-              eyebrow="Insights"
-              title="Top selling products"
-              action={<PackageSearch className="h-5 w-5 text-amber-300" />}
             >
-              {topSellingProducts.length === 0 ? (
-                <div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-sm text-slate-400">
-                  No hay productos vendidos para el recorte actual.
+              {pendingPayments.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-sm text-slate-400">
+                  No hay pagos pendientes con los filtros actuales.
                 </div>
               ) : (
-                <div className="admin-scroll-row max-h-[240px] space-y-2 overflow-y-auto pr-1">
-                  {topSellingProducts.slice(0, 6).map((product) => (
-                    <div key={product.id} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/35 px-3 py-2.5">
-                      <img {...getAdminCardImageProps(product.image)} alt={product.name} className="h-14 w-10 rounded-xl object-cover" />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate font-semibold text-white">{product.name}</p>
-                        <p className="text-sm text-slate-400">{product.rarity}</p>
+                <div className="space-y-2 overflow-y-auto pr-1 xl:max-h-[300px]">
+                  {pendingPayments.map((order) => (
+                    <div key={order.id} className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-white">Pedido #{order.id}</p>
+                          <p className="truncate text-sm text-rose-100/80">{order.customer_name || order.customer_email || "Cliente"}</p>
+                        </div>
+                        <span className="text-sm font-bold text-white">{currency(order.total)}</span>
                       </div>
-                      <div className="text-right text-sm">
-                        <p className="font-bold text-white">{product.quantity}</p>
-                        <p className="text-slate-500">ventas</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedOrderId(order.id)}
+                          className="rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-white transition duration-200 hover:bg-white/[0.08]"
+                        >
+                          Abrir
+                        </button>
+                        <ActionStatusButton
+                          onClick={() => onStatusChange(order.id, "paid")}
+                          disabled={updatingOrderId === order.id}
+                          pending={updatingOrderId === order.id}
+                          success={completedOrderActionKey === `${order.id}:paid`}
+                          idleLabel="Marcar pagado"
+                          pendingLabel="Guardando..."
+                          successLabel="Pago confirmado"
+                          className="min-h-10 bg-sky-500 px-3 py-2 text-slate-950 hover:bg-sky-400"
+                        />
                       </div>
                     </div>
                   ))}
@@ -931,134 +854,162 @@ export default function DashboardView({
               )}
             </DashboardPanel>
 
-            <DashboardPanel
-              eyebrow={alertMeta.eyebrow}
-              title={alertMeta.title}
-              action={
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setAlertMode("low_stock")}
-                    className={cn(
-                      "rounded-full px-3 py-2 text-xs font-semibold transition duration-200",
-                      alertMode === "low_stock" ? "bg-amber-500 text-slate-950" : "border border-white/10 text-slate-300 hover:bg-white/[0.06]"
-                    )}
-                  >
-                    Bajo
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAlertMode("out_of_stock")}
-                    className={cn(
-                      "rounded-full px-3 py-2 text-xs font-semibold transition duration-200",
-                      alertMode === "out_of_stock" ? "bg-rose-500 text-white" : "border border-white/10 text-slate-300 hover:bg-white/[0.06]"
-                    )}
-                  >
-                    Agotado
-                  </button>
-                </div>
-              }
-            >
-              {visibleAlerts.length === 0 ? (
-                <div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-sm text-slate-400">
-                  {alertMeta.empty}
-                </div>
-              ) : (
-                <div className="admin-scroll-row max-h-[280px] space-y-2 overflow-y-auto pr-1">
-                  {visibleAlerts.slice(0, 6).map((entry) => (
-                    <div key={`${alertMode}-${entry.id}`} className={cn(
-                      "rounded-2xl border px-3.5 py-3",
-                      alertMeta.tone === "danger" ? "border-rose-500/20 bg-rose-500/10" : "border-amber-400/20 bg-amber-400/10"
-                    )}>
-                      {alertMode === "pending_payment" ? (
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="font-semibold text-white">Pedido #{entry.id}</p>
-                            <p className="truncate text-sm text-slate-300">{entry.customer_name || entry.customer_email || "Cliente"}</p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedOrderId(entry.id)}
-                            className="rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-white transition duration-200 hover:bg-white/[0.1]"
-                          >
-                            {alertMeta.cta}
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-3">
-                          <img {...getAdminCardImageProps(entry.image)} alt={entry.name} className="h-14 w-10 rounded-xl object-cover" />
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate font-semibold text-white">{entry.name}</p>
-                            <p className="text-sm text-slate-300">Stock {entry.stock} · Umbral {entry.low_stock_threshold}</p>
-                          </div>
-                          <button
-                            type="button"
-                            onMouseEnter={() => onNavigateSectionIntent?.("inventory")}
-                            onFocus={() => onNavigateSectionIntent?.("inventory")}
-                            onClick={() => onNavigateSection("inventory")}
-                            className="rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-white transition duration-200 hover:bg-white/[0.1]"
-                          >
-                            {alertMeta.cta}
-                          </button>
-                        </div>
+            {visibleAlerts.length > 0 ? (
+              <DashboardPanel
+                eyebrow={alertMeta.eyebrow}
+                title={alertMeta.title}
+                action={
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setAlertMode("low_stock")}
+                      className={cn(
+                        "rounded-full px-3 py-2 text-xs font-semibold transition duration-200",
+                        alertMode === "low_stock" ? "bg-amber-500 text-slate-950" : "border border-white/10 text-slate-300 hover:bg-white/[0.06]"
                       )}
+                    >
+                      Bajo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAlertMode("out_of_stock")}
+                      className={cn(
+                        "rounded-full px-3 py-2 text-xs font-semibold transition duration-200",
+                        alertMode === "out_of_stock" ? "bg-rose-500 text-white" : "border border-white/10 text-slate-300 hover:bg-white/[0.06]"
+                      )}
+                    >
+                      Agotado
+                    </button>
+                  </div>
+                }
+              >
+                <div className="space-y-2 overflow-y-auto pr-1 xl:max-h-[280px]">
+                  {visibleAlerts.map((entry) => (
+                    <div
+                      key={`${alertMode}-${entry.id}`}
+                      className={cn(
+                        "flex items-center gap-3 rounded-2xl border px-3.5 py-3",
+                        alertMeta.tone === "danger" ? "border-rose-500/20 bg-rose-500/10" : "border-amber-400/20 bg-amber-400/10"
+                      )}
+                    >
+                      <img {...getAdminCardImageProps(entry.image)} alt={entry.name} className="h-14 w-10 rounded-xl object-cover" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-semibold text-white">{entry.name}</p>
+                        <p className="text-sm text-slate-300">Stock {entry.stock} · Umbral {entry.low_stock_threshold}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onMouseEnter={() => onNavigateSectionIntent?.("inventory")}
+                        onFocus={() => onNavigateSectionIntent?.("inventory")}
+                        onClick={() => onNavigateSection("inventory")}
+                        className="rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-white transition duration-200 hover:bg-white/[0.1]"
+                      >
+                        {alertMeta.cta}
+                      </button>
                     </div>
                   ))}
                 </div>
+              </DashboardPanel>
+            ) : null}
+          </div>
+        </section>
+
+        <section className="grid gap-4 xl:grid-cols-12">
+          <div className="xl:col-span-8">
+            {!insightsReady ? (
+              <DashboardPanel eyebrow="Insights" title="Productos más vendidos">
+                <div className="space-y-3">
+                  {Array.from({ length: 3 }).map((_, index) => (
+                    <div key={index} className="h-20 animate-pulse rounded-2xl border border-white/10 bg-white/[0.03]" />
+                  ))}
+                </div>
+              </DashboardPanel>
+            ) : (
+              <DashboardPanel eyebrow="Insights" title="Productos más vendidos" action={<PackageSearch className="h-5 w-5 text-slate-400" />}>
+                {topSellingProducts.length === 0 ? (
+                  <EmptyState
+                    icon={PackageSearch}
+                    title="Todavía no hay ventas destacadas"
+                    description="Cuando existan pedidos dentro del recorte activo, acá vas a ver el mix que más tracciona."
+                  />
+                ) : (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {topSellingProducts.map((product) => (
+                      <div key={product.id} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/25 px-4 py-3">
+                        <img {...getAdminCardImageProps(product.image)} alt={product.name} className="h-16 w-11 rounded-xl object-cover" />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-semibold text-white">{product.name}</p>
+                          <p className="text-sm text-slate-400">{product.rarity}</p>
+                          <p className="mt-1 text-xs text-slate-500">{currency(product.revenue)} generados</p>
+                        </div>
+                        <div className="text-right text-sm">
+                          <p className="text-xl font-black text-white">{product.quantity}</p>
+                          <p className="text-slate-500">ventas</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </DashboardPanel>
+            )}
+          </div>
+
+          <div className="xl:col-span-4">
+            <DashboardPanel
+              eyebrow="Actividad"
+              title="Movimiento reciente"
+              action={
+                <button
+                  type="button"
+                  onClick={() => setShowActivity((current) => !current)}
+                  className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-200 transition duration-200 hover:bg-white/[0.06]"
+                >
+                  {showActivity ? "Ocultar" : "Mostrar"}
+                </button>
+              }
+            >
+              {!insightsReady ? (
+                <div className="space-y-3">
+                  {Array.from({ length: 3 }).map((_, index) => (
+                    <div key={index} className="h-16 animate-pulse rounded-2xl border border-white/10 bg-white/[0.03]" />
+                  ))}
+                </div>
+              ) : !showActivity ? (
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-5 text-sm text-slate-400">
+                  Expandí esta sección cuando necesites revisar la secuencia reciente de pedidos y usuarios sin sobrecargar la pantalla principal.
+                </div>
+              ) : recentActivity.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-sm text-slate-400">
+                  No hay actividad reciente para los filtros elegidos.
+                </div>
+              ) : (
+                <div className="space-y-2 overflow-y-auto pr-1 xl:max-h-[360px]">
+                  {recentActivity.map((activity) => {
+                    const Icon = activity.icon;
+                    return (
+                      <div key={activity.id} className="flex items-start gap-3 rounded-2xl border border-white/10 bg-slate-950/25 px-3.5 py-3">
+                        <div className={cn(
+                          "flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl",
+                          activity.tone === "danger" ? "bg-rose-500/15 text-rose-300" : activity.tone === "warn" ? "bg-amber-400/15 text-amber-300" : "bg-white/[0.06] text-slate-300"
+                        )}>
+                          <Icon className="h-4 w-4" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-white">{activity.title}</p>
+                          <p className="mt-1 text-sm text-slate-400">{activity.description}</p>
+                        </div>
+                        <div className="text-right text-xs text-slate-500">
+                          <Clock3 className="ml-auto h-3.5 w-3.5" />
+                          <p className="mt-1">{new Date(activity.createdAt).toLocaleDateString("es-AR")}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </DashboardPanel>
-            <DashboardPanel eyebrow="Acciones y radar" title="Control rápido">
-              <div className="space-y-4">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3.5">
-                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Resultados</p>
-                    <p className="mt-2 text-xl font-black text-white">{filteredOrders.length}</p>
-                    <p className="mt-1 text-sm text-slate-400">pedidos visibles</p>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3.5">
-                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Clientes</p>
-                    <p className="mt-2 text-xl font-black text-white">{filteredUsers.length}</p>
-                    <p className="mt-1 text-sm text-slate-400">en el recorte</p>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3.5">
-                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Stock bajo</p>
-                    <p className="mt-2 text-xl font-black text-amber-300">{lowStockCards.length}</p>
-                    <p className="mt-1 text-sm text-slate-400">requieren reposición</p>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3.5">
-                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Agotadas</p>
-                    <p className="mt-2 text-xl font-black text-rose-300">{outOfStockCards.length}</p>
-                    <p className="mt-1 text-sm text-slate-400">frenan conversión</p>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <button type="button" onMouseEnter={() => onNavigateSectionIntent?.("inventory")} onFocus={() => onNavigateSectionIntent?.("inventory")} onClick={() => onNavigateSection("inventory")} className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3.5 text-left transition duration-200 hover:bg-white/[0.06]">
-                    <div>
-                      <p className="font-semibold text-white">Revisar inventario</p>
-                      <p className="mt-1 text-sm text-slate-400">Stock, umbrales y visibilidad</p>
-                    </div>
-                    <Boxes className="h-5 w-5 text-amber-300" />
-                  </button>
-                  <button type="button" onMouseEnter={() => onNavigateSectionIntent?.("orders")} onFocus={() => onNavigateSectionIntent?.("orders")} onClick={() => onNavigateSection("orders")} className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3.5 text-left transition duration-200 hover:bg-white/[0.06]">
-                    <div>
-                      <p className="font-semibold text-white">Resolver pedidos</p>
-                      <p className="mt-1 text-sm text-slate-400">Cobros, estados y tracking</p>
-                    </div>
-                    <Truck className="h-5 w-5 text-sky-300" />
-                  </button>
-                  <button type="button" onMouseEnter={() => onNavigateSectionIntent?.("users")} onFocus={() => onNavigateSectionIntent?.("users")} onClick={() => onNavigateSection("users")} className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3.5 text-left transition duration-200 hover:bg-white/[0.06]">
-                    <div>
-                      <p className="font-semibold text-white">Analizar clientes</p>
-                      <p className="mt-1 text-sm text-slate-400">Roles, gasto y actividad</p>
-                    </div>
-                    <ShieldAlert className="h-5 w-5 text-violet-300" />
-                  </button>
-                </div>
-              </div>
-            </DashboardPanel>
           </div>
-        </div>
+        </section>
       </div>
 
       <OrderDrawer
