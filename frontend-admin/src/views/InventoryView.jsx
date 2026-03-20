@@ -337,10 +337,12 @@ const InventoryRow = memo(function InventoryRow({
 });
 
 function InventoryDrawer({ card, onClose, onSave, onRequestDelete, canEditInventory, isDeletingCards }) {
+  const [activeHistoryTab, setActiveHistoryTab] = useState("price");
   const [stockAdjustment, setStockAdjustment] = useState(1);
   const [detailState, setDetailState] = useState({ loading: false, detail: null, error: "" });
 
   useEffect(() => {
+    setActiveHistoryTab("price");
     setStockAdjustment(1);
   }, [card?.id, card?.updated_at]);
 
@@ -378,6 +380,10 @@ function InventoryDrawer({ card, onClose, onSave, onRequestDelete, canEditInvent
   const priceHistory = detailState.detail?.price_history || [];
   const stockHistory = detailState.detail?.stock_history || [];
   const statusMeta = getStatusMeta(detailCard);
+  const historyTabs = [
+    { key: "price", label: "Precio", count: priceHistory.length },
+    { key: "stock", label: "Stock", count: stockHistory.length },
+  ];
 
   return (
     <>
@@ -425,30 +431,60 @@ function InventoryDrawer({ card, onClose, onSave, onRequestDelete, canEditInvent
             </div>
           </div>
 
-          <div className="grid gap-4 xl:grid-cols-2">
-            <HistoryPanel
-              title="Historial de precio"
-              emptyMessage="Todavía no hay cambios de precio registrados."
-              entries={priceHistory}
-              renderEntry={(entry) => (
-                <div key={entry.id} className="rounded-2xl border border-white/10 bg-slate-950/30 px-4 py-3 text-sm text-slate-300">
-                  <p className="font-semibold text-white">{currency(entry.previous_price)} → {currency(entry.next_price)}</p>
-                  <p className="mt-1 text-xs text-slate-500">{formatDateTime(entry.created_at)} · {entry.source}</p>
-                </div>
-              )}
-            />
+          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-white">
+                <History className="h-4 w-4 text-slate-400" />
+                <p className="font-semibold">Historial de cambios</p>
+              </div>
+              <div className="inline-flex rounded-2xl border border-white/10 bg-slate-950/40 p-1">
+                {historyTabs.map((tab) => (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => setActiveHistoryTab(tab.key)}
+                    className={cn(
+                      "rounded-xl px-3 py-2 text-xs font-semibold transition duration-200",
+                      activeHistoryTab === tab.key ? "bg-amber-400/15 text-amber-100" : "text-slate-400 hover:text-slate-200"
+                    )}
+                  >
+                    {tab.label} ({tab.count})
+                  </button>
+                ))}
+              </div>
+            </div>
 
-            <HistoryPanel
-              title="Historial de stock"
-              emptyMessage="Todavía no hay cambios de stock registrados."
-              entries={stockHistory}
-              renderEntry={(entry) => (
-                <div key={entry.id} className="rounded-2xl border border-white/10 bg-slate-950/30 px-4 py-3 text-sm text-slate-300">
-                  <p className="font-semibold text-white">{entry.previous_stock} → {entry.next_stock} unidades</p>
-                  <p className="mt-1 text-xs text-slate-500">{formatDateTime(entry.created_at)} · {entry.source}</p>
-                </div>
-              )}
-            />
+            {activeHistoryTab === "price" ? (
+              <div className="mt-4">
+                <HistoryPanel
+                  title="Historial de precio"
+                  emptyMessage="Todavía no hay cambios de precio registrados."
+                  entries={priceHistory}
+                  renderEntry={(entry) => (
+                    <div key={entry.id} className="rounded-2xl border border-white/10 bg-slate-950/30 px-4 py-3 text-sm text-slate-300">
+                      <p className="font-semibold text-white">{currency(entry.previous_price)} → {currency(entry.next_price)}</p>
+                      <p className="mt-1 text-xs text-slate-500">{formatDateTime(entry.created_at)} · {entry.source}</p>
+                    </div>
+                  )}
+                />
+              </div>
+            ) : null}
+
+            {activeHistoryTab === "stock" ? (
+              <div className="mt-4">
+                <HistoryPanel
+                  title="Historial de stock"
+                  emptyMessage="Todavía no hay cambios de stock registrados."
+                  entries={stockHistory}
+                  renderEntry={(entry) => (
+                    <div key={entry.id} className="rounded-2xl border border-white/10 bg-slate-950/30 px-4 py-3 text-sm text-slate-300">
+                      <p className="font-semibold text-white">{entry.previous_stock} → {entry.next_stock} unidades</p>
+                      <p className="mt-1 text-xs text-slate-500">{formatDateTime(entry.created_at)} · {entry.source}</p>
+                    </div>
+                  )}
+                />
+              </div>
+            ) : null}
           </div>
 
           <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4">
