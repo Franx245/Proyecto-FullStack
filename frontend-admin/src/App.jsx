@@ -1898,27 +1898,28 @@ function AdminShell({ session, onLogout }) {
         <main className={cn("min-w-0", section === "dashboard" ? "space-y-4 sm:space-y-4 lg:flex lg:h-[calc(100vh-1.5rem)] lg:flex-col lg:overflow-hidden" : "space-y-4 sm:space-y-6")}>
           <OperationNotice notice={operationNotice} online={isOnline} />
 
-          <div className="glass rounded-[28px] border border-white/10 p-3 sm:p-4 lg:hidden">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase tracking-[0.24em] text-amber-300">DuelVault</p>
-                <h1 className="mt-2 text-2xl font-black text-white">Santuario Admin</h1>
-                <p className="mt-1 text-sm text-slate-400">{session.admin.email}</p>
+          <div className="sticky top-0 z-30 -mx-1 space-y-4 bg-[linear-gradient(180deg,rgba(5,8,22,0.98)_0%,rgba(5,8,22,0.95)_86%,rgba(5,8,22,0)_100%)] px-1 pb-4 pt-1 backdrop-blur-md lg:static lg:mx-0 lg:space-y-0 lg:bg-none lg:px-0 lg:pb-0 lg:pt-0 lg:backdrop-blur-none">
+            <div className="glass rounded-[28px] border border-white/10 p-3 sm:p-4 lg:hidden">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.24em] text-amber-300">DuelVault</p>
+                  <h1 className="mt-2 text-2xl font-black text-white">Santuario Admin</h1>
+                  <p className="mt-1 text-sm text-slate-400">{session.admin.email}</p>
+                </div>
+                <button
+                  onClick={onLogout}
+                  className="flex items-center gap-2 rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.06]"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Salir
+                </button>
               </div>
-              <button
-                onClick={onLogout}
-                className="flex items-center gap-2 rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.06]"
-              >
-                <LogOut className="h-4 w-4" />
-                Salir
-              </button>
+              <div className="mt-4 rounded-3xl border border-white/10 bg-slate-950/30 p-3">
+                <MobileSectionNav section={section} onSectionChange={handleSectionChange} onSectionIntent={handleSectionIntent} />
+              </div>
             </div>
-            <div className="mt-4 rounded-3xl border border-white/10 bg-slate-950/30 p-3">
-              <MobileSectionNav section={section} onSectionChange={handleSectionChange} onSectionIntent={handleSectionIntent} />
-            </div>
-          </div>
 
-          <header className={cn("glass rounded-[32px] border border-white/10 p-4 sm:p-6", section === "dashboard" ? "lg:hidden" : "") }>
+            <header className={cn("glass rounded-[32px] border border-white/10 p-4 sm:p-6", section === "dashboard" ? "lg:hidden" : "") }>
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Sistema local</p>
@@ -1940,7 +1941,8 @@ function AdminShell({ session, onLogout }) {
                 Tu cuenta STAFF tiene acceso de consulta y actualización operativa de pedidos, pero no puede hacer ediciones críticas de inventario ni cancelaciones.
               </div>
             ) : null}
-          </header>
+            </header>
+          </div>
 
           {section === "dashboard" ? <div className="min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">{renderSection()}</div> : renderSection()}
         </main>
