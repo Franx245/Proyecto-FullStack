@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   Boxes,
   Clock3,
@@ -448,6 +448,7 @@ export default function DashboardView({
   onNavigateSectionIntent,
   onStatusChange,
 }) {
+  const dashboardRootRef = useRef(null);
   const persistedState = readDashboardViewState();
   const [globalSearch, setGlobalSearch] = useState(() => persistedState.globalSearch || "");
   const [dateRange, setDateRange] = useState(() => persistedState.dateRange || "30d");
@@ -458,6 +459,7 @@ export default function DashboardView({
   const [confirmState, setConfirmState] = useState(null);
   const [showActivity, setShowActivity] = useState(() => Boolean(persistedState.showActivity));
   const [insightsReady, setInsightsReady] = useState(false);
+  const [isHeaderCompact, setIsHeaderCompact] = useState(false);
   const deferredSearch = useDeferredValue(globalSearch);
 
   useEffect(() => {
@@ -481,6 +483,22 @@ export default function DashboardView({
   useEffect(() => {
     const cancel = scheduleIdleTask(() => setInsightsReady(true));
     return cancel;
+  }, []);
+
+  useEffect(() => {
+    const scrollContainer = dashboardRootRef.current?.parentElement;
+    if (!scrollContainer) {
+      return undefined;
+    }
+
+    const handleScroll = () => {
+      setIsHeaderCompact(scrollContainer.scrollTop > 56);
+    };
+
+    handleScroll();
+    scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
+
+    return () => scrollContainer.removeEventListener("scroll", handleScroll);
   }, []);
 
   const cutoffDate = useMemo(() => getCutoffDate(dateRange), [dateRange]);
@@ -665,15 +683,18 @@ export default function DashboardView({
 
   return (
     <>
-      <div className="grid gap-4 lg:gap-6">
-        <div className="sticky top-0 z-20 -mx-1 space-y-4 bg-[linear-gradient(180deg,rgba(5,8,22,0.98)_0%,rgba(5,8,22,0.95)_86%,rgba(5,8,22,0)_100%)] px-1 pb-4 pt-1 backdrop-blur-md">
+      <div ref={dashboardRootRef} className="grid gap-4 lg:gap-6">
+        <div className={cn(
+          "sticky top-0 z-20 -mx-1 bg-[linear-gradient(180deg,rgba(5,8,22,0.98)_0%,rgba(5,8,22,0.95)_86%,rgba(5,8,22,0)_100%)] px-1 backdrop-blur-md transition-[padding,gap] duration-200",
+          isHeaderCompact ? "space-y-3 pb-3 pt-1" : "space-y-4 pb-4 pt-1"
+        )}>
           <DashboardPanel eyebrow="Panel operativo" title="Centro de mando comercial" className="overflow-visible">
             <div className="grid gap-4 xl:grid-cols-12 xl:items-end">
               <div className="xl:col-span-4">
-                <p className="max-w-2xl text-sm leading-6 text-slate-400">
+                <p className={cn("max-w-2xl text-slate-400 transition-all duration-200", isHeaderCompact ? "text-xs leading-5" : "text-sm leading-6")}>
                   Priorizá cobros, pedidos y alertas sin perder contexto del recorte activo. El resumen superior responde a tus filtros actuales.
                 </p>
-                <div className="mt-4 flex flex-wrap gap-2">
+                <div className={cn("flex flex-wrap gap-2 transition-all duration-200", isHeaderCompact ? "mt-3" : "mt-4")}>
                   <InlineFilterChip>Base global: {currency(globalMetrics.totalRevenue)}</InlineFilterChip>
                   <InlineFilterChip>{globalMetrics.totalOrders || 0} pedidos históricos</InlineFilterChip>
                   <InlineFilterChip tone="warn">{globalMetrics.pendingPaymentCount || 0} pagos pendientes</InlineFilterChip>
@@ -724,7 +745,7 @@ export default function DashboardView({
               </div>
             </div>
 
-            <div className="mt-4 flex flex-wrap items-center gap-2">
+            <div className={cn("flex flex-wrap items-center gap-2 transition-all duration-200", isHeaderCompact ? "mt-3" : "mt-4")}>
               <InlineFilterChip>{metrics.visibleOrders} pedidos visibles</InlineFilterChip>
               <InlineFilterChip>{metrics.visibleUsers} usuarios visibles</InlineFilterChip>
               <InlineFilterChip>{metrics.visibleCards} cartas analizadas</InlineFilterChip>
@@ -761,8 +782,8 @@ export default function DashboardView({
           </section>
         </div>
 
-        <section className="grid gap-4 xl:grid-cols-12">
-          <div className={hasVisibleAlerts ? "xl:col-span-8" : "xl:col-span-12"}>
+        <section className="grid gap-4 xl:grid-cols-12 xl:items-start">
+          <div className="xl:col-span-8 grid gap-4">
             <DashboardPanel
               eyebrow="Operaciones"
               title="Pedidos recientes"
@@ -801,9 +822,46 @@ export default function DashboardView({
                 </div>
               )}
             </DashboardPanel>
+
+            {!insightsReady ? (
+              <DashboardPanel eyebrow="Insights" title="Productos más vendidos">
+                <div className="space-y-3">
+                  {Array.from({ length: 3 }).map((_, index) => (
+                    <div key={index} className="h-20 animate-pulse rounded-2xl border border-white/10 bg-white/[0.03]" />
+                  ))}
+                </div>
+              </DashboardPanel>
+            ) : (
+              <DashboardPanel eyebrow="Insights" title="Productos más vendidos" action={<PackageSearch className="h-5 w-5 text-slate-400" />}>
+                {topSellingProducts.length === 0 ? (
+                  <EmptyState
+                    icon={PackageSearch}
+                    title="Todavía no hay ventas destacadas"
+                    description="Cuando existan pedidos dentro del recorte activo, acá vas a ver el mix que más tracciona."
+                  />
+                ) : (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {topSellingProducts.map((product) => (
+                      <div key={product.id} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/25 px-4 py-3">
+                        <img {...getAdminCardImageProps(product.image)} alt={product.name} className="h-16 w-11 rounded-xl object-cover" />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-semibold text-white">{product.name}</p>
+                          <p className="text-sm text-slate-400">{product.rarity}</p>
+                          <p className="mt-1 text-xs text-slate-500">{currency(product.revenue)} generados</p>
+                        </div>
+                        <div className="text-right text-sm">
+                          <p className="text-xl font-black text-white">{product.quantity}</p>
+                          <p className="text-slate-500">ventas</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </DashboardPanel>
+            )}
           </div>
 
-          <div className="xl:col-span-4 grid content-start gap-4">
+          <div className={cn("grid content-start gap-4 xl:col-span-4", isHeaderCompact ? "xl:sticky xl:top-28" : "xl:sticky xl:top-[15rem]")}>
             {hasVisibleAlerts ? (
               <DashboardPanel
                 eyebrow={alertMeta.eyebrow}
@@ -861,50 +919,7 @@ export default function DashboardView({
                 </div>
               </DashboardPanel>
             ) : null}
-          </div>
-        </section>
 
-        <section className="grid gap-4 xl:grid-cols-12">
-          <div className="xl:col-span-8">
-            {!insightsReady ? (
-              <DashboardPanel eyebrow="Insights" title="Productos más vendidos">
-                <div className="space-y-3">
-                  {Array.from({ length: 3 }).map((_, index) => (
-                    <div key={index} className="h-20 animate-pulse rounded-2xl border border-white/10 bg-white/[0.03]" />
-                  ))}
-                </div>
-              </DashboardPanel>
-            ) : (
-              <DashboardPanel eyebrow="Insights" title="Productos más vendidos" action={<PackageSearch className="h-5 w-5 text-slate-400" />}>
-                {topSellingProducts.length === 0 ? (
-                  <EmptyState
-                    icon={PackageSearch}
-                    title="Todavía no hay ventas destacadas"
-                    description="Cuando existan pedidos dentro del recorte activo, acá vas a ver el mix que más tracciona."
-                  />
-                ) : (
-                  <div className="grid gap-3 md:grid-cols-2">
-                    {topSellingProducts.map((product) => (
-                      <div key={product.id} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/25 px-4 py-3">
-                        <img {...getAdminCardImageProps(product.image)} alt={product.name} className="h-16 w-11 rounded-xl object-cover" />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-semibold text-white">{product.name}</p>
-                          <p className="text-sm text-slate-400">{product.rarity}</p>
-                          <p className="mt-1 text-xs text-slate-500">{currency(product.revenue)} generados</p>
-                        </div>
-                        <div className="text-right text-sm">
-                          <p className="text-xl font-black text-white">{product.quantity}</p>
-                          <p className="text-slate-500">ventas</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </DashboardPanel>
-            )}
-          </div>
-
-          <div className="xl:col-span-4">
             <DashboardPanel
               eyebrow="Actividad"
               title="Movimiento reciente"
