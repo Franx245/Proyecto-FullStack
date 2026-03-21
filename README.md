@@ -455,37 +455,7 @@ Esta base quedó evolucionada en cuatro frentes: storefront, panel admin, backen
 - Separación formal entre storefront/API y admin según memoria de repo.
 	Por qué: el admin se despliega como proyecto Vercel independiente y la tienda/API como proyecto raíz; esto evita mezclar tiempos de build y configuración.
 
-## Diagramas del stack 📊
-
-Diagrama de la arquitectura actual (alto nivel):
-
-```mermaid
-flowchart LR
-	Storefront[Storefront (Vite / React)] -->|API requests| API[Backend API (Express, Vercel)]
-	Admin[Admin (frontend-admin)] -->|API requests| API
-	API -->|ORM: Prisma| DB[(Supabase / Postgres)]
-	API -->|Mercado Pago Webhooks| MP[Mercado Pago]
-	CDN[(Vercel CDN)] --> Storefront
-	CDN --> Admin
-	classDef infra fill:#0f172a,color:#e6eefb,stroke:#0b1220;
-	class API,DB,MP,CDN infra;
-```
-
-Diagrama objetivo con Redis (próxima actualización):
-
-```mermaid
-flowchart LR
-	Storefront -->|API requests / cache| API
-	Admin -->|API requests| API
-	API -->|reads/writes| DB[(Supabase / Postgres)]
-	API -->|cache reads/writes| Redis[(Redis Cache / Session Store)]
-	API -->|enqueue| Jobs[Background Workers]
-	Jobs -->|expire orders / rebuild cache| Redis
-	MP[Mercado Pago] -->|webhooks| API
-	CDN --> Storefront
-	classDef infra fill:#07112b,color:#e6eefb,stroke:#07203a;
-	class API,DB,Redis,Jobs,MP,CDN infra;
-```
+> Diagrama: versión simplificada arriba en la sección principal "Diagramas del stack".
 
 ## Notas sobre la próxima actualización: Redis
 
