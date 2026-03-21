@@ -1,8 +1,8 @@
-# DuelVault
+# DuelVault 🃏
 
 DuelVault es una plataforma ecommerce + CRM orientada a la venta de cartas y productos de Yu-Gi-Oh!. El proyecto combina una tienda pública para clientes, un backend con reglas de negocio y un panel administrativo para operar catálogo, inventario, home, órdenes y contenido custom.
 
-## Descripción del proyecto
+## Descripción del proyecto 📝
 
 El sistema resuelve dos necesidades en una sola base de código:
 
@@ -11,7 +11,7 @@ El sistema resuelve dos necesidades en una sola base de código:
 
 La separación entre frontend público y backend permite exponer una experiencia rápida al usuario final sin publicar secretos ni lógica sensible. El panel admin consume la misma API, pero con permisos y tokens de sesión.
 
-## Arquitectura
+## Arquitectura 🏗️
 
 Arquitectura recomendada para producción:
 
@@ -27,7 +27,7 @@ Flujo general:
 3. El backend Express centraliza validaciones, permisos, stock, estados de órdenes y persistencia.
 4. Prisma actúa como capa de acceso a datos y mantiene el esquema sobre Supabase Postgres.
 
-## Tech Stack
+## Tech Stack 🛠️
 
 - React
 - Node.js
@@ -47,7 +47,7 @@ Flujo general:
 - /scripts: utilidades de arranque coordinado y soporte de desarrollo.
 - /entities: definiciones del dominio heredadas del catálogo.
 
-## Getting Started local
+## Getting Started local 🚀
 
 La forma recomendada de correr el proyecto es desde la raíz para levantar tienda, backend y admin de manera coordinada.
 
@@ -215,7 +215,7 @@ Qué hace cada variable:
 - VITE_ENABLE_ANALYTICS: activa banderas de analítica del frontend.
 - VITE_STOREFRONT_URL: URL del storefront usada por el admin para redirigir al login público.
 
-## Deployment Guide
+## Deployment Guide 🚀
 
 ## Frontend en Vercel
 
@@ -398,7 +398,7 @@ Esta base quedó evolucionada en cuatro frentes: storefront, panel admin, backen
 - Separación formal entre storefront/API y admin según memoria de repo.
 	Por qué: el admin se despliega como proyecto Vercel independiente y la tienda/API como proyecto raíz; esto evita mezclar tiempos de build y configuración.
 
-## Diagramas del stack
+## Diagramas del stack 📊
 
 Diagrama de la arquitectura actual (alto nivel):
 
