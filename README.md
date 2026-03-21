@@ -3,8 +3,65 @@
 DuelVault es una plataforma ecommerce + CRM orientada a la venta de cartas y productos de Yu-Gi-Oh!. El proyecto combina una tienda pública para clientes, un backend con reglas de negocio y un panel administrativo para operar catálogo, inventario, home, órdenes y contenido custom.
 
 ## Descripción del proyecto 📝
+# DuelVault 🃏
+
+## Descripción del proyecto 📝
 
 El sistema resuelve dos necesidades en una sola base de código:
+## Tabla de contenido 📚
+
+- [Descripción del proyecto](#descripción-del-proyecto-📝)
+- [Quick Start](#quick-start-🚀)
+- [Arquitectura](#arquitectura-🏗️)
+- [Tech Stack](#tech-stack-🛠️)
+- [Estructura del proyecto](#estructura-del-proyecto)
+- [Deployment Guide](#deployment-guide-🚀)
+- [Diagramas del stack](#diagramas-del-stack-📊)
+- [Próxima actualización: Redis](#notas-sobre-la-próxima-actualización-redis)
+
+## Quick Start 🚀
+
+Rápido para desarrolladores — levantar localmente el storefront, admin y backend:
+
+```bash
+npm install
+npm run dev
+```
+
+URLs típicas al levantar el stack:
+
+- Storefront: http://127.0.0.1:5173
+- Admin: http://127.0.0.1:5178
+- API: http://127.0.0.1:3001
+## Arquitectura 🏗️
+
+## Diagramas del stack 📊
+
+Diagrama simple de la arquitectura actual (alto nivel):
+
+```mermaid
+flowchart LR
+	SF["Storefront\n(Vite / React)"] -->|API requests| API["Backend API\n(Express, Vercel)"]
+	Admin["Admin\n(frontend-admin)"] -->|API requests| API
+	API -->|ORM: Prisma| DB["Supabase / Postgres"]
+	API -->|webhooks| MP["Mercado Pago"]
+	CDN["Vercel CDN"] --> SF
+	CDN --> Admin
+```
+
+Diagrama objetivo con Redis (próxima actualización):
+
+```mermaid
+flowchart LR
+	SF["Storefront\n(Vite / React)"] -->|API requests / cache| API["Backend API\n(Express)"]
+	Admin -->|API requests| API
+	API -->|reads/writes| DB["Supabase / Postgres"]
+	API -->|cache reads/writes| Redis["Redis\n(Cache / Session)"]
+	API -->|enqueue| Jobs["Background Workers"]
+	Jobs -->|expire orders / rebuild cache| Redis
+	MP["Mercado Pago"] -->|webhooks| API
+	CDN --> SF
+```
 
 - Ecommerce: catálogo público, detalle de producto, carrito, pedidos y storefront responsive.
 - CRM / operación interna: panel admin con autenticación, gestión de inventario, merchandising, órdenes y publicaciones custom.
