@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="900" height="320" viewBox="0 0 900 320" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .box { fill:#0f172a; stroke:#e6eefb; stroke-width:1.5; rx:8; }
+    .label { fill:#e6eefb; font-family: Arial,Helvetica,sans-serif; font-size:13px; }
+    .small { font-size:11px; fill:#cbd5e1 }
+    .arrow { stroke:#94a3b8; stroke-width:2; fill:none; marker-end:url(#arrowhead); }
+  </style>
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#94a3b8" />
+    </marker>
+  </defs>
+
+  <!-- Storefront -->
+  <rect x="40" y="30" width="220" height="70" class="box" />
+  <text x="150" y="56" text-anchor="middle" class="label">Storefront</text>
+  <text x="150" y="74" text-anchor="middle" class="small">Vite / React</text>
+
+  <!-- Admin -->
+  <rect x="40" y="170" width="220" height="70" class="box" />
+  <text x="150" y="196" text-anchor="middle" class="label">Admin</text>
+  <text x="150" y="214" text-anchor="middle" class="small">frontend-admin</text>
+
+  <!-- API -->
+  <rect x="360" y="90" width="240" height="90" class="box" />
+  <text x="480" y="120" text-anchor="middle" class="label">Backend API</text>
+  <text x="480" y="138" text-anchor="middle" class="small">Express (Vercel)</text>
+
+  <!-- DB -->
+  <rect x="660" y="30" width="200" height="70" class="box" />
+  <text x="760" y="56" text-anchor="middle" class="label">Supabase / Postgres</text>
+
+  <!-- MP -->
+  <rect x="660" y="170" width="200" height="70" class="box" />
+  <text x="760" y="196" text-anchor="middle" class="label">Mercado Pago</text>
+  <text x="760" y="214" text-anchor="middle" class="small">Webhooks / Payments</text>
+
+  <!-- CDN -->
+  <rect x="360" y="-6" width="240" height="36" class="box" />
+  <text x="480" y="18" text-anchor="middle" class="label">Vercel CDN</text>
+
+  <!-- arrows -->
+  <path d="M260 65 L360 125" class="arrow" />
+  <path d="M260 205 L360 140" class="arrow" />
+  <path d="M600 135 L660 135" class="arrow" />
+  <path d="M600 160 L660 205" class="arrow" />
+  <path d="M480 36 L480 54" class="arrow" />
+
+</svg>

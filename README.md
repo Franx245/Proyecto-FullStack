@@ -48,6 +48,9 @@ flowchart LR
 	CDN["Vercel CDN"] --> SF
 	CDN --> Admin
 ```
+![Arquitectura actual](docs/diagrams/arch-current.svg)
+
+![Arquitectura propuesta con Redis](docs/diagrams/arch-redis.svg)
 
 Diagrama objetivo con Redis (próxima actualización):
 

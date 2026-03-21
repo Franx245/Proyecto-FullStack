@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="900" height="360" viewBox="0 0 900 360" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .box { fill:#06283d; stroke:#a7f3d0; stroke-width:1.5; rx:8; }
+    .label { fill:#a7f3d0; font-family: Arial,Helvetica,sans-serif; font-size:13px; }
+    .small { font-size:11px; fill:#cce7da }
+    .arrow { stroke:#7dd3fc; stroke-width:2; fill:none; marker-end:url(#arrowhead); }
+  </style>
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#7dd3fc" />
+    </marker>
+  </defs>
+
+  <!-- Storefront -->
+  <rect x="40" y="30" width="220" height="70" class="box" />
+  <text x="150" y="56" text-anchor="middle" class="label">Storefront</text>
+  <text x="150" y="74" text-anchor="middle" class="small">Vite / React</text>
+
+  <!-- Admin -->
+  <rect x="40" y="170" width="220" height="70" class="box" />
+  <text x="150" y="196" text-anchor="middle" class="label">Admin</text>
+  <text x="150" y="214" text-anchor="middle" class="small">frontend-admin</text>
+
+  <!-- API -->
+  <rect x="360" y="60" width="240" height="110" class="box" />
+  <text x="480" y="95" text-anchor="middle" class="label">Backend API + Workers</text>
+  <text x="480" y="113" text-anchor="middle" class="small">Express + BullMQ</text>
+
+  <!-- Redis -->
+  <rect x="660" y="40" width="200" height="60" class="box" />
+  <text x="760" y="64" text-anchor="middle" class="label">Redis</text>
+  <text x="760" y="82" text-anchor="middle" class="small">Cache, Locks, Queue</text>
+
+  <!-- DB -->
+  <rect x="660" y="140" width="200" height="60" class="box" />
+  <text x="760" y="164" text-anchor="middle" class="label">Supabase / Postgres</text>
+
+  <!-- MP -->
+  <rect x="360" y="200" width="240" height="70" class="box" />
+  <text x="480" y="232" text-anchor="middle" class="label">Mercado Pago</text>
+  <text x="480" y="250" text-anchor="middle" class="small">Webhooks / Payments</text>
+
+  <!-- arrows -->
+  <path d="M260 65 L360 110" class="arrow" />
+  <path d="M260 205 L360 220" class="arrow" />
+  <path d="M600 115 L660 80" class="arrow" />
+  <path d="M600 240 L660 170" class="arrow" />
+  <path d="M480 16 L480 60" class="arrow" />
+
+</svg>
