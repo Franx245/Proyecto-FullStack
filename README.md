@@ -109,6 +109,10 @@ JWT_SECRET=replace-with-a-long-random-secret
 ACCESS_TOKEN_SECRET=replace-with-a-different-access-secret
 REFRESH_TOKEN_SECRET=replace-with-a-different-refresh-secret
 MP_ACCESS_TOKEN=
+MP_WEBHOOK_SECRET=
+BACKEND_URL=https://tu-api-produccion.com
+CRON_SECRET=replace-with-a-long-random-secret
+CHECKOUT_EXPIRATION_MINUTES=30
 PORT=3001
 NODE_ENV=development
 FRONTEND_URL=https://tu-storefront.vercel.app
@@ -124,7 +128,11 @@ Qué hace cada variable:
 - JWT_SECRET: secreto general de JWT. El proyecto lo usa como fallback si no definís secretos separados.
 - ACCESS_TOKEN_SECRET: firma de access tokens del admin.
 - REFRESH_TOKEN_SECRET: firma de refresh tokens del admin.
-- MP_ACCESS_TOKEN: token privado de Mercado Pago para una futura integración de pagos.
+- MP_ACCESS_TOKEN: token privado de Mercado Pago usado por Checkout Pro y consulta de pagos.
+- MP_WEBHOOK_SECRET: firma secreta del panel de Webhooks de Mercado Pago para validar x-signature.
+- BACKEND_URL: URL pública del backend para notification_url y webhooks de Mercado Pago.
+- CRON_SECRET: secreto que Vercel envía como Authorization Bearer al cron de expiración.
+- CHECKOUT_EXPIRATION_MINUTES: ventana de vigencia de una orden pendiente antes de pasar a EXPIRED y liberar stock.
 - PORT: puerto del backend Express.
 - NODE_ENV: ajusta logging y comportamiento de entorno.
 - FRONTEND_URL: URL pública del storefront en Vercel.
@@ -136,6 +144,48 @@ Nota importante:
 
 - El backend puede correr en local con defaults de JWT, pero ya no debe usar SQLite como base productiva.
 - En producción no deberías usar secretos por defecto ni ejecutar seeds automáticamente.
+
+## Cambios de schema obligatorios
+
+La integración de Mercado Pago ahora requiere estos cambios en Order dentro de [backend/prisma/schema.prisma](backend/prisma/schema.prisma):
+
+- payment_id: string nullable y único.
+- preference_id: string nullable.
+- currency: string.
+- exchange_rate: float nullable.
+- total_ars: float nullable.
+- expires_at: DateTime nullable.
+- payment_status: string nullable.
+- payment_status_detail: string nullable.
+- payment_approved_at: DateTime nullable.
+
+También se agregaron estos estados al enum OrderStatus:
+
+- FAILED
+- EXPIRED
+
+## Actualización de base requerida
+
+Tenés que aplicar el schema antes de levantar backend o usar checkout:
+
+```bash
+npm run db
+```
+
+Sin este paso, el backend va a fallar cuando intente leer o escribir columnas nuevas de órdenes y pagos. El servidor ahora responde un error controlado de schema desactualizado para rutas de órdenes y checkout, pero la integración no funciona hasta correr ese comando.
+
+Para una preparación segura de producción, incluyendo detección y limpieza no destructiva de payment_id duplicados antes del UNIQUE, seguí el runbook en [docs/mercadopago-db-runbook.md](docs/mercadopago-db-runbook.md).
+
+Para el despliegue completo del flujo nuevo de Checkout API directo, variables requeridas, CSP y verificación post-deploy, seguí [docs/checkout-api-deploy.md](docs/checkout-api-deploy.md).
+
+## Expiración automática de órdenes
+
+El backend expira órdenes PENDING_PAYMENT cuando expires_at ya pasó, las marca como EXPIRED y devuelve stock.
+
+- Endpoint interno: GET /api/internal/orders/expire-pending
+- Autenticación requerida: Authorization: Bearer ${CRON_SECRET}
+
+En Vercel conviene ejecutar ese endpoint con Cron Jobs. Si tu plan no permite la frecuencia deseada, usá un scheduler externo con el mismo header Bearer.
 
 ### Frontend (.env)
 
@@ -347,6 +397,66 @@ Esta base quedó evolucionada en cuatro frentes: storefront, panel admin, backen
 
 - Separación formal entre storefront/API y admin según memoria de repo.
 	Por qué: el admin se despliega como proyecto Vercel independiente y la tienda/API como proyecto raíz; esto evita mezclar tiempos de build y configuración.
+
+## Diagramas del stack
+
+Diagrama de la arquitectura actual (alto nivel):
+
+```mermaid
+flowchart LR
+	Storefront[Storefront (Vite / React)] -->|API requests| API[Backend API (Express, Vercel)]
+	Admin[Admin (frontend-admin)] -->|API requests| API
+	API -->|ORM: Prisma| DB[(Supabase / Postgres)]
+	API -->|Mercado Pago Webhooks| MP[Mercado Pago]
+	CDN[(Vercel CDN)] --> Storefront
+	CDN --> Admin
+	classDef infra fill:#0f172a,color:#e6eefb,stroke:#0b1220;
+	class API,DB,MP,CDN infra;
+```
+
+Diagrama objetivo con Redis (próxima actualización):
+
+```mermaid
+flowchart LR
+	Storefront -->|API requests / cache| API
+	Admin -->|API requests| API
+	API -->|reads/writes| DB[(Supabase / Postgres)]
+	API -->|cache reads/writes| Redis[(Redis Cache / Session Store)]
+	API -->|enqueue| Jobs[Background Workers]
+	Jobs -->|expire orders / rebuild cache| Redis
+	MP[Mercado Pago] -->|webhooks| API
+	CDN --> Storefront
+	classDef infra fill:#07112b,color:#e6eefb,stroke:#07203a;
+	class API,DB,Redis,Jobs,MP,CDN infra;
+```
+
+## Notas sobre la próxima actualización: Redis
+
+- Objetivos:
+	- Añadir caching de respuestas pesadas (catálogo, listas de cards) para reducir latencia y coste de consultas.
+	- Usar Redis como session store para sesiones admin (si se decide migrar a server-render o SSR en futuro).
+	- Delegar expiración de órdenes y tareas programadas a workers (BullMQ / Bee-Queue) con Redis como broker.
+
+- Cambios necesarios:
+	- Añadir cliente Redis en `backend/src/lib/redis.js` y wrapper con TTLs por clave.
+	- Introducir capa de cache en puntos calientes: `getPublicCardFilters`, `listPublicCards` y endpoints de catálogo.
+	- Modificar `expirePendingOrders` para encolar tareas idempotentes y evitar bloqueos largos en transacciones.
+	- Añadir despliegue de worker (proc. separado) o serverless que consuma colas (Vercel + worker provider / render background worker).
+
+- Riesgos y mitigaciones:
+	- Invalidez de cache → usar keys versionadas por `catalogVersion` y TTLs conservadores.
+	- Consistencia stock/pedido → mantener invalidación de cache inmediata tras `updateOrderStatusWithEffects`.
+
+## Próxima actualización (plan rápido)
+
+1. Añadir dependencia `ioredis` y archivo `backend/src/lib/redis.js` (cliente con reconnect/backoff).
+2. Implementar helpers `cacheGet(key)`, `cacheSet(key, value, ttl)`, `cacheDel(key)` y una estrategia de versionado de keys.
+3. Cachear resultados de `listPublicCards` y `getPublicCardFilters` con invalidación en `updateOrderStatusWithEffects` y cambios de `card`.
+4. Desplegar worker (BullMQ) para `expirePendingOrders` y tareas asíncronas.
+
+---
+
+Si querés, hago el commit con este README actualizado y genero el push al remoto ahora.
 
 - URLs productivas actualmente utilizadas:
 	- Storefront/API: https://duelvault-store-api.vercel.app
