@@ -1,9 +1,11 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
-import { createHash } from "node:crypto";
 import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const apiPort = Number(process.env.API_PORT || 3001);
 const storePort = Number(process.env.STORE_PORT || 5173);
 
@@ -22,81 +24,25 @@ function createModulePreloadMarkup(bundle, moduleIds) {
     .join("");
 }
 
-function createServiceWorkerSource(cachePrefix, precacheUrls) {
-  const cacheVersion = createHash("sha1")
-    .update(precacheUrls.join("|"))
-    .digest("hex")
-    .slice(0, 10);
+function createCleanupServiceWorkerSource(cachePrefixes) {
+  return `const CACHE_PREFIXES = ${JSON.stringify(cachePrefixes)};
 
-  return `const CACHE_NAME = "${cachePrefix}-${cacheVersion}";
-const SHELL_CACHE_URL = "/index.html";
-const PRECACHE_URLS = ${JSON.stringify(precacheUrls)};
-
-self.addEventListener("install", (event) => {
+self.addEventListener("install", () => {
   self.skipWaiting();
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS)).catch(() => undefined)
-  );
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
-        keys
-          .filter((key) => key.startsWith("${cachePrefix}-") && key !== CACHE_NAME)
-          .map((key) => caches.delete(key))
-      )
-    ).then(() => self.clients.claim())
-  );
-});
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(
+      keys
+        .filter((key) => CACHE_PREFIXES.some((prefix) => key.startsWith(prefix)))
+        .map((key) => caches.delete(key))
+    );
 
-self.addEventListener("fetch", (event) => {
-  const { request } = event;
-  if (request.method !== "GET") {
-    return;
-  }
-
-  const url = new URL(request.url);
-  if (url.origin !== self.location.origin || url.pathname.startsWith("/api/")) {
-    return;
-  }
-
-  if (request.mode === "navigate") {
-    event.respondWith((async () => {
-      const cache = await caches.open(CACHE_NAME);
-      const cachedShell = (await cache.match(SHELL_CACHE_URL)) || (await cache.match("/"));
-      const networkUpdate = fetch(request)
-        .then((response) => {
-          if (response.ok) {
-            cache.put(SHELL_CACHE_URL, response.clone());
-            cache.put(request, response.clone());
-          }
-          return response;
-        })
-        .catch(() => cachedShell);
-
-      return cachedShell || networkUpdate;
-    })());
-    return;
-  }
-
-  if (!url.pathname.startsWith("/assets/") && !PRECACHE_URLS.includes(url.pathname)) {
-    return;
-  }
-
-  event.respondWith((async () => {
-    const cache = await caches.open(CACHE_NAME);
-    const cachedResponse = await cache.match(request);
-    if (cachedResponse) {
-      return cachedResponse;
-    }
-
-    const response = await fetch(request);
-    if (response.ok) {
-      cache.put(request, response.clone());
-    }
-    return response;
+    const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    await self.registration.unregister();
+    await Promise.all(clients.map((client) => client.navigate(client.url).catch(() => undefined)));
   })());
 });
 `;
@@ -131,16 +77,6 @@ function inlineMainStylesheet() {
         `<link rel="preload" as="style" crossorigin href="${stylesheetHref}" data-full-stylesheet onload="this.onload=null;this.rel='stylesheet'">`,
         `<noscript><link rel="stylesheet" crossorigin href="${stylesheetHref}"></noscript>`,
       ].join("");
-      const precacheUrls = [
-        "/",
-        "/index.html",
-        "/manifest.json",
-        "/icon.svg",
-        ...Object.values(bundle)
-          .filter((file) => file.fileName !== "index.html")
-          .map((file) => `/${file.fileName}`),
-      ];
-
       htmlAsset.source = htmlSource.replace(
         new RegExp(`<link rel="stylesheet" crossorigin href="${escapedStylesheetHref}">`),
         deferredStylesheet
@@ -148,7 +84,7 @@ function inlineMainStylesheet() {
       bundle["sw.js"] = {
         type: "asset",
         fileName: "sw.js",
-        source: createServiceWorkerSource("duelvault-shell", [...new Set(precacheUrls)]),
+        source: createCleanupServiceWorkerSource(["duelvault-shell"]),
       };
     },
   };
@@ -193,9 +129,17 @@ export default defineConfig({
     },
     rollupOptions: {
       output: {
-        manualChunks: {
-          "react-query": ["@tanstack/react-query"],
-          "ui-kit": ["lucide-react"],
+        manualChunks(id) {
+          const nm = "node_modules/";
+          const idx = id.indexOf(nm);
+          if (idx === -1) return;
+          const pkg = id.slice(idx + nm.length);
+          if (pkg.startsWith("react/") || pkg.startsWith("react-dom/") || pkg.startsWith("scheduler/")) return "vendor-react";
+          if (pkg.startsWith("@tanstack/react-query") || pkg.startsWith("@tanstack/query-")) return "react-query";
+          if (pkg.startsWith("lucide-react")) return "ui-kit";
+          if (pkg.startsWith("framer-motion") || pkg.startsWith("motion/")) return "motion";
+          if (pkg.startsWith("@supabase/")) return "supabase";
+          if (pkg.startsWith("sonner")) return "sonner";
         },
       },
     },

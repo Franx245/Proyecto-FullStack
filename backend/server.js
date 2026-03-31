@@ -1,18 +1,55 @@
+import "./src/lib/load-env.js";
 import bcrypt from "bcryptjs";
 import cors from "cors";
 import ExcelJS from "exceljs";
 import express from "express";
-import { createHash } from "node:crypto";
+import { MercadoPagoConfig, Payment, Preference } from "mercadopago";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import prismaPkg from "@prisma/client";
 import path from "path";
 import { fileURLToPath } from "url";
-import { prisma } from "./src/lib/prisma.js";
+import { prisma, withDatabaseConnection } from "./src/lib/prisma.js";
 import { syncCatalogFromScope } from "./src/lib/catalogSync.js";
+import {
+  cacheGetOrFetch,
+  invalidatePublicCatalogCache,
+  DASHBOARD_CACHE_KEY,
+  DASHBOARD_CACHE_TTL_SECONDS,
+  PUBLIC_CARD_DETAIL_CACHE_PREFIX,
+  PUBLIC_CARD_DETAIL_CACHE_TTL_SECONDS,
+  PUBLIC_CARD_FILTERS_CACHE_KEY,
+  PUBLIC_CARD_FILTERS_CACHE_TTL_SECONDS,
+  PUBLIC_CARD_LIST_CACHE_PREFIX,
+  PUBLIC_CARD_LIST_CACHE_TTL_SECONDS,
+} from "./src/lib/cache.js";
+import { getUsdToArsRate } from "./src/lib/dollar.js";
+import { createMercadoPagoDirectPayment } from "./src/lib/mercadopagoPayments.js";
+import { createRateLimitMiddleware, getRequestIp, validateBody } from "./src/lib/requestGuards.js";
+/* ── BullMQ + Realtime ── */
+import { publishEvent, subscribeToEvents, stopEventBus } from "./src/lib/events.js";
+import { publicSSEHandler, adminSSEHandler } from "./src/lib/sse.js";
+import { startWorker, stopWorker } from "./src/lib/worker.js";
+import { registerScheduledJobs, scheduleSyncCards, scheduleStockUpdate } from "./src/lib/scheduler.js";
+import { pingRedisTcp, isRedisTcpConfigured } from "./src/lib/redis-tcp.js";
+import { getRedisBackendName, probeRedisConnection } from "./src/lib/redis.js";
+import { invalidateOrderRelatedCache } from "./src/lib/cache-invalidation.js";
+import { recordApiMetric, recordCatalogSearchMetric } from "./src/lib/metrics.js";
+import {
+  adminLoginBodySchema,
+  contactRequestBodySchema,
+  forgotPasswordBodySchema,
+  loginBodySchema,
+  logoutBodySchema,
+  refreshTokenBodySchema,
+  registerBodySchema,
+  resetPasswordBodySchema,
+} from "./src/lib/requestSchemas.js";
 import {
   createPasswordResetToken,
   getRefreshTokenExpiryDate,
   hashToken,
   requireAdminAuth,
+  requireAdminEventStreamAuth,
   requireAdminRole,
   requireAuth,
   signAccessToken,
@@ -29,6 +66,14 @@ const isDirectExecution = process.argv[1]
 const app = express();
 const PORT = Number(process.env.PORT || 3001);
 const REQUEST_TIMEOUT_MS = Number(process.env.API_REQUEST_TIMEOUT_MS || 15000);
+const CHECKOUT_REQUEST_TIMEOUT_MS = Math.max(
+  REQUEST_TIMEOUT_MS,
+  Number(process.env.CHECKOUT_REQUEST_TIMEOUT_MS || 45000)
+);
+const MERCADOPAGO_WEBHOOK_TIMEOUT_MS = Math.max(
+  REQUEST_TIMEOUT_MS,
+  Number(process.env.MP_WEBHOOK_TIMEOUT_MS || 25000)
+);
 const localHosts = new Set(["localhost", "127.0.0.1"]);
 const configuredOrigins = new Set(
   [
@@ -42,10 +87,67 @@ const configuredOrigins = new Set(
 const allowedPorts = new Set([
   String(process.env.STORE_PORT || 5173),
   String(process.env.ADMIN_PORT || 5174),
+  String(process.env.NEXT_STORE_PORT || 3000),
   "5173",
   "5174",
+  "3000",
 ]);
 const allowVercelPreviewOrigins = process.env.ALLOW_VERCEL_PREVIEWS === "true";
+const MERCADOPAGO_ACCESS_TOKEN = String(process.env.MP_ACCESS_TOKEN || "").trim();
+const MERCADOPAGO_WEBHOOK_SECRET = String(process.env.MP_WEBHOOK_SECRET || "").trim();
+const BACKEND_PUBLIC_URL = String(process.env.BACKEND_URL || "").trim().replace(/\/$/, "");
+const FRONTEND_PUBLIC_URL = String(process.env.FRONTEND_URL || "").trim().replace(/\/$/, "");
+const allowedVercelProjectNames = new Set(
+  [...configuredOrigins, BACKEND_PUBLIC_URL]
+    .map((value) => {
+      try {
+        const hostname = new URL(value).hostname.toLowerCase();
+        if (!hostname.endsWith(".vercel.app")) {
+          return null;
+        }
+
+        return hostname.slice(0, -".vercel.app".length);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
+);
+const CRON_SECRET = String(process.env.CRON_SECRET || "").trim();
+const CHECKOUT_EXPIRATION_MINUTES = Math.max(5, Number(process.env.CHECKOUT_EXPIRATION_MINUTES || 30));
+const ORDER_SCHEMA_CACHE_TTL_MS = 1000 * 60;
+const MERCADOPAGO_ACCOUNT_CACHE_TTL_MS = 1000 * 60 * 10;
+const MERCADOPAGO_WEBHOOK_PATHS = ["/api/checkout/webhook", "/api/webhook/mercadopago"];
+const MERCADOPAGO_TEST_ACCESS_TOKEN_PREFIX = "TEST-";
+const mercadoPagoClient = MERCADOPAGO_ACCESS_TOKEN
+  ? new MercadoPagoConfig({ accessToken: MERCADOPAGO_ACCESS_TOKEN })
+  : null;
+const mercadoPagoPreferenceClient = mercadoPagoClient ? new Preference(mercadoPagoClient) : null;
+const mercadoPagoPaymentClient = mercadoPagoClient ? new Payment(mercadoPagoClient) : null;
+const orderSchemaState = {
+  checkedAt: 0,
+  inflight: null,
+  details: null,
+};
+const mercadoPagoAccountState = {
+  checkedAt: 0,
+  inflight: null,
+  details: null,
+};
+
+function resolveRequestTimeoutMs(req) {
+  const requestPath = String(req.path || req.originalUrl || "");
+
+  if (requestPath === "/api/checkout" || requestPath === "/api/checkout/create-preference") {
+    return CHECKOUT_REQUEST_TIMEOUT_MS;
+  }
+
+  if (MERCADOPAGO_WEBHOOK_PATHS.includes(requestPath)) {
+    return MERCADOPAGO_WEBHOOK_TIMEOUT_MS;
+  }
+
+  return REQUEST_TIMEOUT_MS;
+}
 
 function isAllowedOrigin(origin) {
   if (!origin) {
@@ -59,12 +161,30 @@ function isAllowedOrigin(origin) {
 
   try {
     const parsed = new URL(origin);
+    const hostname = parsed.hostname.toLowerCase();
 
-    if (allowVercelPreviewOrigins && parsed.hostname.endsWith(".vercel.app")) {
+    if (localHosts.has(hostname) && process.env.NODE_ENV !== "production") {
       return true;
     }
 
-    return localHosts.has(parsed.hostname) && allowedPorts.has(parsed.port);
+    if (allowVercelPreviewOrigins && hostname.endsWith(".vercel.app")) {
+      return true;
+    }
+
+    if (hostname.endsWith(".vercel.app")) {
+      const projectName = hostname.slice(0, -".vercel.app".length);
+      for (const allowedProjectName of allowedVercelProjectNames) {
+        if (projectName === allowedProjectName || projectName.startsWith(`${allowedProjectName}-`)) {
+          return true;
+        }
+      }
+    }
+
+    if (localHosts.has(hostname) && allowedPorts.has(parsed.port)) {
+      return true;
+    }
+
+    return false;
   } catch {
     return false;
   }
@@ -78,23 +198,32 @@ const SHIPPING_OPTIONS = {
 };
 
 const ORDER_TRANSITIONS = {
-  [OrderStatus.PENDING_PAYMENT]: [OrderStatus.PAID, OrderStatus.CANCELLED],
+  [OrderStatus.PENDING_PAYMENT]: [OrderStatus.PAID, OrderStatus.FAILED, OrderStatus.EXPIRED, OrderStatus.CANCELLED],
+  [OrderStatus.FAILED]: [OrderStatus.PENDING_PAYMENT, OrderStatus.CANCELLED],
+  [OrderStatus.EXPIRED]: [OrderStatus.PENDING_PAYMENT, OrderStatus.CANCELLED],
   [OrderStatus.PAID]: [OrderStatus.SHIPPED, OrderStatus.CANCELLED],
   [OrderStatus.SHIPPED]: [OrderStatus.COMPLETED, OrderStatus.CANCELLED],
   [OrderStatus.COMPLETED]: [],
   [OrderStatus.CANCELLED]: [],
 };
+const BILLABLE_ORDER_STATUSES = [OrderStatus.PAID, OrderStatus.SHIPPED, OrderStatus.COMPLETED];
+const DEFAULT_ADMIN_USERS_PAGE_SIZE = 8;
+const DEFAULT_ADMIN_ORDERS_PAGE_SIZE = 10;
+const MAX_ADMIN_PAGE_SIZE = 50;
 
 app.use(cors({
   origin(origin, callback) {
-    callback(isAllowedOrigin(origin) ? null : new Error("Origin not allowed by CORS"), isAllowedOrigin(origin));
+    const allowedOrigin = isAllowedOrigin(origin);
+    callback(allowedOrigin ? null : new Error("Origin not allowed by CORS"), allowedOrigin);
   },
   credentials: true,
 }));
-app.use(express.json());
+app.set("trust proxy", 1);
+app.use(express.json({ limit: "256kb" }));
 app.use((req, res, next) => {
   const requestId = String(req.headers["x-request-id"] || `srv_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`);
   const controller = new AbortController();
+  const timeoutMs = resolveRequestTimeoutMs(req);
 
   req.requestContext = {
     requestId,
@@ -102,6 +231,7 @@ app.use((req, res, next) => {
     isCancelled: false,
     isTimedOut: false,
     startedAt: Date.now(),
+    timeoutMs,
   };
 
   const abortRequest = (reason) => {
@@ -123,18 +253,128 @@ app.use((req, res, next) => {
     }
   });
 
-  res.setTimeout(REQUEST_TIMEOUT_MS, () => {
+  res.setTimeout(timeoutMs, () => {
     abortRequest("timeout");
     if (!res.headersSent) {
       res.status(408).json({
         error: "Request timed out",
         code: "REQUEST_TIMEOUT",
         requestId,
+        timeout_ms: timeoutMs,
       });
     }
   });
 
+  res.on("finish", () => {
+    const durationMs = Date.now() - (req.requestContext?.startedAt || Date.now());
+    void recordApiMetric({
+      method: req.method,
+      route: req.route?.path || req.path,
+      statusCode: res.statusCode,
+      durationMs,
+    });
+  });
+
   next();
+});
+
+app.use([
+  "/api/checkout",
+  ...MERCADOPAGO_WEBHOOK_PATHS,
+  "/api/orders",
+  "/api/auth/orders",
+  "/api/admin/dashboard",
+  "/api/admin/orders",
+  "/api/admin/export/orders",
+  "/api/internal/orders/expire-pending",
+], async (req, res, next) => {
+  try {
+    await ensureOrderSchemaReady();
+    next();
+  } catch (error) {
+    const isDatabaseUnavailable = isDatabaseUnavailableError(error);
+
+    res.status(error?.statusCode || 503).json({
+      error: isDatabaseUnavailable ? "Database is unavailable" : error?.message || "Database schema is out of date",
+      code: isDatabaseUnavailable ? "DATABASE_UNAVAILABLE" : error?.code || "DATABASE_SCHEMA_OUTDATED",
+      requestId: req.requestContext?.requestId || null,
+      ...(!isDatabaseUnavailable && error?.details ? error.details : {}),
+    });
+  }
+});
+
+const contactRateLimit = createRateLimitMiddleware({
+  keyPrefix: "rl:contact",
+  windowMs: 15 * 60 * 1000,
+  maxRequests: 5,
+  message: "Too many contact requests. Try again later.",
+  code: "CONTACT_RATE_LIMIT_EXCEEDED",
+});
+
+const authWriteRateLimit = createRateLimitMiddleware({
+  keyPrefix: "rl:auth",
+  windowMs: 10 * 60 * 1000,
+  maxRequests: 10,
+  message: "Too many authentication requests. Try again later.",
+  code: "AUTH_RATE_LIMIT_EXCEEDED",
+});
+
+const sessionRateLimit = createRateLimitMiddleware({
+  keyPrefix: "rl:session",
+  windowMs: 10 * 60 * 1000,
+  maxRequests: 20,
+  message: "Too many session requests. Try again later.",
+  code: "SESSION_RATE_LIMIT_EXCEEDED",
+});
+
+const passwordResetRateLimit = createRateLimitMiddleware({
+  keyPrefix: "rl:password-reset",
+  windowMs: 15 * 60 * 1000,
+  maxRequests: 5,
+  message: "Too many password reset requests. Try again later.",
+  code: "PASSWORD_RESET_RATE_LIMIT_EXCEEDED",
+});
+
+const adminAuthRateLimit = createRateLimitMiddleware({
+  keyPrefix: "rl:admin-auth",
+  windowMs: 10 * 60 * 1000,
+  maxRequests: 8,
+  message: "Too many admin authentication requests. Try again later.",
+  code: "ADMIN_AUTH_RATE_LIMIT_EXCEEDED",
+});
+
+/* ── Global rate limiter (all /api/* routes) ── */
+const GLOBAL_RATE_LIMIT_SKIP = new Set([
+  "/api/health",
+  "/api/checkout/webhook",
+  "/api/webhook/mercadopago",
+  "/api/events/stream",
+  "/api/admin/events/stream",
+]);
+
+const globalRateLimit = createRateLimitMiddleware({
+  keyPrefix: "rl:global",
+  windowMs: 60 * 1000,
+  maxRequests: 100,
+  message: "Too many requests. Please try again later.",
+  code: "GLOBAL_RATE_LIMIT_EXCEEDED",
+  buildKey: (req) => getRequestIp(req),
+});
+
+const checkoutRateLimit = createRateLimitMiddleware({
+  keyPrefix: "rl:checkout",
+  windowMs: 60 * 1000,
+  maxRequests: 5,
+  message: "Too many checkout requests. Please try again later.",
+  code: "CHECKOUT_RATE_LIMIT_EXCEEDED",
+});
+
+app.use("/api", (req, res, next) => {
+  if (GLOBAL_RATE_LIMIT_SKIP.has(req.path) || GLOBAL_RATE_LIMIT_SKIP.has(`/api${req.path}`)) {
+    next();
+    return;
+  }
+  globalRateLimit(req, res, next);
 });
 
 function toStatus(card) {
@@ -142,7 +382,7 @@ function toStatus(card) {
     return "out_of_stock";
   }
 
-  if (card.stock <= card.lowStockThreshold) {
+  if (isLowStockCard(card)) {
     return "low_stock";
   }
 
@@ -227,14 +467,45 @@ const PUBLIC_CARD_LIST_SELECT = {
   updatedAt: true,
 };
 
+const ADMIN_USER_RESPONSE_SELECT = {
+  id: true,
+  email: true,
+  username: true,
+  fullName: true,
+  phone: true,
+  avatarUrl: true,
+  role: true,
+  isActive: true,
+  lastLoginAt: true,
+  lastLoginIp: true,
+  createdAt: true,
+  updatedAt: true,
+};
+
+const DASHBOARD_ORDER_SUMMARY_SELECT = {
+  userId: true,
+  status: true,
+  total: true,
+  shippingZone: true,
+  createdAt: true,
+  items: {
+    select: {
+      quantity: true,
+    },
+  },
+};
+
 const CATALOG_SCOPE_MODE = {
   ALL: "ALL",
   FIRST_N: "FIRST_N",
   SELECTED: "SELECTED",
 };
 
-const DEFAULT_CATALOG_SCOPE_LIMIT = 500;
-const MAX_CATALOG_SCOPE_LIMIT = 5000;
+const _DEFAULT_CATALOG_SCOPE_LIMIT = 500;
+const _MAX_CATALOG_SCOPE_LIMIT = 5000;
+const CATALOG_SCOPE_MODE_SETTING_KEY = "catalog_scope_mode";
+const CATALOG_SCOPE_LIMIT_SETTING_KEY = "catalog_scope_limit";
+const CATALOG_SCOPE_SELECTED_IDS_SETTING_KEY = "catalog_scope_selected_ids";
 
 function slugify(value) {
   return String(value || "")
@@ -252,6 +523,11 @@ function normalizeEmail(value) {
 
 function normalizeUsername(value) {
   return slugify(String(value || "").replace(/-/g, " ")).replace(/-/g, "_");
+}
+
+function getAuthenticatedActorId(req) {
+  const candidate = Number(req.user?.id ?? req.user?.sub);
+  return Number.isFinite(candidate) ? candidate : null;
 }
 
 function normalizeOrderStatus(value) {
@@ -299,6 +575,18 @@ function isBillableStatus(status) {
   return [OrderStatus.PAID, OrderStatus.SHIPPED, OrderStatus.COMPLETED].includes(status);
 }
 
+function isOrderPayableStatus(status) {
+  return [OrderStatus.PENDING_PAYMENT, OrderStatus.FAILED].includes(status);
+}
+
+function isMercadoPagoProcessingStatus(status) {
+  return ["pending", "in_process", "authorized", "in_mediation"].includes(String(status || "").trim().toLowerCase());
+}
+
+function hasMercadoPagoPaymentAttempt(order) {
+  return Boolean(String(order?.payment_id || "").trim());
+}
+
 function canCancelOrder(role) {
   return role === UserRole.ADMIN;
 }
@@ -313,7 +601,7 @@ function getAllowedOrderTransitions(currentStatus, role) {
   });
 }
 
-function canTransitionOrder(currentStatus, nextStatus, role) {
+function _canTransitionOrder(currentStatus, nextStatus, role) {
   if (!nextStatus || currentStatus === nextStatus) {
     return false;
   }
@@ -325,10 +613,373 @@ function formatCurrency(value) {
   return Number((value || 0).toFixed(2));
 }
 
+function buildCheckoutExpirationDate(baseTime = Date.now()) {
+  return new Date(baseTime + CHECKOUT_EXPIRATION_MINUTES * 60 * 1000);
+}
+
+async function inspectOrderSchemaCompatibility() {
+  const [columnRows, enumRows] = await Promise.all([
+    prisma.$queryRaw`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'Order'
+    `,
+    prisma.$queryRaw`
+      SELECT e.enumlabel
+      FROM pg_enum e
+      JOIN pg_type t ON e.enumtypid = t.oid
+      WHERE t.typname = 'OrderStatus'
+    `,
+  ]);
+
+  const existingColumns = new Set((Array.isArray(columnRows) ? columnRows : []).map((row) => String(row.column_name || "").trim()));
+  const existingStatuses = new Set((Array.isArray(enumRows) ? enumRows : []).map((row) => String(row.enumlabel || "").trim()));
+  const requiredColumns = [
+    "payment_id",
+    "payment_status_detail",
+    "preference_id",
+    "currency",
+    "exchange_rate",
+    "total_ars",
+    "expires_at",
+  ];
+  const requiredStatuses = ["FAILED", "EXPIRED"];
+
+  return {
+    checkedAt: Date.now(),
+    missingColumns: requiredColumns.filter((column) => !existingColumns.has(column)),
+    missingStatuses: requiredStatuses.filter((status) => !existingStatuses.has(status)),
+  };
+}
+
+async function ensureOrderSchemaReady() {
+  if (orderSchemaState.details && Date.now() - orderSchemaState.checkedAt < ORDER_SCHEMA_CACHE_TTL_MS) {
+    if (orderSchemaState.details.missingColumns.length || orderSchemaState.details.missingStatuses.length) {
+      throw createAppError("Database schema is out of date for order payments. Run npm run db before serving orders or Mercado Pago checkout.", {
+        statusCode: 503,
+        code: "DATABASE_SCHEMA_OUTDATED",
+        details: {
+          required_command: "npm run db",
+          missing_columns: orderSchemaState.details.missingColumns,
+          missing_statuses: orderSchemaState.details.missingStatuses,
+        },
+      });
+    }
+
+    return orderSchemaState.details;
+  }
+
+  if (!orderSchemaState.inflight) {
+    orderSchemaState.inflight = inspectOrderSchemaCompatibility()
+      .then((details) => {
+        orderSchemaState.details = details;
+        orderSchemaState.checkedAt = Date.now();
+        return details;
+      })
+      .finally(() => {
+        orderSchemaState.inflight = null;
+      });
+  }
+
+  const details = await orderSchemaState.inflight;
+  if (details.missingColumns.length || details.missingStatuses.length) {
+    throw createAppError("Database schema is out of date for order payments. Run npm run db before serving orders or Mercado Pago checkout.", {
+      statusCode: 503,
+      code: "DATABASE_SCHEMA_OUTDATED",
+      details: {
+        required_command: "npm run db",
+        missing_columns: details.missingColumns,
+        missing_statuses: details.missingStatuses,
+      },
+    });
+  }
+
+  return details;
+}
+
+function assertMercadoPagoApiConfigured() {
+  if (!mercadoPagoClient || !mercadoPagoPreferenceClient || !mercadoPagoPaymentClient) {
+    throw createAppError("Mercado Pago is not configured", {
+      statusCode: 503,
+      code: "CHECKOUT_NOT_CONFIGURED",
+    });
+  }
+}
+
+function assertMercadoPagoCheckoutConfigured() {
+  assertMercadoPagoApiConfigured();
+
+  if (!BACKEND_PUBLIC_URL || !FRONTEND_PUBLIC_URL) {
+    throw createAppError("BACKEND_URL and FRONTEND_URL are required for Mercado Pago checkout", {
+      statusCode: 503,
+      code: "CHECKOUT_URLS_NOT_CONFIGURED",
+    });
+  }
+}
+
+function assertMercadoPagoWebhookConfigured() {
+  assertMercadoPagoApiConfigured();
+
+  if (!MERCADOPAGO_WEBHOOK_SECRET) {
+    throw createAppError("MP_WEBHOOK_SECRET is required to validate Mercado Pago webhook signatures", {
+      statusCode: 503,
+      code: "WEBHOOK_SECRET_NOT_CONFIGURED",
+    });
+  }
+}
+
+function assertMercadoPagoDirectPaymentsConfigured() {
+  assertMercadoPagoWebhookConfigured();
+}
+
+function buildCheckoutBackUrl(statusPath, orderId) {
+  return `${FRONTEND_PUBLIC_URL}/checkout/${statusPath}?orderId=${encodeURIComponent(String(orderId))}`;
+}
+
+async function inspectMercadoPagoAccount() {
+  const response = await fetch("https://api.mercadopago.com/users/me", {
+    headers: {
+      Authorization: `Bearer ${MERCADOPAGO_ACCESS_TOKEN}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    throw createAppError(`Mercado Pago account inspection failed with ${response.status}`, {
+      statusCode: 502,
+      code: "MERCADOPAGO_ACCOUNT_INSPECTION_FAILED",
+    });
+  }
+
+  const payload = await response.json();
+  return {
+    checkedAt: Date.now(),
+    isTestUser: Boolean(payload?.test_data?.test_user) || (Array.isArray(payload?.tags) && payload.tags.includes("test_user")),
+    nickname: String(payload?.nickname || "").trim() || null,
+    email: String(payload?.email || "").trim().toLowerCase() || null,
+  };
+}
+
+async function getMercadoPagoAccountDetails() {
+  if (mercadoPagoAccountState.details && Date.now() - mercadoPagoAccountState.checkedAt < MERCADOPAGO_ACCOUNT_CACHE_TTL_MS) {
+    return mercadoPagoAccountState.details;
+  }
+
+  if (!mercadoPagoAccountState.inflight) {
+    mercadoPagoAccountState.inflight = inspectMercadoPagoAccount()
+      .then((details) => {
+        mercadoPagoAccountState.details = details;
+        mercadoPagoAccountState.checkedAt = Date.now();
+        return details;
+      })
+      .finally(() => {
+        mercadoPagoAccountState.inflight = null;
+      });
+  }
+
+  return mercadoPagoAccountState.inflight;
+}
+
+function shouldUseMercadoPagoSandbox(accountDetails) {
+  return Boolean(accountDetails?.isTestUser);
+}
+
+function shouldUseMercadoPagoSandboxWebhook(accountDetails) {
+  return shouldUseMercadoPagoSandbox(accountDetails)
+    || MERCADOPAGO_ACCESS_TOKEN.startsWith(MERCADOPAGO_TEST_ACCESS_TOKEN_PREFIX);
+}
+
+function isMercadoPagoWebhookBaseUrlAllowed(value) {
+  if (!value) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(value);
+    const hostname = String(parsed.hostname || "").trim().toLowerCase();
+
+    if (!hostname || ["localhost", "127.0.0.1", "0.0.0.0"].includes(hostname)) {
+      return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function buildMercadoPagoNotificationUrl({ useSandboxWebhook = false } = {}) {
+  if (!isMercadoPagoWebhookBaseUrlAllowed(BACKEND_PUBLIC_URL)) {
+    return null;
+  }
+
+  const webhookPath = useSandboxWebhook ? MERCADOPAGO_WEBHOOK_PATHS[1] : MERCADOPAGO_WEBHOOK_PATHS[0];
+  return `${BACKEND_PUBLIC_URL}${webhookPath}?source_news=webhooks`;
+}
+
+function splitMercadoPagoFullName(fullName) {
+  const normalized = String(fullName || "")
+    .trim()
+    .replace(/\s+/g, " ");
+
+  if (!normalized) {
+    return { firstName: null, lastName: null };
+  }
+
+  const parts = normalized.split(" ");
+  if (parts.length === 1) {
+    return { firstName: parts[0], lastName: null };
+  }
+
+  return {
+    firstName: parts[0],
+    lastName: parts.slice(1).join(" "),
+  };
+}
+
+function resolveMercadoPagoPayer(order) {
+  const email = String(order?.customerEmail || order?.user?.email || "").trim().toLowerCase();
+  const fullName = order?.customerName || order?.address?.recipientName || order?.user?.fullName || "";
+  const { firstName, lastName } = splitMercadoPagoFullName(fullName);
+
+  const payer = {
+    ...(email ? { email } : {}),
+    ...(firstName ? { first_name: firstName } : {}),
+    ...(lastName ? { last_name: lastName } : {}),
+  };
+
+  return Object.keys(payer).length > 0 ? payer : undefined;
+}
+
+function buildMercadoPagoPreferenceItems(order, cardsById, exchangeRate) {
+  const items = order.items.map((item) => {
+    const card = cardsById.get(item.cardId);
+    return {
+      id: String(item.cardId),
+      title: String(card?.name || `Carta #${item.cardId}`).slice(0, 120),
+      description: String(card?.description || card?.setName || card?.cardType || "Carta coleccionable").slice(0, 240),
+      category_id: "others",
+      quantity: item.quantity,
+      currency_id: "ARS",
+      unit_price: formatCurrency(item.price * exchangeRate),
+    };
+  });
+
+  if (order.shippingCost > 0) {
+    items.push({
+      id: `shipping-${order.id}`,
+      title: String(order.shippingLabel || "Envio").slice(0, 120),
+      description: String(order.shippingAddress || order.shippingZone || "Costo de envio").slice(0, 240),
+      category_id: "services",
+      quantity: 1,
+      currency_id: "ARS",
+      unit_price: formatCurrency(order.shippingCost * exchangeRate),
+    });
+  }
+
+  return items;
+}
+
+function alignMercadoPagoItemsTotal(items, totalArs) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return [
+      {
+        id: "order-total",
+        title: "DuelVault Order",
+        description: "Checkout total",
+        category_id: "others",
+        quantity: 1,
+        currency_id: "ARS",
+        unit_price: formatCurrency(totalArs),
+      },
+    ];
+  }
+
+  const currentTotal = formatCurrency(items.reduce((sum, item) => sum + (item.unit_price * item.quantity), 0));
+  const delta = formatCurrency(totalArs - currentTotal);
+
+  if (delta === 0) {
+    return items;
+  }
+
+  const lastItem = items[items.length - 1];
+  const adjustedUnitPrice = formatCurrency(lastItem.unit_price + (delta / Math.max(lastItem.quantity || 1, 1)));
+
+  items[items.length - 1] = {
+    ...lastItem,
+    unit_price: adjustedUnitPrice > 0 ? adjustedUnitPrice : lastItem.unit_price,
+  };
+
+  return items;
+}
+
+function resolveMercadoPagoCheckoutUrl(preference, { useSandbox }) {
+  if (useSandbox) {
+    return preference?.sandbox_init_point || preference?.init_point || null;
+  }
+
+  return preference?.init_point || preference?.sandbox_init_point || null;
+}
+
 function createAppError(message, extra = {}) {
   const error = new Error(message);
   Object.assign(error, extra);
   return error;
+}
+
+function isDatabaseUnavailableError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return error?.name === "PrismaClientInitializationError"
+    || ["P1001", "P1002", "P2024"].includes(error?.code)
+    || message.includes("timed out fetching a new connection from the connection pool")
+    || message.includes("too many clients")
+    || message.includes("can't reach database server");
+}
+
+function sendErrorResponse(error, req, res, fallbackMessage = "Internal server error") {
+  if (res.headersSent) {
+    return;
+  }
+
+  const requestId = req.requestContext?.requestId || null;
+
+  if (error?.statusCode) {
+    res.status(error.statusCode).json({
+      error: error.message,
+      code: error.code || "REQUEST_ERROR",
+      ...(requestId ? { requestId } : {}),
+      ...(error.details ? { details: error.details } : {}),
+    });
+    return;
+  }
+
+  if (error?.name === "PrismaClientInitializationError") {
+    console.error("[request-error] prisma init failed", {
+      requestId,
+      route: getRouteKey(req),
+      message: error.message,
+    });
+
+    res.status(503).json({
+      error: "Database is unavailable",
+      code: "DATABASE_UNAVAILABLE",
+      ...(requestId ? { requestId } : {}),
+    });
+    return;
+  }
+
+  console.error("[request-error]", {
+    requestId,
+    route: getRouteKey(req),
+    message: error instanceof Error ? error.message : String(error),
+    stack: error instanceof Error ? error.stack : null,
+  });
+
+  res.status(500).json({
+    error: fallbackMessage,
+    ...(requestId ? { requestId } : {}),
+  });
 }
 
 function extractIp(req) {
@@ -354,6 +1005,148 @@ function safeJsonParse(value) {
   } catch {
     return null;
   }
+}
+
+function unwrapMercadoPagoBody(payload) {
+  return payload?.body || payload?.response || payload || null;
+}
+
+function normalizeMercadoPagoPaymentStatus(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeMercadoPagoPaymentStatusDetail(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized || null;
+}
+
+function parseMercadoPagoSignature(headerValue) {
+  const parts = String(headerValue || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  return parts.reduce((result, part) => {
+    const [key, value] = part.split("=", 2);
+    if (key === "ts") {
+      result.ts = String(value || "").trim();
+    }
+    if (key === "v1") {
+      result.v1 = String(value || "").trim();
+    }
+    return result;
+  }, { ts: "", v1: "" });
+}
+
+function buildMercadoPagoWebhookManifest(paymentId, requestId, ts) {
+  const normalizedPaymentId = String(paymentId || "").trim().toLowerCase();
+  const normalizedRequestId = String(requestId || "").trim();
+  const normalizedTs = String(ts || "").trim();
+  const parts = [];
+
+  if (normalizedPaymentId) {
+    parts.push(`id:${normalizedPaymentId}`);
+  }
+  if (normalizedRequestId) {
+    parts.push(`request-id:${normalizedRequestId}`);
+  }
+  if (normalizedTs) {
+    parts.push(`ts:${normalizedTs}`);
+  }
+
+  return `${parts.join(";")};`;
+}
+
+function validateMercadoPagoWebhookSignature(req, paymentId) {
+  const signature = parseMercadoPagoSignature(req.headers["x-signature"]);
+  const requestId = String(req.headers["x-request-id"] || "").trim();
+
+  if (!signature.ts || !signature.v1 || !requestId || !paymentId) {
+    throw createAppError("Mercado Pago webhook signature headers are incomplete", {
+      statusCode: 401,
+      code: "INVALID_WEBHOOK_SIGNATURE",
+    });
+  }
+
+  const manifest = buildMercadoPagoWebhookManifest(paymentId, requestId, signature.ts);
+  const expectedSignature = createHmac("sha256", MERCADOPAGO_WEBHOOK_SECRET)
+    .update(manifest)
+    .digest("hex");
+  const receivedSignature = signature.v1.toLowerCase();
+  const isValid = expectedSignature.length === receivedSignature.length
+    && timingSafeEqual(Buffer.from(expectedSignature), Buffer.from(receivedSignature));
+
+  if (!isValid) {
+    throw createAppError("Mercado Pago webhook signature mismatch", {
+      statusCode: 401,
+      code: "INVALID_WEBHOOK_SIGNATURE",
+    });
+  }
+
+  return {
+    providerRequestId: requestId,
+    manifest,
+    ts: signature.ts,
+  };
+}
+
+function extractMercadoPagoPaymentId(payload, query) {
+  const candidates = [
+    payload?.data?.id,
+    payload?.id,
+    query?.id,
+    query?.["data.id"],
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = String(candidate || "").trim();
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return "";
+}
+
+function resolveMercadoPagoOrderId(payment) {
+  const candidates = [payment?.metadata?.order_id, payment?.external_reference];
+
+  for (const candidate of candidates) {
+    const normalized = Number(candidate);
+    if (Number.isFinite(normalized)) {
+      return normalized;
+    }
+  }
+
+  return null;
+}
+
+function resolveWebhookOrderStatus(currentStatus, paymentStatus) {
+  if (!paymentStatus) {
+    return null;
+  }
+
+  if ([OrderStatus.EXPIRED, OrderStatus.PAID, OrderStatus.SHIPPED, OrderStatus.COMPLETED, OrderStatus.CANCELLED].includes(currentStatus)) {
+    return null;
+  }
+
+  if (paymentStatus === "approved") {
+    return OrderStatus.PAID;
+  }
+
+  if (["pending", "in_process", "in_mediation", "authorized"].includes(paymentStatus)) {
+    return OrderStatus.PENDING_PAYMENT;
+  }
+
+  if (paymentStatus === "expired") {
+    return OrderStatus.EXPIRED;
+  }
+
+  if (["rejected", "cancelled", "refunded", "charged_back"].includes(paymentStatus)) {
+    return OrderStatus.FAILED;
+  }
+
+  return null;
 }
 
 function normalizeHashInput(value) {
@@ -399,7 +1192,7 @@ function assertRequestActive(req) {
 }
 
 async function beginIdempotentMutation(req, { routeKey, payload } = {}) {
-  const actorId = Number(req.user?.id);
+  const actorId = getAuthenticatedActorId(req);
   const key = String(req.headers["x-idempotency-key"] || req.body?.mutation_id || "").trim();
   const resolvedRouteKey = routeKey || getRouteKey(req);
 
@@ -568,6 +1361,14 @@ function sanitizeOrderForAudit(order) {
     shippingProvince: order.shippingProvince || null,
     shippingPostalCode: order.shippingPostalCode || null,
     notes: order.notes || null,
+    currency: order.currency || null,
+    exchange_rate: order.exchange_rate ?? null,
+    total_ars: order.total_ars ?? null,
+    payment_id: order.payment_id || null,
+    payment_status: order.payment_status || null,
+    payment_status_detail: order.payment_status_detail || null,
+    preference_id: order.preference_id || null,
+    expires_at: order.expires_at || null,
     createdAt: order.createdAt,
     updatedAt: order.updatedAt,
     items: Array.isArray(order.items)
@@ -649,6 +1450,15 @@ function toUserResponse(user) {
   };
 }
 
+function toPublicUserResponse(user) {
+  return {
+    id: user.id,
+    username: user.username,
+    full_name: user.fullName,
+    avatar_url: user.avatarUrl || null,
+  };
+}
+
 function toAddressResponse(address) {
   return {
     id: address.id,
@@ -709,8 +1519,20 @@ function toOrderResponse(order, cardsById, options = {}) {
     subtotal: order.subtotal,
     shipping_cost: order.shippingCost,
     total: order.total,
+    currency: order.currency || "ARS",
+    exchange_rate: order.exchange_rate ?? null,
+    total_ars: order.total_ars ?? null,
     status: order.status.toLowerCase(),
     counts_for_dashboard: isBillableStatus(order.status),
+    processing_payment: order.status === OrderStatus.PENDING_PAYMENT
+      && hasMercadoPagoPaymentAttempt(order)
+      && isMercadoPagoProcessingStatus(order.payment_status),
+    payment_id: includeAdminFields ? order.payment_id || null : null,
+    payment_status: order.payment_status || null,
+    payment_status_detail: order.payment_status_detail || null,
+    preference_id: includeAdminFields ? order.preference_id || null : null,
+    payment_approved_at: order.payment_approved_at || null,
+    expires_at: order.expires_at || null,
     shipping_zone: order.shippingZone.toLowerCase(),
     shipping_label: order.shippingLabel,
     is_shipping_order: order.shippingZone !== ShippingZone.PICKUP,
@@ -726,7 +1548,7 @@ function toOrderResponse(order, cardsById, options = {}) {
     notes: order.notes || null,
     created_at: order.createdAt,
     updated_at: order.updatedAt,
-    user: order.user ? toUserResponse(order.user) : null,
+    user: order.user ? (includeAdminFields ? toUserResponse(order.user) : toPublicUserResponse(order.user)) : null,
     address: order.address ? toAddressResponse(order.address) : null,
     items,
   };
@@ -1042,7 +1864,7 @@ function buildConditionWhere(conditions) {
   return null;
 }
 
-function buildCardFilters(query) {
+function buildCardFilters(query, options = {}) {
   const minPrice = query.minPrice ? Number(query.minPrice) : undefined;
   const maxPrice = query.maxPrice ? Number(query.maxPrice) : undefined;
   const q = typeof query.q === "string" ? query.q.trim() : "";
@@ -1080,7 +1902,7 @@ function buildCardFilters(query) {
 
   return {
     where: {
-      isVisible: true,
+      ...buildPublicCatalogBaseWhere(options),
       ...(featuredOnly ? { isFeatured: true } : {}),
       ...(latestOnly ? { isNewArrival: true } : {}),
       ...(and.length ? { AND: and } : {}),
@@ -1099,22 +1921,16 @@ function buildCardFilters(query) {
   };
 }
 
-const PUBLIC_CARD_FILTERS_CACHE_TTL_MS = 1000 * 60 * 10;
-const PUBLIC_CARD_LIST_CACHE_TTL_MS = 1000 * 30;
-
-let publicCardFiltersCache = {
-  value: null,
-  expiresAt: 0,
-};
-
-let publicCardListCache = new Map();
-
 function invalidatePublicCatalogCaches() {
-  publicCardListCache.clear();
-  publicCardFiltersCache = {
-    value: null,
-    expiresAt: 0,
-  };
+  void invalidatePublicCatalogCache();
+}
+
+function setAdminInventoryCacheHeaders(res) {
+  res.set("Cache-Control", "private, max-age=300, stale-while-revalidate=60");
+}
+
+function setAdminCatalogWeakCacheHeaders(res) {
+  res.set("Cache-Control", "private, max-age=30, stale-while-revalidate=15");
 }
 
 function buildCatalogVersion(total, updatedAt) {
@@ -1123,144 +1939,139 @@ function buildCatalogVersion(total, updatedAt) {
 }
 
 function setPublicCatalogCacheHeaders(res) {
-  res.set("Cache-Control", "public, max-age=0, must-revalidate");
-  res.set("CDN-Cache-Control", "public, s-maxage=60, stale-while-revalidate=300");
-  res.set("Vercel-CDN-Cache-Control", "public, s-maxage=60, stale-while-revalidate=300");
+  const browserMaxAge = process.env.NODE_ENV === "production" ? 0 : PUBLIC_CARD_LIST_CACHE_TTL_SECONDS;
+  res.set("Cache-Control", `public, max-age=${browserMaxAge}, must-revalidate`);
+  res.set("CDN-Cache-Control", `public, s-maxage=${PUBLIC_CARD_LIST_CACHE_TTL_SECONDS}, stale-while-revalidate=300`);
+  res.set("Vercel-CDN-Cache-Control", `public, s-maxage=${PUBLIC_CARD_LIST_CACHE_TTL_SECONDS}, stale-while-revalidate=300`);
+}
+
+function setPublicFiltersCacheHeaders(res) {
+  const browserMaxAge = process.env.NODE_ENV === "production" ? 0 : PUBLIC_CARD_FILTERS_CACHE_TTL_SECONDS;
+  res.set("Cache-Control", `public, max-age=${browserMaxAge}, must-revalidate`);
+  res.set("CDN-Cache-Control", `public, s-maxage=${PUBLIC_CARD_FILTERS_CACHE_TTL_SECONDS}, stale-while-revalidate=86400`);
+  res.set("Vercel-CDN-Cache-Control", `public, s-maxage=${PUBLIC_CARD_FILTERS_CACHE_TTL_SECONDS}, stale-while-revalidate=86400`);
+}
+
+function setPublicCardDetailCacheHeaders(res) {
+  const browserMaxAge = process.env.NODE_ENV === "production" ? 0 : PUBLIC_CARD_DETAIL_CACHE_TTL_SECONDS;
+  res.set("Cache-Control", `public, max-age=${browserMaxAge}, must-revalidate`);
+  res.set("CDN-Cache-Control", `public, s-maxage=${PUBLIC_CARD_DETAIL_CACHE_TTL_SECONDS}, stale-while-revalidate=1800`);
+  res.set("Vercel-CDN-Cache-Control", `public, s-maxage=${PUBLIC_CARD_DETAIL_CACHE_TTL_SECONDS}, stale-while-revalidate=1800`);
 }
 
 function buildPublicCardListCacheKey(query, searchOverride) {
-  const params = new URLSearchParams();
+  const segments = ["scope=stock"];
 
   Object.entries(query)
     .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
     .forEach(([key, value]) => {
+      if (searchOverride !== undefined && key === "q") {
+        return;
+      }
+
       if (Array.isArray(value)) {
-        value.forEach((entry) => params.append(key, String(entry)));
+        value
+          .map((entry) => String(entry))
+          .sort((left, right) => left.localeCompare(right))
+          .forEach((entry) => {
+            if (entry) {
+              segments.push(`${encodeURIComponent(key)}=${encodeURIComponent(entry)}`);
+            }
+          });
         return;
       }
 
       if (value !== undefined && value !== null && value !== "") {
-        params.set(key, String(value));
+        segments.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`);
       }
     });
 
   if (searchOverride !== undefined) {
-    params.set("__searchOverride", String(searchOverride));
+    segments.push(`q=${encodeURIComponent(String(searchOverride))}`);
   }
 
-  return params.toString();
+  return `${PUBLIC_CARD_LIST_CACHE_PREFIX}:${segments.join(":") || "default"}`;
 }
 
-function getCachedPublicCardList(cacheKey) {
-  const now = Date.now();
-  const cached = publicCardListCache.get(cacheKey);
-
-  if (!cached) {
-    return null;
-  }
-
-  if (cached.expiresAt <= now) {
-    publicCardListCache.delete(cacheKey);
-    return null;
-  }
-
-  return cached.value;
-}
-
-function setCachedPublicCardList(cacheKey, value) {
-  publicCardListCache.set(cacheKey, {
-    value,
-    expiresAt: Date.now() + PUBLIC_CARD_LIST_CACHE_TTL_MS,
-  });
-
-  if (publicCardListCache.size > 50) {
-    const oldestKey = publicCardListCache.keys().next().value;
-    if (oldestKey) {
-      publicCardListCache.delete(oldestKey);
-    }
-  }
-}
-
-async function getPublicCardFilters() {
-  const now = Date.now();
-  if (publicCardFiltersCache.value && publicCardFiltersCache.expiresAt > now) {
-    return publicCardFiltersCache.value;
-  }
-
-  const [rarityRows, setRows] = await Promise.all([
-    prisma.card.findMany({
-      where: { isVisible: true },
-      select: { rarity: true },
-      distinct: ["rarity"],
-      orderBy: { rarity: "asc" },
-    }),
-    prisma.card.findMany({
-      where: { isVisible: true },
-      select: { setName: true },
-      distinct: ["setName"],
-      orderBy: { setName: "asc" },
-    }),
-  ]);
-
-  const nextValue = {
-    rarities: rarityRows.map((card) => card.rarity).filter(Boolean),
-    sets: setRows.map((card) => card.setName).filter(Boolean),
+function buildPublicCatalogBaseWhere(options = {}) {
+  return {
+    isVisible: true,
+    ...(options.stockOnly === false ? {} : { stock: { gt: 0 } }),
   };
-
-  publicCardFiltersCache = {
-    value: nextValue,
-    expiresAt: now + PUBLIC_CARD_FILTERS_CACHE_TTL_MS,
-  };
-
-  return nextValue;
 }
 
-async function listPublicCards(req, res, searchOverride) {
+async function getPublicCardFilters(options = {}) {
+  const expectedScope = options.stockOnly === false ? "visible" : "stock";
+
+  return cacheGetOrFetch(PUBLIC_CARD_FILTERS_CACHE_KEY, PUBLIC_CARD_FILTERS_CACHE_TTL_SECONDS, async () => {
+    const baseWhere = buildPublicCatalogBaseWhere(options);
+
+    const [rarityRows, setRows] = await Promise.all([
+      prisma.card.findMany({
+        where: baseWhere,
+        select: { rarity: true },
+        distinct: ["rarity"],
+        orderBy: { rarity: "asc" },
+      }),
+      prisma.card.findMany({
+        where: baseWhere,
+        select: { setName: true },
+        distinct: ["setName"],
+        orderBy: { setName: "asc" },
+      }),
+    ]);
+
+    return {
+      scope: expectedScope,
+      value: {
+        rarities: rarityRows.map((card) => card.rarity).filter(Boolean),
+        sets: setRows.map((card) => card.setName).filter(Boolean),
+      },
+    };
+  }).then((result) => result?.value ?? { rarities: [], sets: [] });
+}
+
+async function listPublicCards(req, res, searchOverride, options = {}) {
   setPublicCatalogCacheHeaders(res);
 
   const cacheKey = buildPublicCardListCacheKey(req.query, searchOverride);
-  const cachedResponse = getCachedPublicCardList(cacheKey);
-  if (cachedResponse) {
-    res.json(cachedResponse);
-    return;
-  }
-
   const page = Math.max(1, Number(req.query.page || 1));
   const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize || 20)));
   const filters = buildCardFilters({
     ...req.query,
     ...(searchOverride !== undefined ? { q: searchOverride } : {}),
-  });
+  }, options);
 
   const includeFilterMetadata = req.query.featured !== "true" && req.query.latest !== "true";
 
-  const [total, cards, filterOptions, versionAggregate] = await Promise.all([
-    prisma.card.count({ where: filters.where }),
-    prisma.card.findMany({
-      where: filters.where,
-      orderBy: filters.orderBy,
-      select: PUBLIC_CARD_LIST_SELECT,
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    }),
-    includeFilterMetadata ? getPublicCardFilters() : Promise.resolve({ rarities: [], sets: [] }),
-    prisma.card.aggregate({
-      where: filters.where,
-      _max: { updatedAt: true },
-    }),
-  ]);
+  const responsePayload = await cacheGetOrFetch(cacheKey, PUBLIC_CARD_LIST_CACHE_TTL_SECONDS, async () => {
+    const [total, cards, filterOptions, versionAggregate] = await Promise.all([
+      prisma.card.count({ where: filters.where }),
+      prisma.card.findMany({
+        where: filters.where,
+        orderBy: filters.orderBy,
+        select: PUBLIC_CARD_LIST_SELECT,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      includeFilterMetadata ? getPublicCardFilters(options) : Promise.resolve({ rarities: [], sets: [] }),
+      prisma.card.aggregate({
+        where: filters.where,
+        _max: { updatedAt: true },
+      }),
+    ]);
 
-  const responsePayload = {
-    cards: attachMetadata(cards),
-    total,
-    page,
-    pageSize,
-    totalPages: Math.ceil(total / pageSize),
-    filters: filterOptions,
-    version: buildCatalogVersion(total, versionAggregate._max.updatedAt),
-  };
+    return {
+      cards: attachMetadata(cards),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+      filters: filterOptions,
+      version: buildCatalogVersion(total, versionAggregate._max.updatedAt),
+    };
+  });
 
-  setCachedPublicCardList(cacheKey, responsePayload);
   res.json(responsePayload);
 }
 
@@ -1418,6 +2229,203 @@ async function rollbackOrderEffects(tx, order) {
   }
 }
 
+async function lockOrderForUpdate(tx, orderId) {
+  await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${orderId} FOR UPDATE`;
+}
+
+async function reserveStockForOrder(tx, order) {
+  const cardIds = [...new Set(order.items.map((item) => item.cardId))];
+  const cards = await tx.card.findMany({ where: { id: { in: cardIds } } });
+  const cardsById = new Map(cards.map((card) => [card.id, card]));
+
+  for (const item of order.items) {
+    const card = cardsById.get(item.cardId);
+    if (!card || !card.isVisible) {
+      throw createAppError("Hay cartas del pedido que ya no están disponibles", {
+        statusCode: 409,
+        code: "CARD_UNAVAILABLE",
+        unavailableCardIds: [item.cardId],
+      });
+    }
+
+    // Atomic stock reservation: decrement only if stock >= quantity (prevents overselling)
+    const updated = await tx.card.updateMany({
+      where: { id: item.cardId, stock: { gte: item.quantity } },
+      data: { stock: { decrement: item.quantity } },
+    });
+
+    if (updated.count === 0) {
+      throw createAppError(`Insufficient stock for ${card.name}`, {
+        statusCode: 409,
+        code: "INSUFFICIENT_STOCK",
+        unavailableCardIds: [item.cardId],
+      });
+    }
+  }
+}
+
+async function updateOrderStatusWithEffects(tx, order, nextStatus, extraData = {}) {
+  const wasBillable = isBillableStatus(order.status);
+  const willBeBillable = isBillableStatus(nextStatus);
+  const releasesReservation = [OrderStatus.CANCELLED, OrderStatus.EXPIRED].includes(nextStatus)
+    && ![OrderStatus.CANCELLED, OrderStatus.EXPIRED].includes(order.status);
+
+  for (const item of order.items) {
+    if (!wasBillable && willBeBillable) {
+      await tx.card.update({
+        where: { id: item.cardId },
+        data: { salesCount: { increment: item.quantity } },
+      });
+    }
+
+    if (wasBillable && !willBeBillable) {
+      await tx.card.update({
+        where: { id: item.cardId },
+        data: { salesCount: { decrement: item.quantity } },
+      });
+    }
+
+    if (releasesReservation) {
+      await tx.card.update({
+        where: { id: item.cardId },
+        data: { stock: { increment: item.quantity } },
+      });
+    }
+  }
+
+  return tx.order.update({
+    where: { id: order.id },
+    data: {
+      status: nextStatus,
+      ...extraData,
+    },
+    include: { items: true, user: true, address: true },
+  });
+}
+
+function buildOrderStatusPostCommitEffect(order, nextStatus) {
+  return {
+    orderId: order.id,
+    previousStatus: order.status,
+    nextStatus,
+    releasesReservation: [OrderStatus.CANCELLED, OrderStatus.EXPIRED].includes(nextStatus)
+      && ![OrderStatus.CANCELLED, OrderStatus.EXPIRED].includes(order.status),
+    items: order.items.map((item) => ({
+      cardId: item.cardId,
+      quantity: item.quantity,
+    })),
+  };
+}
+
+async function applyOrderStatusPostCommitEffect(effect) {
+  if (!effect) {
+    return;
+  }
+
+  if (effect.items.length) {
+    await invalidateOrderRelatedCache(effect.items);
+  }
+
+  publishEvent("order-update", {
+    orderId: effect.orderId,
+    previousStatus: effect.previousStatus,
+    newStatus: effect.nextStatus,
+  });
+
+  if (effect.releasesReservation) {
+    await scheduleStockUpdate(effect.items, effect.orderId, "status-change");
+  }
+}
+
+async function expirePendingOrders({ orderIds = null, source = "system", requestId = null, batchSize = 5 } = {}) {
+  const now = new Date();
+
+  const candidateOrders = await withDatabaseConnection(() => prisma.order.findMany({
+    where: {
+      status: { in: [OrderStatus.PENDING_PAYMENT, OrderStatus.FAILED] },
+      expires_at: { not: null, lte: now },
+      ...(Array.isArray(orderIds) && orderIds.length ? { id: { in: orderIds } } : {}),
+    },
+    select: { id: true },
+    orderBy: { id: "asc" },
+    ...(!Array.isArray(orderIds) || orderIds.length === 0 ? { take: batchSize } : {}),
+  }), { maxWaitMs: 5000 });
+
+  const expired = [];
+
+  for (const candidateOrder of candidateOrders) {
+    const expiredOutcome = await withDatabaseConnection(() => prisma.$transaction(async (tx) => {
+      await lockOrderForUpdate(tx, candidateOrder.id);
+
+      const lockedOrder = await tx.order.findUnique({
+        where: { id: candidateOrder.id },
+        include: { items: true, user: true, address: true },
+      });
+
+      if (!lockedOrder || ![OrderStatus.PENDING_PAYMENT, OrderStatus.FAILED].includes(lockedOrder.status) || !lockedOrder.expires_at || lockedOrder.expires_at > now) {
+        return null;
+      }
+
+      await updateOrderStatusWithEffects(tx, lockedOrder, OrderStatus.EXPIRED, {
+        payment_status: lockedOrder.payment_status || "expired",
+        payment_status_detail: lockedOrder.payment_status_detail || "expired_order",
+      });
+
+      return {
+        orderId: lockedOrder.id,
+        postCommitEffect: buildOrderStatusPostCommitEffect(lockedOrder, OrderStatus.EXPIRED),
+      };
+    }), { maxWaitMs: 5000 });
+
+    if (expiredOutcome?.orderId) {
+      expired.push(expiredOutcome.orderId);
+      await applyOrderStatusPostCommitEffect(expiredOutcome.postCommitEffect);
+    }
+  }
+
+  if (expired.length > 0) {
+    console.info("Expired pending orders released", {
+      requestId,
+      source,
+      orderIds: expired,
+      count: expired.length,
+    });
+  }
+
+  return {
+    count: expired.length,
+    orderIds: expired,
+  };
+}
+
+function isPrismaTransactionStartTimeout(error) {
+  return error?.code === "P2028";
+}
+
+async function expirePendingOrdersBestEffort(options = {}) {
+  try {
+    return await expirePendingOrders(options);
+  } catch (error) {
+    if (!isPrismaTransactionStartTimeout(error)) {
+      throw error;
+    }
+
+    console.warn("Skipping pending-order expiration after transaction timeout", {
+      requestId: options.requestId || null,
+      source: options.source || "system",
+      orderIds: Array.isArray(options.orderIds) ? options.orderIds : null,
+      code: error.code,
+      message: error.message,
+    });
+
+    return {
+      count: 0,
+      orderIds: [],
+      skipped: true,
+    };
+  }
+}
+
 async function recordActivity(userId, action, req, details) {
   await prisma.userActivity.create({
     data: {
@@ -1428,6 +2436,402 @@ async function recordActivity(userId, action, req, details) {
       details: safeJsonStringify(details),
     },
   });
+}
+
+async function prepareOrderForPreference(req, { orderId, userId }) {
+  await expirePendingOrders({
+    orderIds: [orderId],
+    source: "checkout_prepare_preference",
+    requestId: req.requestContext?.requestId || null,
+  });
+
+  const existingOrder = await prisma.order.findFirst({
+    where: {
+      id: orderId,
+      ...(Number.isFinite(userId) ? { userId } : {}),
+    },
+    include: { items: true, user: true, address: true },
+  });
+
+  if (!existingOrder) {
+    throw createAppError("Order not found", {
+      statusCode: 404,
+      code: "ORDER_NOT_FOUND",
+    });
+  }
+
+  if (isBillableStatus(existingOrder.status)) {
+    throw createAppError("Order is already paid", {
+      statusCode: 409,
+      code: "ORDER_ALREADY_PAID",
+    });
+  }
+
+  if ([OrderStatus.CANCELLED, OrderStatus.SHIPPED, OrderStatus.COMPLETED].includes(existingOrder.status)) {
+    throw createAppError("Order cannot restart Checkout Pro from the current state", {
+      statusCode: 409,
+      code: "ORDER_NOT_RETRYABLE",
+    });
+  }
+
+  const exchangeRate = await getUsdToArsRate();
+  const totalArs = formatCurrency(existingOrder.total * exchangeRate);
+  const expiresAt = buildCheckoutExpirationDate();
+
+  const preparedOrderResult = await prisma.$transaction(async (tx) => {
+    await lockOrderForUpdate(tx, orderId);
+    const order = await tx.order.findFirst({
+      where: {
+        id: orderId,
+        ...(Number.isFinite(userId) ? { userId } : {}),
+      },
+      include: { items: true, user: true, address: true },
+    });
+
+    if (!order) {
+      throw createAppError("Order not found", {
+        statusCode: 404,
+        code: "ORDER_NOT_FOUND",
+      });
+    }
+
+    if (isBillableStatus(order.status)) {
+      throw createAppError("Order is already paid", {
+        statusCode: 409,
+        code: "ORDER_ALREADY_PAID",
+      });
+    }
+
+    if ([OrderStatus.CANCELLED, OrderStatus.SHIPPED, OrderStatus.COMPLETED].includes(order.status)) {
+      throw createAppError("Order cannot restart Checkout Pro from the current state", {
+        statusCode: 409,
+        code: "ORDER_NOT_RETRYABLE",
+      });
+    }
+
+    const shouldReserveStock = [OrderStatus.FAILED, OrderStatus.EXPIRED].includes(order.status);
+    if (shouldReserveStock) {
+      await reserveStockForOrder(tx, order);
+    }
+
+    return tx.order.update({
+      where: { id: order.id },
+      data: {
+        status: OrderStatus.PENDING_PAYMENT,
+        currency: "ARS",
+        exchange_rate: exchangeRate,
+        total_ars: totalArs,
+        expires_at: expiresAt,
+        payment_id: null,
+        payment_status: null,
+        payment_status_detail: null,
+        preference_id: null,
+        payment_approved_at: null,
+      },
+      include: { items: true, user: true, address: true },
+    });
+  });
+
+  return {
+    order: preparedOrderResult,
+    exchangeRate,
+    totalArs,
+    expiresAt,
+  };
+}
+
+async function prepareOrderForDirectPayment(req, { orderId, userId }) {
+  await expirePendingOrders({
+    orderIds: [orderId],
+    source: "payments_create",
+    requestId: req.requestContext?.requestId || null,
+  });
+
+  const existingOrder = await prisma.order.findFirst({
+    where: {
+      id: orderId,
+      ...(Number.isFinite(userId) ? { userId } : {}),
+    },
+    include: { items: true, user: true, address: true },
+  });
+
+  if (!existingOrder) {
+    throw createAppError("Order not found", {
+      statusCode: 404,
+      code: "ORDER_NOT_FOUND",
+    });
+  }
+
+  if (isBillableStatus(existingOrder.status)) {
+    throw createAppError("Order is already paid", {
+      statusCode: 409,
+      code: "ORDER_ALREADY_PAID",
+    });
+  }
+
+  if ([OrderStatus.CANCELLED, OrderStatus.EXPIRED, OrderStatus.SHIPPED, OrderStatus.COMPLETED].includes(existingOrder.status)) {
+    throw createAppError("Order cannot be paid from the current state", {
+      statusCode: 409,
+      code: "ORDER_NOT_PAYABLE",
+    });
+  }
+
+  if (!isOrderPayableStatus(existingOrder.status)) {
+    throw createAppError("Order cannot be paid from the current state", {
+      statusCode: 409,
+      code: "ORDER_NOT_PAYABLE",
+    });
+  }
+
+  const exchangeRate = existingOrder.exchange_rate || await getUsdToArsRate();
+  const totalArs = formatCurrency(existingOrder.total_ars ?? (existingOrder.total * exchangeRate));
+  const expiresAt = existingOrder.expires_at || buildCheckoutExpirationDate(existingOrder.createdAt?.getTime?.() || Date.now());
+
+  const preparedOrderResult = await prisma.$transaction(async (tx) => {
+    await lockOrderForUpdate(tx, orderId);
+    const order = await tx.order.findFirst({
+      where: {
+        id: orderId,
+        ...(Number.isFinite(userId) ? { userId } : {}),
+      },
+      include: { items: true, user: true, address: true },
+    });
+
+    if (!order) {
+      throw createAppError("Order not found", {
+        statusCode: 404,
+        code: "ORDER_NOT_FOUND",
+      });
+    }
+
+    if (isBillableStatus(order.status)) {
+      throw createAppError("Order is already paid", {
+        statusCode: 409,
+        code: "ORDER_ALREADY_PAID",
+      });
+    }
+
+    if ([OrderStatus.CANCELLED, OrderStatus.EXPIRED, OrderStatus.SHIPPED, OrderStatus.COMPLETED].includes(order.status)) {
+      throw createAppError("Order cannot be paid from the current state", {
+        statusCode: 409,
+        code: "ORDER_NOT_PAYABLE",
+      });
+    }
+
+    if (order.expires_at && order.expires_at <= new Date()) {
+      const expiredOrder = await updateOrderStatusWithEffects(tx, order, OrderStatus.EXPIRED, {
+        payment_status: order.payment_status || "expired",
+        payment_status_detail: order.payment_status_detail || "expired_order",
+      });
+
+      return {
+        expiredOrder,
+        postCommitEffect: buildOrderStatusPostCommitEffect(order, OrderStatus.EXPIRED),
+      };
+    }
+
+    if (!isOrderPayableStatus(order.status)) {
+      throw createAppError("Order cannot be paid from the current state", {
+        statusCode: 409,
+        code: "ORDER_NOT_PAYABLE",
+      });
+    }
+
+    if (order.payment_id && isMercadoPagoProcessingStatus(order.payment_status)) {
+      throw createAppError("Order already has a payment in progress", {
+        statusCode: 409,
+        code: "PAYMENT_ALREADY_PROCESSING",
+      });
+    }
+
+    return {
+      order,
+      postCommitEffect: null,
+    };
+  });
+
+  if (preparedOrderResult?.expiredOrder) {
+    await applyOrderStatusPostCommitEffect(preparedOrderResult.postCommitEffect);
+
+    throw createAppError("Order has expired", {
+      statusCode: 409,
+      code: "ORDER_EXPIRED",
+      details: {
+        order: preparedOrderResult.expiredOrder.id,
+      },
+    });
+  }
+
+  return {
+    order: preparedOrderResult.order,
+    exchangeRate,
+    totalArs,
+    expiresAt,
+  };
+}
+
+async function persistDirectPaymentAttempt(req, { orderId, userId, paymentId, paymentStatus, paymentStatusDetail, exchangeRate, totalArs, expiresAt }) {
+  const result = await prisma.$transaction(async (tx) => {
+    await lockOrderForUpdate(tx, orderId);
+    const order = await tx.order.findFirst({
+      where: {
+        id: orderId,
+        ...(Number.isFinite(userId) ? { userId } : {}),
+      },
+      include: { items: true, user: true, address: true },
+    });
+
+    if (!order) {
+      throw createAppError("Order not found", {
+        statusCode: 404,
+        code: "ORDER_NOT_FOUND",
+      });
+    }
+
+    const updatedOrder = await updateOrderStatusWithEffects(tx, order, OrderStatus.PENDING_PAYMENT, {
+      currency: "ARS",
+      exchange_rate: exchangeRate,
+      total_ars: totalArs,
+      expires_at: expiresAt,
+      payment_id: paymentId,
+      payment_status: paymentStatus || order.payment_status || null,
+      payment_status_detail: paymentStatusDetail || order.payment_status_detail || null,
+      payment_approved_at: null,
+      preference_id: null,
+    });
+    return {
+      order: updatedOrder,
+      postCommitEffect: buildOrderStatusPostCommitEffect(order, OrderStatus.PENDING_PAYMENT),
+    };
+  });
+
+  await applyOrderStatusPostCommitEffect(result.postCommitEffect);
+  return result.order;
+}
+
+async function persistDirectPaymentProviderFailure(req, { orderId, userId, paymentStatusDetail, exchangeRate, totalArs, expiresAt }) {
+  const result = await prisma.$transaction(async (tx) => {
+    await lockOrderForUpdate(tx, orderId);
+    const order = await tx.order.findFirst({
+      where: {
+        id: orderId,
+        ...(Number.isFinite(userId) ? { userId } : {}),
+      },
+      include: { items: true, user: true, address: true },
+    });
+
+    if (!order) {
+      throw createAppError("Order not found", {
+        statusCode: 404,
+        code: "ORDER_NOT_FOUND",
+      });
+    }
+
+    const updatedOrder = await updateOrderStatusWithEffects(tx, order, OrderStatus.FAILED, {
+      currency: "ARS",
+      exchange_rate: exchangeRate,
+      total_ars: totalArs,
+      expires_at: expiresAt,
+      payment_id: null,
+      payment_status: "rejected",
+      payment_status_detail: paymentStatusDetail || order.payment_status_detail || "payment_create_rejected",
+      payment_approved_at: null,
+      preference_id: null,
+    });
+    return {
+      order: updatedOrder,
+      postCommitEffect: buildOrderStatusPostCommitEffect(order, OrderStatus.FAILED),
+    };
+  });
+
+  await applyOrderStatusPostCommitEffect(result.postCommitEffect);
+  return result.order;
+}
+
+async function createCheckoutPreferenceForOrder(req, { orderId, userId }) {
+  assertMercadoPagoCheckoutConfigured();
+
+  const prepared = await prepareOrderForPreference(req, { orderId, userId });
+  const preferenceCardsById = await getOrderCardsMap([prepared.order]);
+  const mercadoPagoAccount = await getMercadoPagoAccountDetails();
+  const useSandboxCheckout = shouldUseMercadoPagoSandbox(mercadoPagoAccount);
+  const notificationUrl = buildMercadoPagoNotificationUrl({
+    useSandboxWebhook: shouldUseMercadoPagoSandboxWebhook(mercadoPagoAccount),
+  });
+  const preferenceItems = alignMercadoPagoItemsTotal(
+    buildMercadoPagoPreferenceItems(prepared.order, preferenceCardsById, prepared.exchangeRate),
+    prepared.totalArs
+  );
+  const preferencePayload = {
+    items: preferenceItems,
+    external_reference: String(prepared.order.id),
+    ...(notificationUrl ? { notification_url: notificationUrl } : {}),
+    back_urls: {
+      success: buildCheckoutBackUrl("success", prepared.order.id),
+      failure: buildCheckoutBackUrl("failure", prepared.order.id),
+      pending: buildCheckoutBackUrl("pending", prepared.order.id),
+    },
+    auto_return: "approved",
+    statement_descriptor: "DUELVAULT",
+    expires: true,
+    expiration_date_from: new Date().toISOString(),
+    expiration_date_to: prepared.expiresAt.toISOString(),
+    payer: resolveMercadoPagoPayer(prepared.order),
+    metadata: {
+      order_id: prepared.order.id,
+      request_id: req.requestContext?.requestId || null,
+      checkout_mode: useSandboxCheckout ? "sandbox" : "production",
+    },
+  };
+
+  const preferenceResponse = await mercadoPagoPreferenceClient.create({ body: preferencePayload });
+  const preference = unwrapMercadoPagoBody(preferenceResponse);
+  const initPoint = resolveMercadoPagoCheckoutUrl(preference, { useSandbox: useSandboxCheckout });
+
+  if (!initPoint) {
+    throw createAppError("Mercado Pago preference did not return init_point", {
+      statusCode: 502,
+      code: "CHECKOUT_PREFERENCE_INVALID",
+    });
+  }
+
+  const updatedOrder = await prisma.$transaction(async (tx) => {
+    await lockOrderForUpdate(tx, prepared.order.id);
+    return tx.order.update({
+      where: { id: prepared.order.id },
+      data: {
+        preference_id: preference?.id ? String(preference.id) : null,
+      },
+      include: { items: true, user: true, address: true },
+    });
+  });
+
+  const cardsById = await getOrderCardsMap([updatedOrder]);
+  return {
+    order: updatedOrder,
+    cardsById,
+    initPoint,
+    checkoutMode: useSandboxCheckout ? "sandbox" : "production",
+    exchangeRate: prepared.exchangeRate,
+    totalArs: prepared.totalArs,
+    expiresAt: prepared.expiresAt,
+  };
+}
+
+function assertCronAuthorized(req) {
+  if (!CRON_SECRET) {
+    throw createAppError("CRON_SECRET is required to run the order expiration handler", {
+      statusCode: 503,
+      code: "CRON_SECRET_NOT_CONFIGURED",
+    });
+  }
+
+  if (req.headers.authorization !== `Bearer ${CRON_SECRET}`) {
+    throw createAppError("Unauthorized cron invocation", {
+      statusCode: 401,
+      code: "CRON_UNAUTHORIZED",
+    });
+  }
 }
 
 function sendConcurrencyConflict(res, { error, currentResource, context = null, canOverrideConflict = false, requestId = null }) {
@@ -1737,13 +3141,39 @@ function normalizeWhatsappNumber(value) {
   return value.replace(/[^\d]/g, "").trim();
 }
 
+const PUBLIC_STOREFRONT_CONFIG_CACHE_MS = 30 * 1000;
+const publicStorefrontConfigState = {
+  snapshot: null,
+  checkedAt: 0,
+  inflight: null,
+};
+
+function invalidatePublicStorefrontConfigCache() {
+  publicStorefrontConfigState.snapshot = null;
+  publicStorefrontConfigState.checkedAt = 0;
+  publicStorefrontConfigState.inflight = null;
+}
+
 async function getAppSetting(key, fallbackValue = "") {
   const setting = await prisma.appSetting.findUnique({ where: { key } });
   return setting?.value ?? fallbackValue;
 }
 
-async function setAppSetting(key, value) {
+async function _setAppSetting(key, value) {
   return prisma.appSetting.upsert({
+    where: { key },
+    update: { value },
+    create: { key, value },
+  });
+}
+
+async function _getAppSettingFromClient(db, key, fallbackValue = "") {
+  const setting = await db.appSetting.findUnique({ where: { key } });
+  return setting?.value ?? fallbackValue;
+}
+
+async function _setAppSettingForClient(db, key, value) {
+  return db.appSetting.upsert({
     where: { key },
     update: { value },
     create: { key, value },
@@ -1759,12 +3189,152 @@ function parsePositiveInteger(value, fallbackValue, { min = 1, max = Number.MAX_
   return Math.min(max, Math.max(min, Math.floor(parsed)));
 }
 
-function parseCatalogScopeMode(value) {
+function buildPagination(page, pageSize, total) {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  return {
+    page,
+    pageSize,
+    total,
+    totalPages,
+    hasNextPage: page < totalPages,
+    hasPreviousPage: page > 1,
+  };
+}
+
+function parseAdminRoleFilter(value) {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (!normalized || normalized === "ALL") {
+    return null;
+  }
+
+  return Object.values(UserRole).includes(normalized) ? normalized : "INVALID_ROLE_FILTER";
+}
+
+function parseAdminOrderStatusFilter(value) {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (!normalized || normalized === "ALL") {
+    return null;
+  }
+
+  return Object.values(OrderStatus).includes(normalized) ? normalized : "INVALID_STATUS_FILTER";
+}
+
+function buildAdminUsersWhere({ search, role }) {
+  const trimmedSearch = String(search || "").trim();
+  const filters = [];
+
+  if (role) {
+    filters.push({ role });
+  }
+
+  if (trimmedSearch) {
+    filters.push({
+      OR: [
+        { fullName: { contains: trimmedSearch, mode: "insensitive" } },
+        { username: { contains: trimmedSearch, mode: "insensitive" } },
+        { email: { contains: trimmedSearch, mode: "insensitive" } },
+        { phone: { contains: trimmedSearch, mode: "insensitive" } },
+      ],
+    });
+  }
+
+  return filters.length ? { AND: filters } : {};
+}
+
+function buildAdminOrdersWhere({ search, status }) {
+  const trimmedSearch = String(search || "").trim();
+  const filters = [];
+
+  if (status) {
+    filters.push({ status });
+  }
+
+  if (trimmedSearch) {
+    const numericOrderId = Number(trimmedSearch);
+    const searchFilters = [
+      { customerName: { contains: trimmedSearch, mode: "insensitive" } },
+      { customerEmail: { contains: trimmedSearch, mode: "insensitive" } },
+      { customerPhone: { contains: trimmedSearch, mode: "insensitive" } },
+      { shippingAddress: { contains: trimmedSearch, mode: "insensitive" } },
+      { user: { is: { fullName: { contains: trimmedSearch, mode: "insensitive" } } } },
+      { user: { is: { email: { contains: trimmedSearch, mode: "insensitive" } } } },
+      { items: { some: { card: { name: { contains: trimmedSearch, mode: "insensitive" } } } } },
+    ];
+
+    if (Number.isFinite(numericOrderId)) {
+      searchFilters.push({ id: numericOrderId });
+    }
+
+    filters.push({ OR: searchFilters });
+  }
+
+  return filters.length ? { AND: filters } : {};
+}
+
+async function authenticateSessionUser({ identifier, password, allowedRoles = null }) {
+  const user = await findUserByIdentifier(identifier);
+  const hasAllowedRole = !Array.isArray(allowedRoles) || allowedRoles.includes(user?.role);
+
+  if (!user || !user.isActive || !hasAllowedRole) {
+    throw createAppError("Credenciales inválidas", {
+      statusCode: 401,
+      code: "INVALID_CREDENTIALS",
+    });
+  }
+
+  const isValidPassword = await bcrypt.compare(password, user.passwordHash);
+  if (!isValidPassword) {
+    throw createAppError("Credenciales inválidas", {
+      statusCode: 401,
+      code: "INVALID_CREDENTIALS",
+    });
+  }
+
+  return user;
+}
+
+async function resolveRefreshSessionUser({ refreshToken, allowedRoles = null }) {
+  try {
+    const payload = verifyRefreshToken(refreshToken);
+    if (payload.type !== "refresh") {
+      throw createAppError("Refresh token expired", {
+        statusCode: 401,
+        code: "REFRESH_TOKEN_EXPIRED",
+      });
+    }
+  } catch (error) {
+    if (error?.statusCode) {
+      throw error;
+    }
+
+    throw createAppError("Refresh token expired", {
+      statusCode: 401,
+      code: "REFRESH_TOKEN_EXPIRED",
+    });
+  }
+
+  const storedToken = await prisma.refreshToken.findUnique({
+    where: { tokenHash: hashToken(refreshToken) },
+    include: { user: true },
+  });
+  const hasAllowedRole = !Array.isArray(allowedRoles) || allowedRoles.includes(storedToken?.user?.role);
+
+  if (!storedToken || storedToken.revokedAt || storedToken.expiresAt < new Date() || !storedToken.user?.isActive || !hasAllowedRole) {
+    throw createAppError("Refresh token expired", {
+      statusCode: 401,
+      code: "REFRESH_TOKEN_EXPIRED",
+    });
+  }
+
+  return storedToken.user;
+}
+
+function _parseCatalogScopeMode(value) {
   const normalized = String(value || "").trim().toUpperCase();
   return Object.values(CATALOG_SCOPE_MODE).includes(normalized) ? normalized : CATALOG_SCOPE_MODE.ALL;
 }
 
-function normalizeSelectedCardIds(value) {
+function _normalizeSelectedCardIds(value) {
   let rawValue = [];
 
   if (Array.isArray(value)) {
@@ -1784,16 +3354,96 @@ function normalizeSelectedCardIds(value) {
   return [...new Set(rawValue.map((entry) => Number(entry)).filter(Number.isInteger).filter((entry) => entry > 0))];
 }
 
-async function getCatalogScopeSettings() {
+function _normalizeCatalogScopeLimit(value) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return _DEFAULT_CATALOG_SCOPE_LIMIT;
+  }
+
+  return Math.min(parsed, _MAX_CATALOG_SCOPE_LIMIT);
+}
+
+async function getCatalogScopeSettings(db = prisma) {
+  const [modeValue, limitValue, selectedIdsValue] = await Promise.all([
+    _getAppSettingFromClient(db, CATALOG_SCOPE_MODE_SETTING_KEY, CATALOG_SCOPE_MODE.ALL),
+    _getAppSettingFromClient(db, CATALOG_SCOPE_LIMIT_SETTING_KEY, String(_DEFAULT_CATALOG_SCOPE_LIMIT)),
+    _getAppSettingFromClient(db, CATALOG_SCOPE_SELECTED_IDS_SETTING_KEY, "[]"),
+  ]);
+
+  const mode = _parseCatalogScopeMode(modeValue);
+  const limit = _normalizeCatalogScopeLimit(limitValue);
+  const selectedCardIds = _normalizeSelectedCardIds(selectedIdsValue);
+
   return {
-    mode: CATALOG_SCOPE_MODE.ALL,
-    limit: null,
-    selectedCardIds: [],
+    mode,
+    limit: mode === CATALOG_SCOPE_MODE.FIRST_N ? limit : null,
+    selectedCardIds: mode === CATALOG_SCOPE_MODE.SELECTED ? selectedCardIds : [],
   };
 }
 
 async function resolveCatalogScopeWhere(scopeSettings) {
+  if (!scopeSettings || scopeSettings.mode === CATALOG_SCOPE_MODE.ALL) {
+    return undefined;
+  }
+
+  if (scopeSettings.mode === CATALOG_SCOPE_MODE.SELECTED) {
+    return scopeSettings.selectedCardIds.length
+      ? { id: { in: scopeSettings.selectedCardIds } }
+      : { id: { in: [-1] } };
+  }
+
+  if (scopeSettings.mode === CATALOG_SCOPE_MODE.FIRST_N) {
+    const scopedCards = await prisma.card.findMany({
+      select: { id: true },
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+      take: scopeSettings.limit || _DEFAULT_CATALOG_SCOPE_LIMIT,
+    });
+    const scopedIds = scopedCards.map((card) => card.id);
+    return scopedIds.length ? { id: { in: scopedIds } } : { id: { in: [-1] } };
+  }
+
   return undefined;
+}
+
+async function setCatalogScopeSettings(scopeSettings, db = prisma) {
+  const normalizedSettings = {
+    mode: _parseCatalogScopeMode(scopeSettings?.mode),
+    limit: _normalizeCatalogScopeLimit(scopeSettings?.limit),
+    selectedCardIds: _normalizeSelectedCardIds(scopeSettings?.selectedCardIds),
+  };
+
+  await Promise.all([
+    _setAppSettingForClient(db, CATALOG_SCOPE_MODE_SETTING_KEY, normalizedSettings.mode),
+    _setAppSettingForClient(db, CATALOG_SCOPE_LIMIT_SETTING_KEY, String(normalizedSettings.limit)),
+    _setAppSettingForClient(db, CATALOG_SCOPE_SELECTED_IDS_SETTING_KEY, JSON.stringify(normalizedSettings.selectedCardIds)),
+  ]);
+
+  return getCatalogScopeSettings(db);
+}
+
+async function updateCatalogScopeSelectedIds({ addIds = [], removeIds = [] } = {}, db = prisma) {
+  const scopeSettings = await getCatalogScopeSettings(db);
+  const nextSelectedIds = new Set(scopeSettings.selectedCardIds);
+
+  for (const id of _normalizeSelectedCardIds(addIds)) {
+    nextSelectedIds.add(id);
+  }
+
+  for (const id of _normalizeSelectedCardIds(removeIds)) {
+    nextSelectedIds.delete(id);
+  }
+
+  return setCatalogScopeSettings({
+    mode: CATALOG_SCOPE_MODE.SELECTED,
+    limit: scopeSettings.limit,
+    selectedCardIds: [...nextSelectedIds],
+  }, db);
+}
+
+function isLowStockCard(card) {
+  const stock = Number(card?.stock || 0);
+  const threshold = Number(card?.lowStockThreshold ?? card?.low_stock_threshold ?? 0);
+  return stock > 0 && threshold > 0 && stock <= threshold;
 }
 
 function buildAdminCardSearchWhere(search) {
@@ -1802,13 +3452,41 @@ function buildAdminCardSearchWhere(search) {
     return undefined;
   }
 
+  const numericNeedle = Number(needle);
+  const tokenClauses = needle
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean)
+    .map((token) => ({
+      OR: [
+        { name: { contains: token, mode: "insensitive" } },
+        { rarity: { contains: token, mode: "insensitive" } },
+        { cardType: { contains: token, mode: "insensitive" } },
+        { setName: { contains: token, mode: "insensitive" } },
+        { setCode: { contains: token, mode: "insensitive" } },
+      ],
+    }));
+
+  const directClauses = [
+    { name: { contains: needle, mode: "insensitive" } },
+    { name: { startsWith: needle, mode: "insensitive" } },
+    { rarity: { contains: needle, mode: "insensitive" } },
+    { cardType: { contains: needle, mode: "insensitive" } },
+    { setName: { contains: needle, mode: "insensitive" } },
+    { setCode: { contains: needle, mode: "insensitive" } },
+  ];
+
+  if (Number.isInteger(numericNeedle) && numericNeedle > 0) {
+    directClauses.push({ id: numericNeedle });
+    directClauses.push({ ygoproId: numericNeedle });
+  }
+
+  if (tokenClauses.length > 1) {
+    directClauses.push({ AND: tokenClauses });
+  }
+
   return {
-    OR: [
-      { name: { contains: needle, mode: "insensitive" } },
-      { rarity: { contains: needle, mode: "insensitive" } },
-      { cardType: { contains: needle, mode: "insensitive" } },
-      { setName: { contains: needle, mode: "insensitive" } },
-    ],
+    OR: directClauses,
   };
 }
 
@@ -1825,8 +3503,14 @@ function combineWhereClauses(...clauses) {
   return { AND: filteredClauses };
 }
 
-function readAdminInventoryFilters(source = {}) {
+function normalizeAdminInventoryMode(value, fallbackValue = "all") {
+  const normalized = String(value || fallbackValue).trim().toLowerCase();
+  return normalized === "stock" ? "stock" : "all";
+}
+
+function readAdminInventoryFilters(source = {}, options = {}) {
   return {
+    mode: normalizeAdminInventoryMode(source.mode, options.defaultMode || "all"),
     search: String(source.search || source.q || "").trim(),
     rarity: String(source.rarity || "").trim(),
     cardType: String(source.cardType || source.card_type || "").trim(),
@@ -1835,12 +3519,19 @@ function readAdminInventoryFilters(source = {}) {
   };
 }
 
-async function buildAdminInventoryWhere(source = {}) {
-  const filters = readAdminInventoryFilters(source);
+async function buildAdminInventoryWhere(source = {}, options = {}) {
+  const filters = readAdminInventoryFilters(source, options);
   const scopeSettings = await getCatalogScopeSettings();
-  const scopeWhere = await resolveCatalogScopeWhere(scopeSettings);
+  const scopeStrategy = options.scopeStrategy || "stock";
+  const shouldApplyScope = scopeStrategy === "always"
+    || (scopeStrategy === "stock" && filters.mode === "stock");
+  const scopeWhere = shouldApplyScope ? await resolveCatalogScopeWhere(scopeSettings) : undefined;
+  const baseWhere = combineWhereClauses(
+    scopeWhere,
+    filters.mode === "stock" && options.requirePositiveStockWhenModeStock ? { stock: { gt: 0 } } : undefined
+  );
   const searchWhere = buildAdminCardSearchWhere(filters.search);
-  const filterClauses = [scopeWhere, searchWhere];
+  const filterClauses = [baseWhere, searchWhere];
 
   if (filters.rarity && filters.rarity !== "all") {
     filterClauses.push({ rarity: filters.rarity });
@@ -1866,17 +3557,21 @@ async function buildAdminInventoryWhere(source = {}) {
 
   let lowStockIds = null;
   if (filters.stockStatus === "low_stock") {
-    const lowStockRows = await prisma.$queryRaw`
-      SELECT id
-      FROM "Card"
-      WHERE stock > 0 AND stock <= "lowStockThreshold"
-    `;
-    lowStockIds = lowStockRows.map((row) => Number(row.id)).filter(Number.isFinite);
+    const lowStockRows = await prisma.card.findMany({
+      where: combineWhereClauses(baseWhere, {
+        stock: { gt: 0 },
+        lowStockThreshold: { gt: 0 },
+      }),
+      select: { id: true, stock: true, lowStockThreshold: true },
+    });
+    lowStockIds = lowStockRows.filter(isLowStockCard).map((row) => Number(row.id)).filter(Number.isFinite);
   }
 
   return {
     filters,
+    scopeSettings,
     scopeWhere,
+    baseWhere,
     finalWhere: lowStockIds
       ? combineWhereClauses(where, lowStockIds.length ? { id: { in: lowStockIds } } : { id: { in: [-1] } })
       : where,
@@ -1904,25 +3599,78 @@ async function resolveAdminCardSelection(selection = {}) {
 
 function serializeCatalogScopeSettings(scopeSettings, appliedCardCount) {
   return {
-    mode: CATALOG_SCOPE_MODE.ALL,
-    limit: null,
-    selected_card_ids: [],
-    selected_count: 0,
+    mode: scopeSettings.mode,
+    limit: scopeSettings.mode === CATALOG_SCOPE_MODE.FIRST_N ? scopeSettings.limit : null,
+    selected_card_ids: scopeSettings.selectedCardIds,
+    selected_count: scopeSettings.selectedCardIds.length,
     applied_card_count: appliedCardCount,
   };
 }
 
-async function parseCatalogScopePayload(payload) {
-  return { data: await getCatalogScopeSettings() };
+async function _parseCatalogScopePayload(payload) {
+  const nextMode = _parseCatalogScopeMode(payload?.mode);
+  const nextLimit = _normalizeCatalogScopeLimit(payload?.limit ?? payload?.first_n ?? payload?.firstN);
+  const nextSelectedIds = _normalizeSelectedCardIds(
+    payload?.selectedCardIds
+    ?? payload?.selected_card_ids
+    ?? payload?.cardIds
+    ?? payload?.card_ids
+  );
+
+  return {
+    data: {
+      mode: nextMode,
+      limit: nextLimit,
+      selectedCardIds: nextSelectedIds,
+    },
+  };
 }
 
 async function getPublicStorefrontConfig() {
-  const supportWhatsappNumber = await getAppSetting("support_whatsapp_number", "");
-  const supportEmail = await getAppSetting("support_email", "");
-  return {
-    support_whatsapp_number: supportWhatsappNumber,
-    support_email: supportEmail,
-  };
+  if (
+    publicStorefrontConfigState.snapshot
+    && Date.now() - publicStorefrontConfigState.checkedAt < PUBLIC_STOREFRONT_CONFIG_CACHE_MS
+  ) {
+    return publicStorefrontConfigState.snapshot;
+  }
+
+  if (publicStorefrontConfigState.inflight) {
+    return publicStorefrontConfigState.inflight;
+  }
+
+  try {
+    publicStorefrontConfigState.inflight = Promise.all([
+      getAppSetting("support_whatsapp_number", ""),
+      getAppSetting("support_email", ""),
+    ]).then(([supportWhatsappNumber, supportEmail]) => {
+      const snapshot = {
+        support_whatsapp_number: supportWhatsappNumber,
+        support_email: supportEmail,
+      };
+
+      publicStorefrontConfigState.snapshot = snapshot;
+      publicStorefrontConfigState.checkedAt = Date.now();
+      return snapshot;
+    }).finally(() => {
+      publicStorefrontConfigState.inflight = null;
+    });
+
+    return publicStorefrontConfigState.inflight;
+  } catch (error) {
+    if (!isDatabaseUnavailableError(error)) {
+      throw error;
+    }
+
+    console.warn("[storefront-config] database unavailable, using env fallback");
+    const fallbackSnapshot = {
+      support_whatsapp_number: String(process.env.SUPPORT_WHATSAPP_NUMBER || "").trim(),
+      support_email: String(process.env.SUPPORT_EMAIL || "").trim().toLowerCase(),
+    };
+
+    publicStorefrontConfigState.snapshot = fallbackSnapshot;
+    publicStorefrontConfigState.checkedAt = Date.now();
+    return fallbackSnapshot;
+  }
 }
 
 function parseWhatsappSettingsPayload(payload) {
@@ -2102,21 +3850,41 @@ async function buildWorkbook(orders) {
 }
 
 app.get("/api/health", async (_req, res) => {
+  let dbOk = false;
   try {
-    res.json({
-      ok: true,
-      runtime: {
-        api_port: PORT,
-        store_port: Number(process.env.STORE_PORT || 5173),
-        admin_port: Number(process.env.ADMIN_PORT || 5174),
-        admin_url: String(process.env.ADMIN_URL || "").trim().replace(/\/$/, ""),
-      },
-      storefront: await getPublicStorefrontConfig(),
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to load runtime config" });
+    await Promise.race([
+      prisma.$queryRaw`SELECT 1`.then(() => { dbOk = true; }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("db probe timeout")), 2000)),
+    ]);
+  } catch {
+    // intentionally silent — Render polls this frequently
   }
+
+  const statusCode = dbOk ? 200 : 503;
+
+  let redisCache = null;
+  let redisTcpOk = false;
+  try {
+    [redisCache, redisTcpOk] = await Promise.all([
+      probeRedisConnection(),
+      isRedisTcpConfigured() ? pingRedisTcp() : Promise.resolve(false),
+    ]);
+  } catch {
+    // Redis is non-critical — don't affect status code
+  }
+
+  res.status(statusCode).json({
+    ok: dbOk,
+    database: { ok: dbOk },
+    redis: {
+      cache: redisCache,
+      tcp: {
+        configured: isRedisTcpConfigured(),
+        ok: redisTcpOk,
+      },
+      cache_backend: getRedisBackendName(),
+    },
+  });
 });
 
 app.get("/api/storefront/config", async (_req, res) => {
@@ -2128,85 +3896,79 @@ app.get("/api/storefront/config", async (_req, res) => {
   }
 });
 
-app.post("/api/contact", async (req, res) => {
-  try {
-    const parsed = parseContactRequestPayload(req.body || {});
-    if (parsed.error) {
-      res.status(400).json({ error: parsed.error });
-      return;
-    }
+/* ── SSE realtime streams ── */
+app.get("/api/events/stream", publicSSEHandler);
+app.get("/api/admin/events/stream", requireAdminEventStreamAuth, adminSSEHandler);
 
-    const contactRequest = await prisma.contactRequest.create({
-      data: {
-        ...parsed.data,
-        source: "storefront",
-        ipAddress: extractIp(req),
-        userAgent: req.headers["user-agent"] || null,
+app.post("/api/contact", contactRateLimit, validateBody(contactRequestBodySchema), async (req, res) => {
+  const parsed = parseContactRequestPayload(req.validatedBody || {});
+  if (parsed.error) {
+    throw createAppError(parsed.error, {
+      statusCode: 400,
+      code: "VALIDATION_ERROR",
+    });
+  }
+
+  const contactRequest = await prisma.contactRequest.create({
+    data: {
+      ...parsed.data,
+      source: "storefront",
+      ipAddress: extractIp(req),
+      userAgent: req.headers["user-agent"] || null,
+    },
+  });
+
+  res.status(201).json({
+    contact_request: toContactRequestResponse(contactRequest),
+    message: "Contact request created",
+  });
+});
+
+async function handlePublicCatalogList(req, res) {
+  await listPublicCards(req, res, undefined, { stockOnly: true });
+}
+
+async function handlePublicCatalogFilters(_req, res) {
+  setPublicFiltersCacheHeaders(res);
+  res.json({ filters: await getPublicCardFilters({ stockOnly: true }) });
+}
+
+async function handlePublicCatalogSearch(req, res) {
+  const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+
+  if (!q) {
+    res.json({ cards: [], total: 0, page: 1, pageSize: Math.min(50, Math.max(1, Number(req.query.pageSize || 20))), totalPages: 0 });
+    return;
+  }
+
+  void recordCatalogSearchMetric(q);
+  await listPublicCards(req, res, q, { stockOnly: true });
+}
+
+async function handlePublicCatalogDetail(req, res) {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) {
+    res.status(400).json({ error: "Invalid card id" });
+    return;
+  }
+
+  const cacheKey = `${PUBLIC_CARD_DETAIL_CACHE_PREFIX}:stock:${id}`;
+
+  const payload = await cacheGetOrFetch(cacheKey, PUBLIC_CARD_DETAIL_CACHE_TTL_SECONDS, async () => {
+    const card = await prisma.card.findFirst({
+      where: {
+        id,
+        isVisible: true,
+        stock: { gt: 0 },
       },
     });
 
-    res.status(201).json({
-      contact_request: toContactRequestResponse(contactRequest),
-      message: "Contact request created",
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to create contact request" });
-  }
-});
-
-app.get("/api/cards", async (req, res) => {
-  try {
-    await listPublicCards(req, res);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to load cards" });
-  }
-});
-
-app.get("/api/cards/filters", async (_req, res) => {
-  try {
-    setPublicCatalogCacheHeaders(res);
-    res.json({ filters: await getPublicCardFilters() });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to load card filters" });
-  }
-});
-
-app.get("/api/cards/search", async (req, res) => {
-  try {
-    const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
-
-    if (!q) {
-      res.json({ cards: [], total: 0, page: 1, pageSize: Math.min(50, Math.max(1, Number(req.query.pageSize || 20))), totalPages: 0 });
-      return;
-    }
-
-    await listPublicCards(req, res, q);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to search cards" });
-  }
-});
-
-app.get("/api/cards/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    if (!Number.isFinite(id)) {
-      res.status(400).json({ error: "Invalid card id" });
-      return;
-    }
-
-    const card = await prisma.card.findUnique({ where: { id } });
-    if (!card || !card.isVisible) {
-      res.status(404).json({ error: "Card not found" });
-      return;
+    if (!card) {
+      return null; // cacheGetOrFetch won't cache null
     }
 
     const publicCard = toPublicCard(card);
-
-    res.json({
+    return {
       card: publicCard,
       versions: [
         {
@@ -2232,8 +3994,91 @@ app.get("/api/cards/:id", async (req, res) => {
         def: publicCard.def,
         level: publicCard.level,
       },
-    });
+    };
+  });
+
+  if (!payload) {
+    res.status(404).json({ error: "Card not found" });
+    return;
+  }
+
+  setPublicCardDetailCacheHeaders(res);
+  res.json(payload);
+}
+
+app.get("/api/catalog", async (req, res) => {
+  try {
+    await handlePublicCatalogList(req, res);
   } catch (error) {
+    if (res.headersSent) return;
+    console.error(error);
+    res.status(500).json({ error: "Failed to load cards" });
+  }
+});
+
+app.get("/api/cards", async (req, res) => {
+  try {
+    await handlePublicCatalogList(req, res);
+  } catch (error) {
+    if (res.headersSent) return;
+    console.error(error);
+    res.status(500).json({ error: "Failed to load cards" });
+  }
+});
+
+app.get("/api/catalog/filters", async (req, res) => {
+  try {
+    await handlePublicCatalogFilters(req, res);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to load card filters" });
+  }
+});
+
+app.get("/api/cards/filters", async (req, res) => {
+  try {
+    await handlePublicCatalogFilters(req, res);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to load card filters" });
+  }
+});
+
+app.get("/api/catalog/search", async (req, res) => {
+  try {
+    await handlePublicCatalogSearch(req, res);
+  } catch (error) {
+    if (res.headersSent) return;
+    console.error(error);
+    res.status(500).json({ error: "Failed to search cards" });
+  }
+});
+
+app.get("/api/cards/search", async (req, res) => {
+  try {
+    await handlePublicCatalogSearch(req, res);
+  } catch (error) {
+    if (res.headersSent) return;
+    console.error(error);
+    res.status(500).json({ error: "Failed to search cards" });
+  }
+});
+
+app.get("/api/catalog/:id", async (req, res) => {
+  try {
+    await handlePublicCatalogDetail(req, res);
+  } catch (error) {
+    if (res.headersSent) return;
+    console.error(error);
+    res.status(500).json({ error: "Failed to load card" });
+  }
+});
+
+app.get("/api/cards/:id", async (req, res) => {
+  try {
+    await handlePublicCatalogDetail(req, res);
+  } catch (error) {
+    if (res.headersSent) return;
     console.error(error);
     res.status(500).json({ error: "Failed to load card" });
   }
@@ -2334,119 +4179,79 @@ app.get("/api/custom/products/:slug", async (req, res) => {
   }
 });
 
-app.post("/api/auth/register", async (req, res) => {
-  try {
-    const parsed = parseRegisterPayload(req.body || {});
-    if (parsed.error) {
-      res.status(400).json({ error: parsed.error });
-      return;
-    }
-
-    const { email, username, password, fullName, phone, avatarUrl } = parsed.data;
-    const existing = await prisma.user.findFirst({
-      where: {
-        OR: [{ email }, { username }],
-      },
+app.post("/api/auth/register", authWriteRateLimit, validateBody(registerBodySchema), async (req, res) => {
+  const parsed = parseRegisterPayload(req.validatedBody || {});
+  if (parsed.error) {
+    throw createAppError(parsed.error, {
+      statusCode: 400,
+      code: "VALIDATION_ERROR",
     });
-
-    if (existing) {
-      res.status(409).json({ error: existing.email === email ? "Email already registered" : "Username already in use" });
-      return;
-    }
-
-    const passwordHash = await bcrypt.hash(password, 10);
-    const user = await prisma.user.create({
-      data: {
-        email,
-        username,
-        passwordHash,
-        fullName,
-        phone,
-        avatarUrl,
-        role: UserRole.USER,
-      },
-    });
-
-    await recordActivity(user.id, "AUTH_REGISTER", req, { email: user.email });
-    const session = await createSession(user, req);
-    res.status(201).json(session);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to register user" });
   }
+
+  const { email, username, password, fullName, phone, avatarUrl } = parsed.data;
+  const existing = await prisma.user.findFirst({
+    where: {
+      OR: [{ email }, { username }],
+    },
+  });
+
+  if (existing) {
+    throw createAppError(existing.email === email ? "Email already registered" : "Username already in use", {
+      statusCode: 409,
+      code: "USER_ALREADY_EXISTS",
+    });
+  }
+
+  const passwordHash = await bcrypt.hash(password, 10);
+  const user = await prisma.user.create({
+    data: {
+      email,
+      username,
+      passwordHash,
+      fullName,
+      phone,
+      avatarUrl,
+      role: UserRole.USER,
+    },
+  });
+
+  await recordActivity(user.id, "AUTH_REGISTER", req, { email: user.email });
+  const session = await createSession(user, req);
+  res.status(201).json(session);
 });
 
-app.post("/api/auth/login", async (req, res) => {
-  try {
-    const identifier = typeof req.body?.identifier === "string"
-      ? req.body.identifier
-      : typeof req.body?.email === "string"
-        ? req.body.email
+app.post("/api/auth/login", authWriteRateLimit, validateBody(loginBodySchema), async (req, res) => {
+  await withDatabaseConnection(async () => {
+    const identifier = typeof req.validatedBody?.identifier === "string"
+      ? req.validatedBody.identifier
+      : typeof req.validatedBody?.email === "string"
+        ? req.validatedBody.email
         : "";
-    const password = typeof req.body?.password === "string" ? req.body.password : "";
-
-    if (!identifier || !password) {
-      res.status(400).json({ error: "Identifier and password are required" });
-      return;
-    }
-
-    const user = await findUserByIdentifier(identifier);
-    if (!user || !user.isActive) {
-      res.status(401).json({ error: "Credenciales inválidas" });
-      return;
-    }
-
-    const isValidPassword = await bcrypt.compare(password, user.passwordHash);
-    if (!isValidPassword) {
-      res.status(401).json({ error: "Credenciales inválidas" });
-      return;
-    }
+    const user = await authenticateSessionUser({
+      identifier,
+      password: req.validatedBody.password,
+    });
 
     await recordActivity(user.id, "AUTH_LOGIN", req, { via: "storefront" });
     const session = await createSession(user, req);
     res.json(session);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to login" });
-  }
+  }, { maxWaitMs: 4000 });
 });
 
-app.post("/api/auth/refresh", async (req, res) => {
-  try {
-    const refreshToken = typeof req.body?.refreshToken === "string" ? req.body.refreshToken : "";
-    if (!refreshToken) {
-      res.status(400).json({ error: "Refresh token is required" });
-      return;
-    }
+app.post("/api/auth/refresh", sessionRateLimit, validateBody(refreshTokenBodySchema), async (req, res) => {
+  await withDatabaseConnection(async () => {
+    const user = await resolveRefreshSessionUser({ refreshToken: req.validatedBody.refreshToken });
 
-    const payload = verifyRefreshToken(refreshToken);
-    if (payload.type !== "refresh") {
-      res.status(401).json({ error: "Invalid refresh token" });
-      return;
-    }
-
-    const storedToken = await prisma.refreshToken.findUnique({
-      where: { tokenHash: hashToken(refreshToken) },
-      include: { user: true },
-    });
-
-    if (!storedToken || storedToken.revokedAt || storedToken.expiresAt < new Date() || !storedToken.user?.isActive) {
-      res.status(401).json({ error: "Refresh token expired" });
-      return;
-    }
-
-    await revokeRefreshToken(refreshToken);
-    await recordActivity(storedToken.user.id, "AUTH_REFRESH", req, null);
-    const session = await createSession(storedToken.user, req);
+    await revokeRefreshToken(req.validatedBody.refreshToken);
+    await recordActivity(user.id, "AUTH_REFRESH", req, null);
+    const session = await createSession(user, req);
     res.json(session);
-  } catch {
-    res.status(401).json({ error: "Refresh token expired" });
-  }
+  }, { maxWaitMs: 4000 });
 });
 
-app.post("/api/auth/logout", async (req, res) => {
+app.post("/api/auth/logout", sessionRateLimit, validateBody(logoutBodySchema), async (req, res) => {
   try {
-    const refreshToken = typeof req.body?.refreshToken === "string" ? req.body.refreshToken : "";
+    const refreshToken = typeof req.validatedBody?.refreshToken === "string" ? req.validatedBody.refreshToken : "";
     await revokeRefreshToken(refreshToken);
     res.json({ ok: true });
   } catch (error) {
@@ -2455,80 +4260,66 @@ app.post("/api/auth/logout", async (req, res) => {
   }
 });
 
-app.post("/api/auth/forgot-password", async (req, res) => {
-  try {
-    const email = normalizeEmail(req.body?.email);
-    const user = email ? await prisma.user.findUnique({ where: { email } }) : null;
+app.post("/api/auth/forgot-password", passwordResetRateLimit, validateBody(forgotPasswordBodySchema), async (req, res) => {
+  const email = normalizeEmail(req.validatedBody?.email);
+  const user = email ? await prisma.user.findUnique({ where: { email } }) : null;
 
-    if (!user) {
-      res.json({ ok: true, message: "Si el email existe, enviamos instrucciones." });
-      return;
-    }
-
-    const resetToken = createPasswordResetToken();
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        passwordResetTokenHash: hashToken(resetToken),
-        passwordResetExpiresAt: new Date(Date.now() + 1000 * 60 * 30),
-      },
-    });
-
-    await recordActivity(user.id, "PASSWORD_RESET_REQUESTED", req, null);
-    res.json({
-      ok: true,
-      message: "Si el email existe, enviamos instrucciones.",
-      ...(process.env.NODE_ENV !== "production" ? { resetToken } : {}),
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to request password reset" });
+  if (!user) {
+    res.json({ ok: true, message: "Si el email existe, enviamos instrucciones." });
+    return;
   }
+
+  const resetToken = createPasswordResetToken();
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      passwordResetTokenHash: hashToken(resetToken),
+      passwordResetExpiresAt: new Date(Date.now() + 1000 * 60 * 30),
+    },
+  });
+
+  await recordActivity(user.id, "PASSWORD_RESET_REQUESTED", req, null);
+  res.json({
+    ok: true,
+    message: "Si el email existe, enviamos instrucciones.",
+    ...(process.env.NODE_ENV !== "production" ? { resetToken } : {}),
+  });
 });
 
-app.post("/api/auth/reset-password", async (req, res) => {
-  try {
-    const token = typeof req.body?.token === "string" ? req.body.token : "";
-    const password = typeof req.body?.password === "string" ? req.body.password : "";
+app.post("/api/auth/reset-password", passwordResetRateLimit, validateBody(resetPasswordBodySchema), async (req, res) => {
+  const { token, password } = req.validatedBody;
 
-    if (!token || password.length < 6) {
-      res.status(400).json({ error: "Token and a 6 character password are required" });
-      return;
-    }
+  const user = await prisma.user.findFirst({
+    where: {
+      passwordResetTokenHash: hashToken(token),
+      passwordResetExpiresAt: { gt: new Date() },
+    },
+  });
 
-    const user = await prisma.user.findFirst({
-      where: {
-        passwordResetTokenHash: hashToken(token),
-        passwordResetExpiresAt: { gt: new Date() },
-      },
+  if (!user) {
+    throw createAppError("Reset token invalid or expired", {
+      statusCode: 400,
+      code: "INVALID_RESET_TOKEN",
     });
-
-    if (!user) {
-      res.status(400).json({ error: "Reset token invalid or expired" });
-      return;
-    }
-
-    await prisma.$transaction([
-      prisma.user.update({
-        where: { id: user.id },
-        data: {
-          passwordHash: await bcrypt.hash(password, 10),
-          passwordResetTokenHash: null,
-          passwordResetExpiresAt: null,
-        },
-      }),
-      prisma.refreshToken.updateMany({
-        where: { userId: user.id, revokedAt: null },
-        data: { revokedAt: new Date() },
-      }),
-    ]);
-
-    await recordActivity(user.id, "PASSWORD_RESET_COMPLETED", req, null);
-    res.json({ ok: true });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to reset password" });
   }
+
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash: await bcrypt.hash(password, 10),
+        passwordResetTokenHash: null,
+        passwordResetExpiresAt: null,
+      },
+    }),
+    prisma.refreshToken.updateMany({
+      where: { userId: user.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    }),
+  ]);
+
+  await recordActivity(user.id, "PASSWORD_RESET_COMPLETED", req, null);
+  res.json({ ok: true });
 });
 
 app.get("/api/auth/me", requireAuth, async (req, res) => {
@@ -2701,6 +4492,11 @@ app.delete("/api/auth/addresses/:id", requireAuth, async (req, res) => {
 
 app.get("/api/auth/orders", requireAuth, async (req, res) => {
   try {
+    await expirePendingOrdersBestEffort({
+      source: "auth_orders_list",
+      requestId: req.requestContext?.requestId || null,
+    });
+
     const orders = await prisma.order.findMany({
       where: { userId: Number(req.user.sub) },
       include: { items: true, user: true, address: true },
@@ -2730,8 +4526,22 @@ app.get("/api/auth/activity", requireAuth, async (req, res) => {
   }
 });
 
-app.post("/api/checkout", requireAuth, async (req, res) => {
+app.post("/api/checkout", requireAuth, checkoutRateLimit, async (req, res) => {
+  let idempotency = null;
+
   try {
+    assertMercadoPagoDirectPaymentsConfigured();
+    await ensureOrderSchemaReady();
+
+    idempotency = await beginIdempotentMutation(req, {
+      payload: req.body || null,
+    });
+
+    if (idempotency.replay) {
+      res.status(idempotency.replay.statusCode).json(idempotency.replay.body);
+      return;
+    }
+
     const userId = Number(req.user.sub);
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
     const acceptedPrivacy = req.body?.accepted === true;
@@ -2772,7 +4582,7 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
       ? req.body.phone.trim()
       : user.phone;
 
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await withDatabaseConnection(() => prisma.$transaction(async (tx) => {
       const cards = await tx.card.findMany({
         where: { id: { in: normalizedItems.map((item) => item.cardId) } },
       });
@@ -2795,18 +4605,28 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
 
       for (const item of normalizedItems) {
         const card = cardMap.get(item.cardId);
-        if (card.stock < item.quantity) {
+        subtotal += card.price * item.quantity;
+      }
+
+      // Atomic stock reservation: decrement only if stock >= quantity (prevents overselling)
+      for (const item of normalizedItems) {
+        const card = cardMap.get(item.cardId);
+        const updated = await tx.card.updateMany({
+          where: { id: item.cardId, stock: { gte: item.quantity } },
+          data: { stock: { decrement: item.quantity } },
+        });
+
+        if (updated.count === 0) {
           throw createAppError(`Insufficient stock for ${card.name}`, {
             code: "INSUFFICIENT_STOCK",
             unavailableCardIds: [item.cardId],
           });
         }
-
-        subtotal += card.price * item.quantity;
       }
 
       const delivery = await buildCheckoutAddress(tx, userId, req.body || {}, fallbackPhone);
       const total = formatCurrency(subtotal + delivery.shipping.cost);
+      const expiresAt = buildCheckoutExpirationDate();
 
       const order = await tx.order.create({
         data: {
@@ -2815,7 +4635,11 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
           subtotal: formatCurrency(subtotal),
           shippingCost: delivery.shipping.cost,
           total,
+          currency: "ARS",
           status: OrderStatus.PENDING_PAYMENT,
+          expires_at: expiresAt,
+          payment_status: null,
+          payment_status_detail: null,
           shippingZone: delivery.shippingZone,
           shippingLabel: delivery.shipping.label,
           customerName,
@@ -2840,25 +4664,66 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
         include: { items: true, user: true, address: true },
       });
 
-      await Promise.all(normalizedItems.map((item) => tx.card.update({
-        where: { id: item.cardId },
-        data: { stock: { decrement: item.quantity } },
-      })));
-
       return { order, cardsById };
-    });
+    }), { maxWaitMs: 5000 });
 
     const responseOrder = toOrderResponse(result.order, result.cardsById);
-    invalidatePublicCatalogCaches();
+
+    const responsePayload = {
+      order: responseOrder,
+      init_point: null,
+      exchange_rate: responseOrder.exchange_rate ?? null,
+      total_ars: responseOrder.total_ars ?? null,
+      expires_at: responseOrder.expires_at ?? null,
+      payment_redirect_available: false,
+    };
 
     try {
-      await recordActivity(userId, "CHECKOUT_CREATED", req, { orderId: result.order.id });
+      await recordActivity(userId, "CHECKOUT_CREATED", req, {
+        orderId: result.order.id,
+        paymentFlow: "checkout_api",
+      });
     } catch (activityError) {
       console.error("Failed to record checkout activity", activityError);
     }
 
-    res.status(201).json({ order: responseOrder });
+    console.info("Checkout created", {
+      requestId: req.requestContext?.requestId || null,
+      orderId: result.order.id,
+      paymentRedirectAvailable: false,
+    });
+
+    await finalizeIdempotentMutation(idempotency, 201, responsePayload);
+    res.status(201).json(responsePayload);
+
+    /* ── Realtime: notify new order + async stock update (fire-and-forget) ── */
+    try {
+      await invalidateOrderRelatedCache(normalizedItems);
+      publishEvent("new-order", {
+        orderId: result.order.id,
+        total: result.order.total,
+        itemCount: normalizedItems.length,
+      });
+      await scheduleStockUpdate(normalizedItems, result.order.id, "checkout");
+    } catch (postResponseError) {
+      console.error("[checkout] post-response side-effects failed", postResponseError);
+    }
+    return;
   } catch (error) {
+    await releaseIdempotentMutation(idempotency);
+
+    if (res.headersSent) return;
+
+    if (error?.statusCode) {
+      res.status(error.statusCode).json({
+        error: error.message,
+        code: error.code || "REQUEST_ERROR",
+        ...(error.details ? error.details : {}),
+        ...(Array.isArray(error.unavailableCardIds) ? { unavailableCardIds: error.unavailableCardIds } : {}),
+      });
+      return;
+    }
+
     if (error?.code === "CARD_UNAVAILABLE") {
       res.status(409).json({
         error: error.message,
@@ -2892,8 +4757,487 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
   }
 });
 
-app.get("/api/orders", async (req, res) => {
+app.post("/api/checkout/create-preference", requireAuth, checkoutRateLimit, async (req, res) => {
+  let idempotency = null;
+
   try {
+    idempotency = await beginIdempotentMutation(req, {
+      payload: { orderId: req.body?.orderId ?? null },
+    });
+
+    if (idempotency.replay) {
+      res.status(idempotency.replay.statusCode).json(idempotency.replay.body);
+      return;
+    }
+
+    const userId = Number(req.user.sub);
+    const orderId = Number(req.body?.orderId);
+    if (!Number.isFinite(orderId)) {
+      res.status(400).json({ error: "Invalid order id" });
+      return;
+    }
+
+    const preferenceResult = await createCheckoutPreferenceForOrder(req, { orderId, userId });
+    const responsePayload = {
+      init_point: preferenceResult.initPoint,
+      exchange_rate: preferenceResult.exchangeRate,
+      total_ars: preferenceResult.totalArs,
+      expires_at: preferenceResult.expiresAt,
+      order: toOrderResponse(preferenceResult.order, preferenceResult.cardsById),
+    };
+
+    try {
+      await recordActivity(userId, "CHECKOUT_PREFERENCE_CREATED", req, {
+        orderId: preferenceResult.order.id,
+        preferenceId: preferenceResult.order.preference_id,
+        exchangeRate: preferenceResult.exchangeRate,
+        totalArs: preferenceResult.totalArs,
+      });
+    } catch (activityError) {
+      console.error("Failed to record checkout preference activity", activityError);
+    }
+
+    console.info("Checkout preference created", {
+      requestId: req.requestContext?.requestId || null,
+      orderId: preferenceResult.order.id,
+      preferenceId: preferenceResult.order.preference_id,
+    });
+
+    await finalizeIdempotentMutation(idempotency, 200, responsePayload);
+    return res.json(responsePayload);
+  } catch (error) {
+    await releaseIdempotentMutation(idempotency);
+
+    if (res.headersSent) return;
+
+    if (error?.statusCode) {
+      res.status(error.statusCode).json({
+        error: error.message,
+        code: error.code || "REQUEST_ERROR",
+        ...(error.details ? error.details : {}),
+      });
+      return;
+    }
+
+    console.error(error);
+    res.status(500).json({ error: error.message || "Failed to create Mercado Pago preference" });
+  }
+});
+
+app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res) => {
+  let idempotency = null;
+  let prepared = null;
+  let userId = null;
+
+  try {
+    assertMercadoPagoDirectPaymentsConfigured();
+    await ensureOrderSchemaReady();
+
+    idempotency = await beginIdempotentMutation(req, {
+      payload: {
+        orderId: req.body?.orderId ?? null,
+        token: req.body?.token ?? null,
+        payment_method_id: req.body?.payment_method_id ?? null,
+        issuer_id: req.body?.issuer_id ?? null,
+        installments: req.body?.installments ?? null,
+        identification: req.body?.identification ?? null,
+      },
+    });
+
+    if (idempotency.replay) {
+      res.status(idempotency.replay.statusCode).json(idempotency.replay.body);
+      return;
+    }
+
+    userId = Number(req.user.sub);
+    const orderId = Number(req.body?.orderId);
+    const token = String(req.body?.token || "").trim();
+    const paymentMethodId = String(req.body?.payment_method_id || "").trim();
+    const issuerId = String(req.body?.issuer_id || "").trim();
+    const installments = Number(req.body?.installments);
+    const identificationType = String(req.body?.identification?.type || "").trim();
+    const identificationNumber = String(req.body?.identification?.number || "").trim();
+
+    if (!Number.isFinite(orderId)) {
+      res.status(400).json({ error: "Invalid order id", code: "INVALID_ORDER_ID" });
+      return;
+    }
+
+    if (!token) {
+      res.status(400).json({ error: "Missing card token", code: "MISSING_CARD_TOKEN" });
+      return;
+    }
+
+    if (!paymentMethodId) {
+      res.status(400).json({ error: "Missing payment method", code: "MISSING_PAYMENT_METHOD" });
+      return;
+    }
+
+    if (!Number.isInteger(installments) || installments <= 0) {
+      res.status(400).json({ error: "Invalid installments", code: "INVALID_INSTALLMENTS" });
+      return;
+    }
+
+    prepared = await prepareOrderForDirectPayment(req, { orderId, userId });
+    const mercadoPagoAccount = await getMercadoPagoAccountDetails();
+    const notificationUrl = buildMercadoPagoNotificationUrl({
+      useSandboxWebhook: shouldUseMercadoPagoSandboxWebhook(mercadoPagoAccount),
+    });
+    const providerIdempotencyKey = String(idempotency.key || req.body?.mutation_id || `${orderId}-${Date.now()}`);
+    const paymentPayload = {
+      transaction_amount: prepared.totalArs,
+      token,
+      payment_method_id: paymentMethodId,
+      installments,
+      description: `DuelVault order #${prepared.order.id}`,
+      external_reference: String(prepared.order.id),
+      ...(notificationUrl ? { notification_url: notificationUrl } : {}),
+      payer: {
+        email: String(prepared.order.customerEmail || prepared.order.user?.email || "").trim().toLowerCase(),
+        ...((identificationType && identificationNumber)
+          ? {
+              identification: {
+                type: identificationType,
+                number: identificationNumber,
+              },
+            }
+          : {}),
+      },
+      ...(issuerId ? { issuer_id: issuerId } : {}),
+      metadata: {
+        order_id: prepared.order.id,
+        request_id: req.requestContext?.requestId || null,
+        user_id: prepared.order.userId ?? null,
+      },
+    };
+
+    const payment = await createMercadoPagoDirectPayment({
+      accessToken: MERCADOPAGO_ACCESS_TOKEN,
+      idempotencyKey: providerIdempotencyKey,
+      body: paymentPayload,
+      timeoutMs: CHECKOUT_REQUEST_TIMEOUT_MS,
+      signal: req.requestContext?.signal,
+    });
+
+    const paymentStatus = normalizeMercadoPagoPaymentStatus(payment?.status);
+    const paymentStatusDetail = normalizeMercadoPagoPaymentStatusDetail(payment?.status_detail);
+    const updatedOrder = await persistDirectPaymentAttempt(req, {
+      orderId: prepared.order.id,
+      userId,
+      paymentId: String(payment?.id || "").trim() || null,
+      paymentStatus,
+      paymentStatusDetail,
+      exchangeRate: prepared.exchangeRate,
+      totalArs: prepared.totalArs,
+      expiresAt: prepared.expiresAt,
+    });
+    const cardsById = await getOrderCardsMap([updatedOrder]);
+    const responsePayload = {
+      order: toOrderResponse(updatedOrder, cardsById),
+      payment: {
+        id: payment?.id ? String(payment.id) : null,
+        status: paymentStatus || null,
+        status_detail: paymentStatusDetail,
+        amount: Number(payment?.transaction_amount || prepared.totalArs),
+        installments: Number(payment?.installments || installments),
+        payment_method_id: String(payment?.payment_method_id || paymentMethodId),
+      },
+      webhook_pending: true,
+    };
+
+    try {
+      await recordActivity(userId, "PAYMENT_CREATE_REQUESTED", req, {
+        orderId: updatedOrder.id,
+        paymentId: responsePayload.payment.id,
+        paymentStatus,
+        paymentStatusDetail,
+      });
+    } catch (activityError) {
+      console.error("Failed to record direct payment activity", activityError);
+    }
+
+    console.info("Direct payment created", {
+      requestId: req.requestContext?.requestId || null,
+      orderId: updatedOrder.id,
+      paymentId: responsePayload.payment.id,
+      paymentStatus,
+      paymentStatusDetail,
+    });
+
+    await finalizeIdempotentMutation(idempotency, 201, responsePayload);
+    return res.status(201).json(responsePayload);
+  } catch (error) {
+    if (
+      prepared?.order?.id
+      && Number.isFinite(userId)
+      && error?.code === "MERCADOPAGO_PAYMENT_FAILED"
+      && Number(error?.statusCode) >= 400
+      && Number(error?.statusCode) < 500
+    ) {
+      try {
+        const paymentStatusDetail = normalizeMercadoPagoPaymentStatusDetail(
+          error?.providerPayload?.cause?.[0]?.description
+          || error?.providerPayload?.message
+          || error?.message
+        );
+
+        await persistDirectPaymentProviderFailure(req, {
+          orderId: prepared.order.id,
+          userId,
+          paymentStatusDetail,
+          exchangeRate: prepared.exchangeRate,
+          totalArs: prepared.totalArs,
+          expiresAt: prepared.expiresAt,
+        });
+
+        try {
+          await recordActivity(userId, "PAYMENT_CREATE_REJECTED", req, {
+            orderId: prepared.order.id,
+            providerStatusCode: Number(error?.statusCode) || null,
+            paymentStatusDetail,
+          });
+        } catch (activityError) {
+          console.error("Failed to record direct payment rejection activity", activityError);
+        }
+      } catch (persistError) {
+        console.error("Failed to persist direct payment rejection", persistError);
+      }
+    }
+
+    await releaseIdempotentMutation(idempotency);
+
+    if (res.headersSent) return;
+
+    if (error?.statusCode) {
+      res.status(error.statusCode).json({
+        error: error.message,
+        code: error.code || "PAYMENT_CREATE_FAILED",
+        ...(error.providerPayload ? { provider: error.providerPayload } : {}),
+        ...(error.details ? error.details : {}),
+      });
+      return;
+    }
+
+    console.error(error);
+    res.status(500).json({ error: error.message || "Failed to create Mercado Pago payment" });
+  }
+});
+
+app.post(MERCADOPAGO_WEBHOOK_PATHS, async (req, res) => {
+  try {
+    assertMercadoPagoWebhookConfigured();
+
+    const notificationType = String(req.body?.type || req.query?.type || "payment").trim().toLowerCase();
+    if (notificationType && notificationType !== "payment") {
+      console.info("Ignoring unsupported Mercado Pago webhook", {
+        type: notificationType,
+        requestId: req.requestContext?.requestId || null,
+      });
+      res.status(200).json({ received: true, ignored: true });
+      return;
+    }
+
+    const paymentId = extractMercadoPagoPaymentId(req.body || {}, req.query || {});
+    if (!paymentId) {
+      res.status(200).json({ received: true, ignored: true, reason: "missing_payment_id" });
+      return;
+    }
+
+    const signatureMeta = validateMercadoPagoWebhookSignature(req, paymentId);
+
+    const paymentResponse = await mercadoPagoPaymentClient.get({ id: paymentId });
+    const payment = unwrapMercadoPagoBody(paymentResponse);
+    const paymentStatus = normalizeMercadoPagoPaymentStatus(payment?.status);
+    const orderId = resolveMercadoPagoOrderId(payment);
+
+    if (!Number.isFinite(orderId)) {
+      console.warn("Mercado Pago payment without valid external_reference", {
+        paymentId,
+        paymentStatus,
+      });
+      res.status(200).json({ received: true, ignored: true, reason: "missing_external_reference" });
+      return;
+    }
+
+    const outcome = await prisma.$transaction(async (tx) => {
+      await lockOrderForUpdate(tx, orderId);
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        include: { items: true, user: true, address: true },
+      });
+
+      if (!order) {
+        return null;
+      }
+
+      if (order.status === OrderStatus.PENDING_PAYMENT && order.expires_at && order.expires_at <= new Date()) {
+        const expiredOrder = await updateOrderStatusWithEffects(tx, order, OrderStatus.EXPIRED, {
+          payment_status: order.payment_status || "expired",
+          payment_status_detail: order.payment_status_detail || "expired_order",
+        });
+        return {
+          order: expiredOrder,
+          duplicate: false,
+          appliedStatus: OrderStatus.EXPIRED,
+          paymentStatus,
+          postCommitEffect: buildOrderStatusPostCommitEffect(order, OrderStatus.EXPIRED),
+        };
+      }
+
+      const nextStatus = resolveWebhookOrderStatus(order.status, paymentStatus);
+      const paymentData = {
+        payment_id: String(payment?.id || paymentId),
+        payment_status: paymentStatus || order.payment_status || null,
+        payment_status_detail: normalizeMercadoPagoPaymentStatusDetail(payment?.status_detail) || order.payment_status_detail || null,
+        payment_approved_at: paymentStatus === "approved"
+          ? order.payment_approved_at || new Date()
+          : order.payment_approved_at,
+      };
+      const staleWebhook = order.payment_id && order.payment_id !== paymentData.payment_id;
+
+      if (staleWebhook && paymentStatus !== "approved") {
+        return {
+          order,
+          duplicate: false,
+          ignored: true,
+          appliedStatus: order.status,
+          paymentStatus,
+        };
+      }
+
+      const isDuplicate = order.payment_id === paymentData.payment_id
+        && order.payment_status === paymentData.payment_status
+        && order.payment_status_detail === paymentData.payment_status_detail
+        && (!nextStatus || order.status === nextStatus);
+
+      if (isDuplicate) {
+        return {
+          order,
+          duplicate: true,
+          appliedStatus: order.status,
+          paymentStatus,
+          postCommitEffect: null,
+        };
+      }
+
+      if (nextStatus && order.status !== nextStatus) {
+        const updatedOrder = await updateOrderStatusWithEffects(tx, order, nextStatus, paymentData);
+        return {
+          order: updatedOrder,
+          duplicate: false,
+          appliedStatus: nextStatus,
+          paymentStatus,
+          postCommitEffect: buildOrderStatusPostCommitEffect(order, nextStatus),
+        };
+      }
+
+      const updatedOrder = await tx.order.update({
+        where: { id: order.id },
+        data: paymentData,
+        include: { items: true, user: true, address: true },
+      });
+
+      return {
+        order: updatedOrder,
+        duplicate: false,
+        appliedStatus: order.status,
+        paymentStatus,
+        postCommitEffect: null,
+      };
+    });
+
+    if (!outcome?.order) {
+      console.warn("Mercado Pago webhook for unknown order", {
+        paymentId,
+        orderId,
+        paymentStatus,
+      });
+      res.status(200).json({ received: true, ignored: true, reason: "order_not_found" });
+      return;
+    }
+
+    await applyOrderStatusPostCommitEffect(outcome.postCommitEffect);
+
+    const activityAction = outcome.duplicate
+      ? "CHECKOUT_WEBHOOK_DUPLICATE"
+      : outcome.ignored
+        ? "CHECKOUT_WEBHOOK_IGNORED"
+      : outcome.paymentStatus === "approved"
+        ? "CHECKOUT_PAYMENT_APPROVED"
+        : outcome.appliedStatus === OrderStatus.EXPIRED
+          ? "CHECKOUT_PAYMENT_EXPIRED"
+        : outcome.paymentStatus === "pending" || outcome.paymentStatus === "in_process"
+          ? "CHECKOUT_PAYMENT_PENDING"
+          : "CHECKOUT_PAYMENT_FAILED";
+
+    try {
+      await recordActivity(outcome.order.userId ?? null, activityAction, req, {
+        orderId: outcome.order.id,
+        paymentId: outcome.order.payment_id,
+        paymentStatus: outcome.paymentStatus,
+        paymentStatusDetail: outcome.order.payment_status_detail || null,
+        appliedStatus: outcome.appliedStatus,
+        duplicate: outcome.duplicate,
+        ignored: Boolean(outcome.ignored),
+        providerRequestId: signatureMeta.providerRequestId,
+      });
+    } catch (activityError) {
+      console.error("Failed to record Mercado Pago webhook activity", activityError);
+    }
+
+    console.info("Mercado Pago webhook processed", {
+      requestId: req.requestContext?.requestId || null,
+      providerRequestId: signatureMeta.providerRequestId,
+      orderId: outcome.order.id,
+      paymentId: outcome.order.payment_id,
+      paymentStatus: outcome.paymentStatus,
+      appliedStatus: outcome.appliedStatus,
+      duplicate: outcome.duplicate,
+    });
+
+    invalidatePublicCatalogCaches();
+    return res.status(200).json({ received: true });
+  } catch (error) {
+    console.error("Mercado Pago webhook failed", error);
+    if (res.headersSent) return;
+    res.status(error?.statusCode || 500).json({
+      error: error?.message || "Webhook processing failed",
+      code: error?.code || "WEBHOOK_PROCESSING_FAILED",
+    });
+  }
+});
+
+app.get("/api/internal/orders/expire-pending", async (req, res) => {
+  try {
+    assertCronAuthorized(req);
+    const expired = await expirePendingOrders({
+      source: "vercel_cron",
+      requestId: req.requestContext?.requestId || null,
+    });
+
+    res.json({
+      expired_count: expired.count,
+      order_ids: expired.orderIds,
+    });
+  } catch (error) {
+    if (res.headersSent) return;
+    res.status(error?.statusCode || 500).json({
+      error: error?.message || "Failed to expire pending orders",
+      code: error?.code || "EXPIRE_PENDING_ORDERS_FAILED",
+      requestId: req.requestContext?.requestId || null,
+    });
+  }
+});
+
+app.get("/api/orders", requireAuth, async (req, res) => {
+  try {
+    const currentUserId = Number(req.user.sub);
+
+    await expirePendingOrdersBestEffort({
+      source: "public_orders_list",
+      requestId: req.requestContext?.requestId || null,
+    });
+
     const ids = typeof req.query.ids === "string"
       ? req.query.ids.split(",").map((value) => Number(value)).filter(Number.isFinite)
       : [];
@@ -2904,7 +5248,7 @@ app.get("/api/orders", async (req, res) => {
     }
 
     const orders = await prisma.order.findMany({
-      where: { id: { in: ids } },
+      where: { id: { in: ids }, userId: currentUserId },
       orderBy: { createdAt: "desc" },
       include: { items: true, user: true, address: true },
     });
@@ -2912,163 +5256,202 @@ app.get("/api/orders", async (req, res) => {
     const cardsById = await getOrderCardsMap(orders);
     res.json({ orders: orders.map((order) => toOrderResponse(order, cardsById)) });
   } catch (error) {
+    if (res.headersSent) return;
     console.error(error);
     res.status(500).json({ error: "Failed to load orders" });
   }
 });
 
-app.post("/api/admin/login", async (req, res) => {
-  try {
-    const identifier = typeof req.body?.email === "string" ? req.body.email : typeof req.body?.identifier === "string" ? req.body.identifier : "";
-    const password = typeof req.body?.password === "string" ? req.body.password : "";
-
-    if (!identifier || !password) {
-      res.status(400).json({ error: "Email and password are required" });
-      return;
-    }
-
-    const user = await findUserByIdentifier(identifier);
-    if (!user || ![UserRole.ADMIN, UserRole.STAFF].includes(user.role)) {
-      res.status(401).json({ error: "Credenciales inválidas" });
-      return;
-    }
-
-    const isValidPassword = await bcrypt.compare(password, user.passwordHash);
-    if (!isValidPassword) {
-      res.status(401).json({ error: "Credenciales inválidas" });
-      return;
-    }
+app.post("/api/admin/login", adminAuthRateLimit, validateBody(adminLoginBodySchema), async (req, res) => {
+  await withDatabaseConnection(async () => {
+    const identifier = typeof req.validatedBody?.identifier === "string"
+      ? req.validatedBody.identifier
+      : typeof req.validatedBody?.email === "string"
+        ? req.validatedBody.email
+        : "";
+    const user = await authenticateSessionUser({
+      identifier,
+      password: req.validatedBody.password,
+      allowedRoles: [UserRole.ADMIN, UserRole.STAFF],
+    });
 
     await recordActivity(user.id, "AUTH_LOGIN", req, { via: "admin" });
     const session = await createSession(user, req);
     res.json(toAdminSessionPayload(session));
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to login" });
-  }
+  }, { maxWaitMs: 4000 });
 });
 
-app.post("/api/admin/refresh", async (req, res) => {
-  try {
-    const refreshToken = typeof req.body?.refreshToken === "string" ? req.body.refreshToken : "";
-    if (!refreshToken) {
-      res.status(400).json({ error: "Refresh token is required" });
-      return;
-    }
-
-    const payload = verifyRefreshToken(refreshToken);
-    if (payload.type !== "refresh") {
-      res.status(401).json({ error: "Invalid refresh token" });
-      return;
-    }
-
-    const storedToken = await prisma.refreshToken.findUnique({
-      where: { tokenHash: hashToken(refreshToken) },
-      include: { user: true },
+app.post("/api/admin/refresh", adminAuthRateLimit, validateBody(refreshTokenBodySchema), async (req, res) => {
+  await withDatabaseConnection(async () => {
+    const user = await resolveRefreshSessionUser({
+      refreshToken: req.validatedBody.refreshToken,
+      allowedRoles: [UserRole.ADMIN, UserRole.STAFF],
     });
 
-    if (!storedToken || storedToken.revokedAt || storedToken.expiresAt < new Date() || !storedToken.user || ![UserRole.ADMIN, UserRole.STAFF].includes(storedToken.user.role)) {
-      res.status(401).json({ error: "Refresh token expired" });
-      return;
-    }
-
-    await revokeRefreshToken(refreshToken);
-    const session = await createSession(storedToken.user, req);
+    await revokeRefreshToken(req.validatedBody.refreshToken);
+    const session = await createSession(user, req);
     res.json(toAdminSessionPayload(session));
-  } catch {
-    res.status(401).json({ error: "Refresh token expired" });
-  }
+  }, { maxWaitMs: 4000 });
 });
 
 app.get("/api/admin/dashboard", requireAdminAuth, async (_req, res) => {
   try {
-    const scopeSettings = await getCatalogScopeSettings();
-    const scopeWhere = await resolveCatalogScopeWhere(scopeSettings);
-
-    const [cardMetricsRows, topSellingCardRows, orders, customerCount, staffCount, recentUsers, customerSeriesRows, topCustomerUsers] = await Promise.all([
-      prisma.card.findMany({
-        where: scopeWhere,
-        select: { stock: true, lowStockThreshold: true },
-      }),
-      prisma.card.findMany({
-        where: scopeWhere,
-        orderBy: [{ salesCount: "desc" }, { name: "asc" }],
-        take: 6,
-        select: PUBLIC_CARD_LIST_SELECT,
-      }),
-      prisma.order.findMany({
-        include: { items: true, user: true, address: true },
-        orderBy: { createdAt: "desc" },
-      }),
-      prisma.user.count({ where: { role: UserRole.USER } }),
-      prisma.user.count({ where: { role: { in: [UserRole.ADMIN, UserRole.STAFF] } } }),
-      prisma.user.findMany({
-        where: { role: UserRole.USER },
-        take: 6,
-        orderBy: { createdAt: "desc" },
-      }),
-      prisma.user.findMany({
-        where: { role: UserRole.USER },
-        select: { createdAt: true },
-      }),
-      prisma.user.findMany({
-        where: { role: UserRole.USER },
-        include: { orders: { select: { userId: true, status: true, total: true } } },
-      }),
-    ]);
-
-    const cardsById = await getOrderCardsMap(orders);
-    const completedOrders = orders.filter((order) => isBillableStatus(order.status));
-    const lowStockCount = cardMetricsRows.filter((card) => card.stock > 0 && card.stock <= card.lowStockThreshold).length;
-    const outOfStockCount = cardMetricsRows.filter((card) => card.stock === 0).length;
-    const totalRevenue = completedOrders.reduce((sum, order) => sum + order.total, 0);
-    const avgOrderValue = completedOrders.length ? totalRevenue / completedOrders.length : 0;
-    const statusCounts = Object.values(OrderStatus).reduce((accumulator, status) => {
-      accumulator[status.toLowerCase()] = orders.filter((order) => order.status === status).length;
-      return accumulator;
-    }, {});
-    const zones = Object.values(ShippingZone).map((zone) => ({
-      zone: zone.toLowerCase(),
-      orders: orders.filter((order) => order.shippingZone === zone).length,
-    }));
-    const topCustomers = topCustomerUsers
-      .map((user) => {
-        const userOrders = orders.filter((order) => order.userId === user.id);
-        const totalSpent = userOrders.filter((order) => isBillableStatus(order.status)).reduce((sum, order) => sum + order.total, 0);
-        return {
-          ...toUserResponse(user),
-          total_orders: userOrders.length,
-          total_spent: formatCurrency(totalSpent),
-        };
-      })
-      .sort((left, right) => right.total_spent - left.total_spent)
-      .slice(0, 5);
-
-    res.json({
-      metrics: {
-        totalRevenue: formatCurrency(totalRevenue),
-        totalOrders: orders.length,
-        totalProducts: cardMetricsRows.length,
-        lowStockCount,
-        outOfStockCount,
-        totalCustomers: customerCount,
-        activeStaffCount: staffCount,
-        avgOrderValue: formatCurrency(avgOrderValue),
-        pendingPaymentCount: statusCounts.pending_payment || 0,
-      },
-      recentOrders: orders.slice(0, 6).map((order) => toOrderResponse(order, cardsById, { includeAdminFields: true })),
-      recentUsers: recentUsers.map((user) => toUserResponse(user)),
-      topCustomers,
-      topSellingCards: attachMetadata(topSellingCardRows, { adminThumbnail: true }),
-      analytics: {
-        daily: aggregateSeries(completedOrders),
-        statuses: statusCounts,
-        zones,
-        usersByDay: aggregateUsersByDay(customerSeriesRows),
-      },
-      scope: serializeCatalogScopeSettings(scopeSettings, cardMetricsRows.length),
+    await expirePendingOrdersBestEffort({
+      source: "admin_dashboard",
+      requestId: _req.requestContext?.requestId || null,
     });
+
+    const dashboardData = await cacheGetOrFetch(DASHBOARD_CACHE_KEY, DASHBOARD_CACHE_TTL_SECONDS, async () => {
+      const scopeSettings = await getCatalogScopeSettings();
+      const scopeWhere = await resolveCatalogScopeWhere(scopeSettings);
+
+      const ninetyDaysAgo = new Date();
+      ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+
+      const [cardMetricsRows, topSellingCardRows, orderSummaryRows, recentOrders, customerCount, staffCount, recentUsers, customerSeriesRows] = await Promise.all([
+        prisma.card.findMany({
+          where: scopeWhere,
+          select: { stock: true, lowStockThreshold: true },
+        }),
+        prisma.card.findMany({
+          where: scopeWhere,
+          orderBy: [{ salesCount: "desc" }, { name: "asc" }],
+          take: 6,
+          select: PUBLIC_CARD_LIST_SELECT,
+        }),
+        prisma.order.findMany({
+          where: { createdAt: { gte: ninetyDaysAgo } },
+          select: DASHBOARD_ORDER_SUMMARY_SELECT,
+        }),
+        prisma.order.findMany({
+          where: { createdAt: { gte: ninetyDaysAgo } },
+          include: { items: true, user: true, address: true },
+          orderBy: { createdAt: "desc" },
+          take: 6,
+        }),
+        prisma.user.count({ where: { role: UserRole.USER } }),
+        prisma.user.count({ where: { role: { in: [UserRole.ADMIN, UserRole.STAFF] } } }),
+        prisma.user.findMany({
+          where: { role: UserRole.USER },
+          take: 6,
+          orderBy: { createdAt: "desc" },
+          select: ADMIN_USER_RESPONSE_SELECT,
+        }),
+        prisma.user.findMany({
+          where: { role: UserRole.USER, createdAt: { gte: ninetyDaysAgo } },
+          select: { createdAt: true },
+        }),
+      ]);
+
+      const cardsById = await getOrderCardsMap(recentOrders, { adminThumbnail: true });
+      const completedOrders = orderSummaryRows.filter((order) => isBillableStatus(order.status));
+      const lowStockCount = cardMetricsRows.filter(isLowStockCard).length;
+      const outOfStockCount = cardMetricsRows.filter((card) => card.stock === 0).length;
+      const totalRevenue = completedOrders.reduce((sum, order) => sum + order.total, 0);
+      const avgOrderValue = completedOrders.length ? totalRevenue / completedOrders.length : 0;
+
+      const statusCounts = Object.values(OrderStatus).reduce((accumulator, status) => {
+        accumulator[status.toLowerCase()] = 0;
+        return accumulator;
+      }, {});
+      const zoneCounts = new Map(Object.values(ShippingZone).map((zone) => [zone, 0]));
+      const customerOrderSummaries = new Map();
+
+      for (const order of orderSummaryRows) {
+        statusCounts[order.status.toLowerCase()] = (statusCounts[order.status.toLowerCase()] || 0) + 1;
+        zoneCounts.set(order.shippingZone, (zoneCounts.get(order.shippingZone) || 0) + 1);
+
+        if (!Number.isFinite(order.userId)) {
+          continue;
+        }
+
+        const currentCustomerSummary = customerOrderSummaries.get(order.userId) || {
+          totalOrders: 0,
+          totalSpent: 0,
+        };
+
+        currentCustomerSummary.totalOrders += 1;
+        if (isBillableStatus(order.status)) {
+          currentCustomerSummary.totalSpent += order.total;
+        }
+
+        customerOrderSummaries.set(order.userId, currentCustomerSummary);
+      }
+
+      const zones = Object.values(ShippingZone).map((zone) => ({
+        zone: zone.toLowerCase(),
+        orders: zoneCounts.get(zone) || 0,
+      }));
+
+      const topCustomerIds = [...customerOrderSummaries.entries()]
+        .sort((left, right) => {
+          const spendDelta = right[1].totalSpent - left[1].totalSpent;
+          if (spendDelta !== 0) {
+            return spendDelta;
+          }
+
+          const orderDelta = right[1].totalOrders - left[1].totalOrders;
+          if (orderDelta !== 0) {
+            return orderDelta;
+          }
+
+          return left[0] - right[0];
+        })
+        .slice(0, 5)
+        .map(([userId]) => userId);
+
+      const topCustomerUsers = topCustomerIds.length > 0
+        ? await prisma.user.findMany({
+          where: { id: { in: topCustomerIds } },
+          select: ADMIN_USER_RESPONSE_SELECT,
+        })
+        : [];
+      const topCustomerUsersById = new Map(topCustomerUsers.map((user) => [user.id, user]));
+      const topCustomers = topCustomerIds
+        .map((userId) => {
+          const user = topCustomerUsersById.get(userId);
+          const summary = customerOrderSummaries.get(userId);
+          if (!user || !summary) {
+            return null;
+          }
+
+          return {
+            ...toUserResponse(user),
+            total_orders: summary.totalOrders,
+            total_spent: formatCurrency(summary.totalSpent),
+          };
+        })
+        .filter(Boolean);
+
+      return {
+        metrics: {
+          totalRevenue: formatCurrency(totalRevenue),
+          totalOrders: orderSummaryRows.length,
+          totalProducts: cardMetricsRows.length,
+          lowStockCount,
+          outOfStockCount,
+          totalCustomers: customerCount,
+          activeStaffCount: staffCount,
+          avgOrderValue: formatCurrency(avgOrderValue),
+          pendingPaymentCount: statusCounts.pending_payment || 0,
+        },
+        recentOrders: recentOrders.map((order) => toOrderResponse(order, cardsById, { includeAdminFields: true })),
+        recentUsers: recentUsers.map((user) => toUserResponse(user)),
+        topCustomers,
+        topSellingCards: attachMetadata(topSellingCardRows, { adminThumbnail: true }),
+        analytics: {
+          daily: aggregateSeries(completedOrders),
+          statuses: statusCounts,
+          zones,
+          usersByDay: aggregateUsersByDay(customerSeriesRows),
+        },
+        scope: serializeCatalogScopeSettings(scopeSettings, cardMetricsRows.length),
+      };
+    });
+
+    res.json(dashboardData);
   } catch (error) {
+    if (res.headersSent) return;
     console.error(error);
     res.status(500).json({ error: "Failed to load dashboard" });
   }
@@ -3088,7 +5471,8 @@ app.get("/api/admin/settings/catalog-scope", requireAdminAuth, async (_req, res)
 
 app.put("/api/admin/settings/catalog-scope", requireAdminAuth, requireAdminRole([UserRole.ADMIN]), async (req, res) => {
   try {
-    const scopeSettings = await getCatalogScopeSettings();
+    const parsedPayload = await _parseCatalogScopePayload(req.body || {});
+    const scopeSettings = await setCatalogScopeSettings(parsedPayload.data);
     const scopeWhere = await resolveCatalogScopeWhere(scopeSettings);
     const appliedCardCount = await prisma.card.count({ where: scopeWhere });
     res.json({ settings: serializeCatalogScopeSettings(scopeSettings, appliedCardCount) });
@@ -3170,6 +5554,8 @@ app.put("/api/admin/settings/whatsapp", requireAdminAuth, requireAdminRole([User
         support_email: emailSetting.value,
       };
 
+      invalidatePublicStorefrontConfigCache();
+
       await createAdminAuditLog(tx, {
         actorId: req.user.id,
         entityType: "app_setting",
@@ -3200,9 +5586,11 @@ app.put("/api/admin/settings/whatsapp", requireAdminAuth, requireAdminRole([User
     }
 
     await finalizeIdempotentMutation(idempotency, 200, responsePayload);
-    res.json(responsePayload);
+    return res.json(responsePayload);
   } catch (error) {
     await releaseIdempotentMutation(idempotency);
+
+    if (res.headersSent) return;
 
     if (error?.statusCode) {
       res.status(error.statusCode).json({
@@ -3223,7 +5611,7 @@ app.get("/api/admin/contact-requests", requireAdminAuth, async (req, res) => {
   try {
     const requestedStatus = typeof req.query.status === "string" ? parseContactRequestStatus(req.query.status) : null;
     const contactRequests = await prisma.contactRequest.findMany({
-      where: requestedStatus ? { status: requestedStatus } : undefined,
+      where: requestedStatus ? { status: requestedStatus } : { status: { not: ContactRequestStatus.ARCHIVED } },
       include: {
         respondedBy: true,
       },
@@ -3296,6 +5684,31 @@ app.patch("/api/admin/contact-requests/:id", requireAdminAuth, requireAdminRole(
       assertExpectedUpdatedAt(existingContactRequest, expectedUpdatedAt);
 
       const nextStatus = parsed.data.status || existingContactRequest.status;
+
+      if (nextStatus === ContactRequestStatus.ARCHIVED) {
+        await tx.contactRequest.delete({
+          where: { id: contactRequestId },
+        });
+
+        await createAdminAuditLog(tx, {
+          actorId: req.user.id,
+          entityType: "contact_request",
+          entityId: contactRequestId,
+          action: "ADMIN_CONTACT_REQUEST_DELETED",
+          req,
+          routeKey: idempotency.routeKey,
+          before: sanitizeContactRequestForAudit(existingContactRequest),
+          after: null,
+          metadata: {
+            mutationId: mutationMeta.mutationId,
+            requestId: mutationMeta.requestId,
+            nextStatus,
+          },
+        });
+
+        return { deleted: true, contact_request_id: contactRequestId, status: "archived" };
+      }
+
       const isResponded = nextStatus === ContactRequestStatus.RESPONDED;
       const contactRequest = await tx.contactRequest.update({
         where: { id: contactRequestId },
@@ -3330,20 +5743,23 @@ app.patch("/api/admin/contact-requests/:id", requireAdminAuth, requireAdminRole(
     });
 
     try {
-      await recordActivity(req.user.id, "ADMIN_CONTACT_REQUEST_UPDATED", req, {
+      const activityType = responsePayload.deleted ? "ADMIN_CONTACT_REQUEST_DELETED" : "ADMIN_CONTACT_REQUEST_UPDATED";
+      await recordActivity(req.user.id, activityType, req, {
         mutationId: mutationMeta.mutationId,
         requestId: mutationMeta.requestId,
         contactRequestId,
-        nextStatus: responsePayload.contact_request.status,
+        nextStatus: responsePayload.contact_request?.status || responsePayload.status,
       });
     } catch (activityError) {
       console.error("Failed to record contact request activity", activityError);
     }
 
     await finalizeIdempotentMutation(idempotency, 200, responsePayload);
-    res.json(responsePayload);
+    return res.json(responsePayload);
   } catch (error) {
     await releaseIdempotentMutation(idempotency);
+
+    if (res.headersSent) return;
 
     if (error.message === "CONCURRENT_MODIFICATION") {
       const currentContactRequest = await prisma.contactRequest.findUnique({
@@ -3377,8 +5793,16 @@ app.patch("/api/admin/contact-requests/:id", requireAdminAuth, requireAdminRole(
   }
 });
 
-app.get("/api/admin/cards", requireAdminAuth, async (_req, res) => {
-  try {
+function hasAdminCardListQuery(query = {}) {
+  return ["page", "pageSize", "q", "search", "rarity", "cardType", "card_type", "stockStatus", "stock_status", "visibility", "mode"].some(
+    (key) => query[key] !== undefined
+  );
+}
+
+async function listAdminCardsRoute(req, res, options = {}) {
+  const { defaultMode = "all", requireSearch = false, legacyUnpaginated = false } = options;
+
+  if (legacyUnpaginated && !hasAdminCardListQuery(req.query || {})) {
     const scopeSettings = await getCatalogScopeSettings();
     const scopeWhere = await resolveCatalogScopeWhere(scopeSettings);
     const cards = await prisma.card.findMany({
@@ -3386,61 +5810,271 @@ app.get("/api/admin/cards", requireAdminAuth, async (_req, res) => {
       orderBy: [{ isFeatured: "desc" }, { salesCount: "desc" }, { name: "asc" }],
       select: PUBLIC_CARD_LIST_SELECT,
     });
-    res.json({ cards: attachMetadata(cards, { adminThumbnail: true }), scope: serializeCatalogScopeSettings(scopeSettings, cards.length) });
+
+    setAdminCatalogWeakCacheHeaders(res);
+    res.json({
+      cards: attachMetadata(cards, { adminThumbnail: true }),
+      total: cards.length,
+      page: 1,
+      pageSize: cards.length,
+      totalPages: 1,
+      mode: "all",
+      scope: serializeCatalogScopeSettings(scopeSettings, cards.length),
+    });
+    return;
+  }
+
+  const page = parsePositiveInteger(req.query.page, 1, { min: 1, max: 10000 });
+  const pageSize = parsePositiveInteger(req.query.pageSize, 100, { min: 1, max: 100 });
+  const scopeStrategy = options.scopeStrategy || "stock";
+  const requirePositiveStockWhenModeStock = Boolean(options.requirePositiveStockWhenModeStock);
+  const { filters, scopeSettings, baseWhere, finalWhere } = await buildAdminInventoryWhere(req.query || {}, {
+    defaultMode,
+    scopeStrategy,
+    requirePositiveStockWhenModeStock,
+  });
+
+  if (requireSearch && !filters.search) {
+    setAdminCatalogWeakCacheHeaders(res);
+    res.json({
+      cards: [],
+      total: 0,
+      page,
+      pageSize,
+      totalPages: 0,
+      search: "",
+      stockStatus: filters.stockStatus,
+      mode: filters.mode,
+      searchRequired: true,
+      scope: serializeCatalogScopeSettings(scopeSettings, 0),
+      filters: {
+        rarities: [],
+        cardTypes: [],
+      },
+    });
+    return;
+  }
+
+  if (filters.mode === "stock") {
+    setAdminInventoryCacheHeaders(res);
+  } else {
+    setAdminCatalogWeakCacheHeaders(res);
+  }
+
+  const orderBy = filters.search
+    ? [{ stock: "desc" }, { isVisible: "desc" }, { isFeatured: "desc" }, { salesCount: "desc" }, { name: "asc" }]
+    : [{ isFeatured: "desc" }, { salesCount: "desc" }, { name: "asc" }];
+
+  const [total, cards, appliedCardCount, rarityOptions, cardTypeOptions] = await Promise.all([
+    prisma.card.count({ where: finalWhere }),
+    prisma.card.findMany({
+      where: finalWhere,
+      orderBy,
+      select: PUBLIC_CARD_LIST_SELECT,
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.card.count({ where: baseWhere }),
+    prisma.card.findMany({
+      where: baseWhere,
+      distinct: ["rarity"],
+      select: { rarity: true },
+      orderBy: { rarity: "asc" },
+    }),
+    prisma.card.findMany({
+      where: baseWhere,
+      distinct: ["cardType"],
+      select: { cardType: true },
+      orderBy: { cardType: "asc" },
+    }),
+  ]);
+
+  res.json({
+    cards: attachMetadata(cards, { adminThumbnail: true }),
+    total,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    search: filters.search,
+    stockStatus: filters.stockStatus,
+    mode: filters.mode,
+    scope: serializeCatalogScopeSettings(scopeSettings, appliedCardCount),
+    filters: {
+      rarities: rarityOptions.map((entry) => entry.rarity).filter(Boolean),
+      cardTypes: cardTypeOptions.map((entry) => entry.cardType).filter(Boolean),
+    },
+  });
+}
+
+function parseAdminInventoryInsertPayload(payload = {}) {
+  const cardId = Number(payload.cardId ?? payload.card_id);
+  const quantity = Math.floor(Number(payload.quantity));
+
+  if (!Number.isInteger(cardId) || cardId <= 0) {
+    return { error: "Valid cardId is required" };
+  }
+
+  if (!Number.isInteger(quantity) || quantity <= 0) {
+    return { error: "Quantity must be a positive integer" };
+  }
+
+  return {
+    data: {
+      cardId,
+      quantity,
+    },
+  };
+}
+
+app.get("/api/admin/cards", requireAdminAuth, async (req, res) => {
+  try {
+    await listAdminCardsRoute(req, res, {
+      defaultMode: "all",
+      legacyUnpaginated: true,
+      scopeStrategy: "stock",
+      requirePositiveStockWhenModeStock: true,
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Failed to load admin cards" });
   }
 });
 
-app.get("/api/admin/cards/inventory", requireAdminAuth, async (req, res) => {
+app.get("/api/admin/cards/search", requireAdminAuth, async (req, res) => {
   try {
-    const scopeSettings = await getCatalogScopeSettings();
-    const page = parsePositiveInteger(req.query.page, 1, { min: 1, max: 10000 });
-    const pageSize = parsePositiveInteger(req.query.pageSize, 20, { min: 1, max: 100 });
-    const { filters, scopeWhere, finalWhere } = await buildAdminInventoryWhere(req.query || {});
+    await listAdminCardsRoute(req, res, { defaultMode: "all", requireSearch: true, scopeStrategy: "never" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to search admin cards" });
+  }
+});
 
-    const [total, cards, appliedCardCount, rarityOptions, cardTypeOptions] = await Promise.all([
-      prisma.card.count({ where: finalWhere }),
-      prisma.card.findMany({
-        where: finalWhere,
-        orderBy: [{ isFeatured: "desc" }, { salesCount: "desc" }, { name: "asc" }],
-        select: PUBLIC_CARD_LIST_SELECT,
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-      }),
-      prisma.card.count({ where: scopeWhere }),
-      prisma.card.findMany({
-        where: scopeWhere,
-        distinct: ["rarity"],
-        select: { rarity: true },
-        orderBy: { rarity: "asc" },
-      }),
-      prisma.card.findMany({
-        where: scopeWhere,
-        distinct: ["cardType"],
-        select: { cardType: true },
-        orderBy: { cardType: "asc" },
-      }),
-    ]);
-
-    res.json({
-      cards: attachMetadata(cards, { adminThumbnail: true }),
-      total,
-      page,
-      pageSize,
-      totalPages: Math.max(1, Math.ceil(total / pageSize)),
-      search: filters.search,
-      stockStatus: filters.stockStatus,
-      scope: serializeCatalogScopeSettings(scopeSettings, appliedCardCount),
-      filters: {
-        rarities: rarityOptions.map((entry) => entry.rarity).filter(Boolean),
-        cardTypes: cardTypeOptions.map((entry) => entry.cardType).filter(Boolean),
-      },
-    });
+app.get("/api/admin/inventory", requireAdminAuth, async (req, res) => {
+  try {
+    await listAdminCardsRoute(req, res, { defaultMode: "stock", scopeStrategy: "always" });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Failed to load inventory cards" });
+  }
+});
+
+app.get("/api/admin/cards/inventory", requireAdminAuth, async (req, res) => {
+  try {
+    await listAdminCardsRoute(req, res, { defaultMode: "stock", scopeStrategy: "always" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to load inventory cards" });
+  }
+});
+
+app.post("/api/admin/inventory", requireAdminAuth, requireAdminRole([UserRole.ADMIN]), async (req, res) => {
+  const requestId = req.requestContext?.requestId || null;
+  let idempotency = null;
+
+  try {
+    const mutationMeta = getMutationMetadata(req);
+    const parsedPayload = parseAdminInventoryInsertPayload(req.body || {});
+    if (parsedPayload.error) {
+      res.status(400).json({ error: parsedPayload.error });
+      return;
+    }
+
+    const expectedUpdatedAt = parseExpectedUpdatedAt(req.body?.expected_updated_at);
+    if (expectedUpdatedAt === "INVALID_DATE") {
+      res.status(400).json({ error: "Invalid expected_updated_at value" });
+      return;
+    }
+
+    idempotency = await beginIdempotentMutation(req, {
+      payload: {
+        cardId: parsedPayload.data.cardId,
+        quantity: parsedPayload.data.quantity,
+      },
+    });
+
+    if (idempotency.replay) {
+      res.status(idempotency.replay.statusCode).json(idempotency.replay.body);
+      return;
+    }
+
+    const responsePayload = await prisma.$transaction(async (tx) => {
+      assertRequestActive(req);
+
+      const existingCard = await tx.card.findUnique({ where: { id: parsedPayload.data.cardId } });
+      if (!existingCard) {
+        throw createAppError("Card not found", {
+          statusCode: 404,
+          code: "CARD_NOT_FOUND",
+        });
+      }
+
+      assertExpectedUpdatedAt(existingCard, expectedUpdatedAt);
+
+      const updateData = {
+        stock: Math.max(0, Number(existingCard.stock || 0) + parsedPayload.data.quantity),
+        isVisible: true,
+      };
+
+      await recordCardHistoryEntries(tx, [existingCard], updateData, "admin_inventory_add");
+      const card = await tx.card.update({
+        where: { id: parsedPayload.data.cardId },
+        data: updateData,
+      });
+      await updateCatalogScopeSelectedIds({ addIds: [parsedPayload.data.cardId] }, tx);
+
+      await createAdminAuditLog(tx, {
+        actorId: req.user.id,
+        entityType: "card",
+        entityId: parsedPayload.data.cardId,
+        action: "ADMIN_INVENTORY_ADDED",
+        req,
+        routeKey: idempotency.routeKey,
+        before: sanitizeCardForAudit(existingCard),
+        after: sanitizeCardForAudit(card),
+        metadata: {
+          mutationId: mutationMeta.mutationId,
+          requestId: mutationMeta.requestId,
+          quantity: parsedPayload.data.quantity,
+        },
+      });
+
+      return {
+        card: toPublicCard(card),
+        addedQuantity: parsedPayload.data.quantity,
+      };
+    });
+
+    invalidatePublicCatalogCaches();
+    try {
+      await recordActivity(req.user.id, "ADMIN_INVENTORY_ADDED", req, {
+        mutationId: mutationMeta.mutationId,
+        requestId: mutationMeta.requestId,
+        cardId: parsedPayload.data.cardId,
+        quantity: parsedPayload.data.quantity,
+      });
+    } catch (activityError) {
+      console.error("Failed to record inventory add activity", activityError);
+    }
+
+    await finalizeIdempotentMutation(idempotency, 200, responsePayload);
+    res.json(responsePayload);
+  } catch (error) {
+    await releaseIdempotentMutation(idempotency);
+
+    if (res.headersSent) return;
+
+    if (error?.statusCode) {
+      res.status(error.statusCode).json({
+        error: error.message,
+        code: error.code || "REQUEST_ERROR",
+        requestId,
+        ...(error.details ? { details: error.details } : {}),
+      });
+      return;
+    }
+
+    console.error(error);
+    res.status(500).json({ error: "Failed to add card to inventory" });
   }
 });
 
@@ -3487,10 +6121,30 @@ app.post("/api/admin/cards/sync-catalog", requireAdminAuth, requireAdminRole([Us
     const scopeSettings = await getCatalogScopeSettings();
     const result = await syncCatalogFromScope(scopeSettings);
     invalidatePublicCatalogCaches();
+
+    /* ── Realtime: notify catalog sync completed ── */
+    publishEvent("catalog-synced", {
+      created: result.createdCount,
+      updated: result.updatedCount,
+      deleted: result.deletedCount,
+      hidden: result.hiddenCount,
+    });
+
     res.json({ sync: result, settings: serializeCatalogScopeSettings(scopeSettings, result.requestedCount) });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Failed to sync catalog from YGOPRODeck" });
+  }
+});
+
+/* ── Async catalog sync (queued via BullMQ) ── */
+app.post("/api/admin/cards/sync-catalog/async", requireAdminAuth, requireAdminRole([UserRole.ADMIN]), async (_req, res) => {
+  try {
+    const job = await scheduleSyncCards();
+    res.json({ queued: true, jobId: job?.id || null });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to queue catalog sync" });
   }
 });
 
@@ -3560,6 +6214,9 @@ app.put("/api/admin/cards/bulk", requireAdminAuth, requireAdminRole([UserRole.AD
       if (eligibleIds.length) {
         await recordCardHistoryEntries(tx, eligibleCards, parsed.data, "admin_bulk");
         await tx.card.updateMany({ where: { id: { in: eligibleIds } }, data: parsed.data });
+        if (Number(parsed.data.stock) > 0) {
+          await updateCatalogScopeSelectedIds({ addIds: eligibleIds }, tx);
+        }
 
         const updatedCards = await tx.card.findMany({ where: { id: { in: eligibleIds } } });
         const updatedCardsById = new Map(updatedCards.map((card) => [card.id, card]));
@@ -3585,6 +6242,9 @@ app.put("/api/admin/cards/bulk", requireAdminAuth, requireAdminRole([UserRole.AD
 
       return {
         updatedCardIds: eligibleIds,
+        updatedCards: eligibleIds.length
+          ? [...updatedCardsById.values()].map(toPublicCard)
+          : [],
         success: eligibleIds.map((id) => ({ id, action: "updated" })),
         failed,
         conflicts,
@@ -3608,9 +6268,11 @@ app.put("/api/admin/cards/bulk", requireAdminAuth, requireAdminRole([UserRole.AD
     }
 
     await finalizeIdempotentMutation(idempotency, 200, responsePayload);
-    res.json(responsePayload);
+    return res.json(responsePayload);
   } catch (error) {
     await releaseIdempotentMutation(idempotency);
+
+    if (res.headersSent) return;
 
     if (error?.statusCode) {
       res.status(error.statusCode).json({
@@ -3677,6 +6339,9 @@ app.put("/api/admin/cards/:id", requireAdminAuth, requireAdminRole([UserRole.ADM
 
       await recordCardHistoryEntries(tx, [existingCard], parsed.data, "admin_single");
       const card = await tx.card.update({ where: { id }, data: parsed.data });
+      if (Number(card.stock) > 0) {
+        await updateCatalogScopeSelectedIds({ addIds: [id] }, tx);
+      }
 
       await createAdminAuditLog(tx, {
         actorId: req.user.id,
@@ -3710,9 +6375,11 @@ app.put("/api/admin/cards/:id", requireAdminAuth, requireAdminRole([UserRole.ADM
     }
 
     await finalizeIdempotentMutation(idempotency, 200, responsePayload);
-    res.json(responsePayload);
+    return res.json(responsePayload);
   } catch (error) {
     await releaseIdempotentMutation(idempotency);
+
+    if (res.headersSent) return;
 
     if (error.message === "CONCURRENT_MODIFICATION") {
       const currentCard = await prisma.card.findUnique({ where: { id: Number(req.params.id) } });
@@ -3812,6 +6479,7 @@ app.delete("/api/admin/cards", requireAdminAuth, requireAdminRole([UserRole.ADMI
 
       if (deletableIds.length) {
         await tx.card.deleteMany({ where: { id: { in: deletableIds } } });
+        await updateCatalogScopeSelectedIds({ removeIds: deletableIds }, tx);
       }
 
       let hiddenCardsById = new Map();
@@ -3886,9 +6554,11 @@ app.delete("/api/admin/cards", requireAdminAuth, requireAdminRole([UserRole.ADMI
     }
 
     await finalizeIdempotentMutation(idempotency, 200, responsePayload);
-    res.json(responsePayload);
+    return res.json(responsePayload);
   } catch (error) {
     await releaseIdempotentMutation(idempotency);
+
+    if (res.headersSent) return;
 
     if (error?.statusCode) {
       res.status(error.statusCode).json({
@@ -4073,39 +6743,98 @@ app.put("/api/admin/custom/products/:id", requireAdminAuth, requireAdminRole([Us
   }
 });
 
-app.get("/api/admin/users", requireAdminAuth, async (_req, res) => {
+app.get("/api/admin/users", requireAdminAuth, async (req, res) => {
   try {
-    const users = await prisma.user.findMany({
-      include: {
-        addresses: true,
-        orders: {
-          orderBy: { createdAt: "desc" },
+    const page = parsePositiveInteger(req.query.page, 1, { min: 1, max: 10000 });
+    const pageSize = parsePositiveInteger(req.query.pageSize, DEFAULT_ADMIN_USERS_PAGE_SIZE, { min: 1, max: MAX_ADMIN_PAGE_SIZE });
+    const role = parseAdminRoleFilter(req.query.role);
+    const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+
+    if (role === "INVALID_ROLE_FILTER") {
+      throw createAppError("Invalid role filter", {
+        statusCode: 400,
+        code: "INVALID_ROLE_FILTER",
+      });
+    }
+
+    const where = buildAdminUsersWhere({ search, role });
+    const skip = (page - 1) * pageSize;
+
+    const [users, filteredTotal, totalUsers, roleGroups] = await withDatabaseConnection(() => Promise.all([
+      prisma.user.findMany({
+        where,
+        include: {
+          addresses: {
+            orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }],
+            take: 3,
+          },
+          activities: {
+            orderBy: { createdAt: "desc" },
+            take: 4,
+          },
+          _count: {
+            select: {
+              addresses: true,
+              orders: true,
+            },
+          },
         },
-        activities: {
-          orderBy: { createdAt: "desc" },
-          take: 10,
+        orderBy: [{ role: "asc" }, { createdAt: "desc" }],
+        skip,
+        take: pageSize,
+      }),
+      prisma.user.count({ where }),
+      prisma.user.count(),
+      prisma.user.groupBy({
+        by: ["role"],
+        _count: {
+          _all: true,
         },
-      },
-      orderBy: [{ role: "asc" }, { createdAt: "desc" }],
-    });
+      }),
+    ]), { maxWaitMs: 5000 });
+
+    const userIds = users.map((user) => user.id);
+    const totalsByUser = userIds.length
+      ? await withDatabaseConnection(() => prisma.order.groupBy({
+        by: ["userId"],
+        where: {
+          userId: { in: userIds },
+          status: { in: BILLABLE_ORDER_STATUSES },
+        },
+        _sum: {
+          total: true,
+        },
+      }), { maxWaitMs: 5000 })
+      : [];
+    const spentByUserId = new Map(totalsByUser.map((entry) => [entry.userId, formatCurrency(entry._sum.total || 0)]));
+    const roleCounts = roleGroups.reduce((accumulator, entry) => {
+      accumulator[entry.role] = entry._count._all;
+      return accumulator;
+    }, {});
 
     res.json({
       users: users.map((user) => {
-        const totalSpent = user.orders.filter((order) => isBillableStatus(order.status)).reduce((sum, order) => sum + order.total, 0);
         return {
           ...toUserResponse(user),
-          address_count: user.addresses.length,
-          order_count: user.orders.length,
-          total_spent: formatCurrency(totalSpent),
+          address_count: user._count.addresses,
+          order_count: user._count.orders,
+          total_spent: spentByUserId.get(user.id) || 0,
           latest_activity: user.activities[0] ? toActivityResponse(user.activities[0]) : null,
           addresses: user.addresses.map(toAddressResponse),
           activities: user.activities.map(toActivityResponse),
         };
       }),
+      summary: {
+        totalUsers,
+        customerCount: roleCounts[UserRole.USER] || 0,
+        staffCount: roleCounts[UserRole.STAFF] || 0,
+        adminCount: roleCounts[UserRole.ADMIN] || 0,
+        filteredTotal,
+      },
+      pagination: buildPagination(page, pageSize, filteredTotal),
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to load users" });
+    sendErrorResponse(error, req, res, "Failed to load users");
   }
 });
 
@@ -4199,9 +6928,11 @@ app.put("/api/admin/users/:id/role", requireAdminAuth, requireAdminRole([UserRol
     }
 
     await finalizeIdempotentMutation(idempotency, 200, responsePayload);
-    res.json(responsePayload);
+    return res.json(responsePayload);
   } catch (error) {
     await releaseIdempotentMutation(idempotency);
+
+    if (res.headersSent) return;
 
     if (error.message === "CONCURRENT_MODIFICATION") {
       const currentUser = await prisma.user.findUnique({ where: { id: Number(req.params.id) } });
@@ -4234,23 +6965,73 @@ app.put("/api/admin/users/:id/role", requireAdminAuth, requireAdminRole([UserRol
   }
 });
 
-app.get("/api/admin/orders", requireAdminAuth, async (_req, res) => {
+app.get("/api/admin/orders", requireAdminAuth, async (req, res) => {
   try {
-    const orders = await prisma.order.findMany({
-      include: { items: true, user: true, address: true },
-      orderBy: { createdAt: "desc" },
+    await expirePendingOrdersBestEffort({
+      source: "admin_orders_list",
+      requestId: req.requestContext?.requestId || null,
+      batchSize: 5,
     });
+    assertRequestActive(req);
+
+    const page = parsePositiveInteger(req.query.page, 1, { min: 1, max: 10000 });
+    const pageSize = parsePositiveInteger(req.query.pageSize, DEFAULT_ADMIN_ORDERS_PAGE_SIZE, { min: 1, max: MAX_ADMIN_PAGE_SIZE });
+    const status = parseAdminOrderStatusFilter(req.query.status);
+    const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+
+    if (status === "INVALID_STATUS_FILTER") {
+      throw createAppError("Invalid status filter", {
+        statusCode: 400,
+        code: "INVALID_STATUS_FILTER",
+      });
+    }
+
+    const where = buildAdminOrdersWhere({ search, status });
+    const skip = (page - 1) * pageSize;
+
+    const [orders, filteredTotal, totalOrders, pendingCount, countedCount] = await withDatabaseConnection(() => Promise.all([
+      prisma.order.findMany({
+        where,
+        include: { items: true, user: true, address: true },
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: pageSize,
+      }),
+      prisma.order.count({ where }),
+      prisma.order.count(),
+      prisma.order.count({ where: { status: OrderStatus.PENDING_PAYMENT } }),
+      prisma.order.count({ where: { status: { in: BILLABLE_ORDER_STATUSES } } }),
+    ]), { maxWaitMs: 5000 });
 
     const cardsById = await getOrderCardsMap(orders, { adminThumbnail: true });
-    res.json({ orders: orders.map((order) => toOrderResponse(order, cardsById, { includeAdminFields: true })) });
+    assertRequestActive(req);
+
+    if (res.headersSent) {
+      return;
+    }
+
+    res.json({
+      orders: orders.map((order) => toOrderResponse(order, cardsById, { includeAdminFields: true })),
+      summary: {
+        totalOrders,
+        pendingCount,
+        countedCount,
+        filteredTotal,
+      },
+      pagination: buildPagination(page, pageSize, filteredTotal),
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to load admin orders" });
+    sendErrorResponse(error, req, res, "Failed to load admin orders");
   }
 });
 
 app.get("/api/admin/export/orders", requireAdminAuth, async (_req, res) => {
   try {
+    await expirePendingOrdersBestEffort({
+      source: "admin_orders_export",
+      requestId: _req.requestContext?.requestId || null,
+    });
+
     const orders = await prisma.order.findMany({
       include: { items: { include: { card: true } }, user: true, address: true },
       orderBy: { createdAt: "desc" },
@@ -4259,8 +7040,9 @@ app.get("/api/admin/export/orders", requireAdminAuth, async (_req, res) => {
     const buffer = await buildWorkbook(orders);
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="duelvault-orders-${Date.now()}.xlsx"`);
-    res.send(Buffer.from(buffer));
+    return res.send(Buffer.from(buffer));
   } catch (error) {
+    if (res.headersSent) return;
     console.error(error);
     res.status(500).json({ error: "Failed to export orders" });
   }
@@ -4300,8 +7082,16 @@ app.put("/api/admin/orders/:id/status", requireAdminAuth, async (req, res) => {
       return;
     }
 
-    const updatedOrder = await prisma.$transaction(async (tx) => {
+    await expirePendingOrders({
+      orderIds: [orderId],
+      source: "admin_order_status_update",
+      requestId,
+    });
+
+    const orderUpdateResult = await prisma.$transaction(async (tx) => {
       assertRequestActive(req);
+
+      await lockOrderForUpdate(tx, orderId);
 
       const order = await tx.order.findUnique({
         where: { id: orderId },
@@ -4330,40 +7120,11 @@ app.put("/api/admin/orders/:id/status", requireAdminAuth, async (req, res) => {
         });
       }
 
-      const wasBillable = isBillableStatus(order.status);
-      const willBeBillable = isBillableStatus(nextStatus);
-      const isCancelling = nextStatus === OrderStatus.CANCELLED;
-
-      for (const item of order.items) {
+      for (const _item of order.items) {
         assertRequestActive(req);
-
-        if (!wasBillable && willBeBillable) {
-          await tx.card.update({
-            where: { id: item.cardId },
-            data: { salesCount: { increment: item.quantity } },
-          });
-        }
-
-        if (wasBillable && !willBeBillable) {
-          await tx.card.update({
-            where: { id: item.cardId },
-            data: { salesCount: { decrement: item.quantity } },
-          });
-        }
-
-        if (isCancelling) {
-          await tx.card.update({
-            where: { id: item.cardId },
-            data: { stock: { increment: item.quantity } },
-          });
-        }
       }
 
-      const nextOrder = await tx.order.update({
-        where: { id: orderId },
-        data: { status: nextStatus },
-        include: { items: true, user: true, address: true },
-      });
+      const nextOrder = await updateOrderStatusWithEffects(tx, order, nextStatus);
 
       await createAdminAuditLog(tx, {
         actorId: req.user.id,
@@ -4382,8 +7143,14 @@ app.put("/api/admin/orders/:id/status", requireAdminAuth, async (req, res) => {
         },
       });
 
-      return nextOrder;
+      return {
+        order: nextOrder,
+        postCommitEffect: buildOrderStatusPostCommitEffect(order, nextStatus),
+      };
     });
+
+    await applyOrderStatusPostCommitEffect(orderUpdateResult.postCommitEffect);
+    const updatedOrder = orderUpdateResult.order;
 
     try {
       await recordActivity(req.user.id, "ADMIN_ORDER_STATUS_UPDATED", req, {
@@ -4396,13 +7163,14 @@ app.put("/api/admin/orders/:id/status", requireAdminAuth, async (req, res) => {
       console.error("Failed to record order status activity", activityError);
     }
 
-    invalidatePublicCatalogCaches();
     const cardsById = await getOrderCardsMap([updatedOrder], { adminThumbnail: true });
     const responsePayload = { order: toOrderResponse(updatedOrder, cardsById, { includeAdminFields: true }) };
     await finalizeIdempotentMutation(idempotency, 200, responsePayload);
-    res.json(responsePayload);
+    return res.json(responsePayload);
   } catch (error) {
     await releaseIdempotentMutation(idempotency);
+
+    if (res.headersSent) return;
 
     if (error.message === "CONCURRENT_MODIFICATION") {
       const currentOrder = await prisma.order.findUnique({
@@ -4538,9 +7306,11 @@ app.put("/api/admin/orders/:id/shipping", requireAdminAuth, async (req, res) => 
       console.error("Failed to record order shipping activity", activityError);
     }
     await finalizeIdempotentMutation(idempotency, 200, responsePayload);
-    res.json(responsePayload);
+    return res.json(responsePayload);
   } catch (error) {
     await releaseIdempotentMutation(idempotency);
+
+    if (res.headersSent) return;
 
     if (error.message === "CONCURRENT_MODIFICATION") {
       const currentOrder = await prisma.order.findUnique({
@@ -4653,9 +7423,11 @@ app.delete("/api/admin/orders/:id", requireAdminAuth, requireAdminRole([UserRole
       console.error("Failed to record order delete activity", activityError);
     }
     await finalizeIdempotentMutation(idempotency, 200, responsePayload);
-    res.json(responsePayload);
+    return res.json(responsePayload);
   } catch (error) {
     await releaseIdempotentMutation(idempotency);
+
+    if (res.headersSent) return;
 
     if (error.message === "CONCURRENT_MODIFICATION") {
       const currentOrder = await prisma.order.findUnique({
@@ -4747,9 +7519,11 @@ app.delete("/api/admin/orders", requireAdminAuth, requireAdminRole([UserRole.ADM
       console.error("Failed to record clear orders activity", activityError);
     }
     await finalizeIdempotentMutation(idempotency, 200, responsePayload);
-    res.json(responsePayload);
+    return res.json(responsePayload);
   } catch (error) {
     await releaseIdempotentMutation(idempotency);
+
+    if (res.headersSent) return;
 
     if (error?.statusCode) {
       res.status(error.statusCode).json({
@@ -4766,10 +7540,51 @@ app.delete("/api/admin/orders", requireAdminAuth, requireAdminRole([UserRole.ADM
   }
 });
 
+app.use((error, req, res, next) => {
+  if (res.headersSent) {
+    next(error);
+    return;
+  }
+
+  sendErrorResponse(error, req, res);
+});
+
 if (isDirectExecution) {
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, async () => {
     console.log(`DuelVault API running at http://localhost:${PORT}`);
+
+    const redisCache = await probeRedisConnection();
+    console.log(`[infra] cache backend=${redisCache.backend} ready=${redisCache.ok}`);
+
+    /* ── Bootstrap BullMQ + Realtime if Redis TCP is available ── */
+    if (isRedisTcpConfigured()) {
+      const alive = await pingRedisTcp();
+      if (alive) {
+        subscribeToEvents();
+        startWorker();
+        await registerScheduledJobs();
+        console.log("[infra] Redis TCP connected — BullMQ workers + pub/sub active");
+      } else {
+        console.warn("[infra] Redis TCP not reachable — running without BullMQ/realtime");
+      }
+    } else {
+      console.warn("[infra] Redis TCP not configured — running without BullMQ/realtime");
+    }
   });
+
+  /* ── Graceful shutdown ── */
+  const shutdown = async (signal) => {
+    console.log(`[shutdown] ${signal} received — cleaning up...`);
+    server.close(() => {
+      console.log("[shutdown] HTTP server closed");
+    });
+    await stopWorker();
+    await stopEventBus();
+    process.exit(0);
+  };
+
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
 }
 
 export { app };

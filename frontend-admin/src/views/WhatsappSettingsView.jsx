@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Clock3, Mail, MessageCircle, Phone, Reply, UserRound } from "lucide-react";
+import { Clock3, Mail, Phone, Reply, UserRound } from "lucide-react";
 import { ActionStatusButton } from "./shared";
 
 function formatDateTime(value) {

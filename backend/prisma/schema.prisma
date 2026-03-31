@@ -119,7 +119,16 @@ model Order {
   subtotal           Float        @default(0)
   shippingCost       Float        @default(0)
   total              Float
+  currency           String       @default("ARS")
+  exchange_rate      Float?
+  total_ars          Float?
   status             OrderStatus  @default(PENDING_PAYMENT)
+  payment_id         String?      @unique
+  payment_status     String?
+  payment_status_detail String?
+  preference_id      String?
+  payment_approved_at DateTime?
+  expires_at         DateTime?
   shippingZone       ShippingZone @default(PICKUP)
   shippingLabel      String       @default("Retiro en persona")
   trackingCode       String?
@@ -304,6 +313,8 @@ model AdminIdempotencyKey {
 
 enum OrderStatus {
   PENDING_PAYMENT
+  FAILED
+  EXPIRED
   PAID
   SHIPPED
   COMPLETED

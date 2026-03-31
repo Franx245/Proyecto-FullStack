@@ -4,25 +4,65 @@ export function cn(...classes) {
   return classes.filter(Boolean).join(" ");
 }
 
-export function getAdminCardImageProps(imageUrl) {
-  const src = imageUrl || "";
+const ADMIN_CARD_IMAGE_VARIANTS = {
+  thumb: {
+    width: 120,
+    sizes: "(max-width: 1024px) 56px, 48px",
+  },
+  detail: {
+    width: 240,
+    sizes: "80px",
+  },
+};
 
-  if (!src) {
+const DEFAULT_CLOUDINARY_CLOUD_NAME = "dafftkonl";
+
+function normalizeCloudinaryCloudName(value) {
+  return String(value || "").trim().replace(/^['\"]|['\"]$/g, "");
+}
+
+function getCloudinaryCloudName() {
+  return normalizeCloudinaryCloudName(import.meta.env.VITE_CLOUDINARY_CLOUD_NAME) || DEFAULT_CLOUDINARY_CLOUD_NAME;
+}
+
+export function buildAdminCloudinaryUrl(sourceUrl, variant = "thumb") {
+  const normalizedSource = typeof sourceUrl === "string" ? sourceUrl.trim() : "";
+  const cloudName = getCloudinaryCloudName();
+
+  if (!normalizedSource || !cloudName || normalizedSource.includes("res.cloudinary.com/")) {
+    return normalizedSource;
+  }
+
+  const selectedVariant = ADMIN_CARD_IMAGE_VARIANTS[variant] || ADMIN_CARD_IMAGE_VARIANTS.thumb;
+  const transformations = [`w_${selectedVariant.width}`, "q_auto", "f_auto", "dpr_auto"].join(",");
+  return `https://res.cloudinary.com/${cloudName}/image/fetch/${transformations}/${normalizedSource}`;
+}
+
+export function getAdminCardImageProps(imageUrl, options = {}) {
+  const rawSrc = imageUrl || "";
+  const variant = options.variant === "detail" ? "detail" : "thumb";
+
+  if (!rawSrc) {
     return {
-      src,
+      src: rawSrc,
       loading: "lazy",
       decoding: "async",
     };
   }
 
-  const highResSrc = src.includes("/images/cards_small/")
-    ? src.replace("/images/cards_small/", "/images/cards/")
-    : src;
+  const smallSrc = rawSrc.includes("/images/cards/")
+    ? rawSrc.replace("/images/cards/", "/images/cards_small/")
+    : rawSrc;
+  const highResSrc = smallSrc.includes("/images/cards_small/")
+    ? smallSrc.replace("/images/cards_small/", "/images/cards/")
+    : rawSrc;
+  const selectedVariant = ADMIN_CARD_IMAGE_VARIANTS[variant] || ADMIN_CARD_IMAGE_VARIANTS.thumb;
+  const sourceUrl = variant === "detail" ? highResSrc : smallSrc;
+  const optimizedSrc = buildAdminCloudinaryUrl(sourceUrl, variant);
 
   return {
-    src,
-    srcSet: highResSrc && highResSrc !== src ? `${src} 1x, ${highResSrc} 2x` : undefined,
-    sizes: "(max-width: 1024px) 56px, 48px",
+    src: optimizedSrc || sourceUrl,
+    sizes: selectedVariant.sizes,
     loading: "lazy",
     decoding: "async",
   };
@@ -46,6 +86,8 @@ export function formatDay(value) {
 export function orderStatusLabel(status) {
   const labels = {
     pending_payment: "Pendiente de pago",
+    failed: "Pago rechazado",
+    expired: "Pago expirado",
     paid: "Pagado",
     shipped: "Enviado",
     completed: "Completado",
@@ -135,6 +177,8 @@ export function canUseAsParent(candidateId, selectedCategoryId, categoriesById) 
 
 const STATUS_STYLES = {
   pending_payment: "border-slate-400/20 bg-slate-400/10 text-slate-200",
+  failed: "border-rose-400/20 bg-rose-500/10 text-rose-300",
+  expired: "border-amber-400/20 bg-amber-500/10 text-amber-300",
   paid: "border-sky-400/20 bg-sky-400/10 text-sky-300",
   shipped: "border-emerald-400/20 bg-emerald-400/10 text-emerald-300",
   completed: "border-amber-400/20 bg-amber-400/10 text-amber-300",

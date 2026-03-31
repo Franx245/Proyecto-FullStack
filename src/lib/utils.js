@@ -1,9 +1,10 @@
 import { clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
 
+/** @param {...import("clsx").ClassValue} inputs */
 export function cn(...inputs) {
   return twMerge(clsx(inputs))
 } 
 
 
-export const isIframe = window.self !== window.top;
+export const isIframe = typeof window !== "undefined" && window.self !== window.top;

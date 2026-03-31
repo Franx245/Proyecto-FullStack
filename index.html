@@ -210,6 +210,31 @@
       })();
     </script>
 
+    <script>
+      (function () {
+        if (window.location.pathname !== "/" && window.location.pathname !== "") return;
+        var cloudName = "%VITE_CLOUDINARY_CLOUD_NAME%";
+        fetch("/api/catalog?featured=true&page=1&pageSize=5", { credentials: "same-origin", priority: "high" })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (payload) {
+            var cards = payload && Array.isArray(payload.cards) ? payload.cards : [];
+            if (!cards.length) return;
+            window.__DUELVAULT_FEATURED_BOOTSTRAP__ = cards;
+            var first = cards[0];
+            var rawId = first && (first.ygopro_id || first.id);
+            if (!rawId) return;
+            var remoteSrc = "https://images.ygoprodeck.com/images/cards_small/" + rawId + ".jpg";
+            var href = cloudName
+              ? "https://res.cloudinary.com/" + cloudName + "/image/fetch/w_240,q_auto,f_auto/" + remoteSrc
+              : remoteSrc;
+            var img = new Image();
+            img.fetchPriority = "high";
+            img.src = href;
+          })
+          .catch(function () {});
+      })();
+    </script>
+
   </head>
 
   <body>

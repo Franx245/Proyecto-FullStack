@@ -3,6 +3,7 @@ import { Boxes, PackageSearch, Search } from "lucide-react";
 import {
   EmptyState,
   StatCard,
+  buildAdminCloudinaryUrl,
   buildCategoryPath,
   canUseAsParent,
   cn,
@@ -503,7 +504,7 @@ export default function CustomContentView({
               )}
             >
               <div className="h-16 w-16 shrink-0 overflow-hidden rounded-2xl bg-slate-900">
-                {product.image ? <img src={product.image} alt={product.title} className="h-full w-full object-cover" /> : null}
+                {product.image ? <img src={buildAdminCloudinaryUrl(product.image)} alt={product.title} loading="lazy" className="h-full w-full object-cover" /> : null}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">

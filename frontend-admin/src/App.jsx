@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, memo, startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -9,13 +9,13 @@ import {
   MessageCircle,
   PackageSearch,
   ReceiptText,
-  ShieldAlert,
   Star,
   TrendingUp,
   Users,
   X,
 } from "lucide-react";
 import {
+  addCardToInventory,
   clearStoredSession,
   createCustomCategory,
   createCustomProduct,
@@ -29,12 +29,11 @@ import {
   getDashboard,
   getContactRequests,
   getInventoryCards,
+  searchAdminCards,
   getOrders,
   getWhatsappSettings,
   getUsers,
-  refreshAdminSession,
   getStoredSession,
-  loginAdmin,
   updateCustomCategory,
   updateCustomProduct,
   updateCard,
@@ -51,9 +50,9 @@ import {
 } from "./lib/api";
 import { clearPersistedAdminQueryCache, persistAdminQueryCacheNow } from "./lib/queryClient";
 import { generateClientMutationId, recordAdminEvent, startAdminFlow } from "./lib/observability";
+import { markDataReady, reportBootMetrics } from "./lib/perf";
 import { userRoleLabel } from "./views/shared";
-
-import DashboardView from "./views/DashboardView";
+import { useAdminRealtimeEvents } from "./hooks/useAdminRealtimeEvents";
 
 function lazyWithPreload(factory) {
   const Component = lazy(factory);
@@ -61,27 +60,53 @@ function lazyWithPreload(factory) {
   return Component;
 }
 
-function scheduleIdleTask(callback) {
-  if (typeof window === "undefined") {
-    return () => {};
-  }
-
-  if ("requestIdleCallback" in window) {
-    const callbackId = window.requestIdleCallback(callback, { timeout: 1600 });
-    return () => window.cancelIdleCallback?.(callbackId);
-  }
-
-  const timeoutId = window.setTimeout(callback, 220);
-  return () => window.clearTimeout(timeoutId);
-}
-
+const DashboardView = lazyWithPreload(() => import("./views/DashboardView"));
 const AnalyticsView = lazyWithPreload(() => import("./views/AnalyticsView"));
 const CustomContentView = lazyWithPreload(() => import("./views/CustomContentView"));
 const HomeMerchandisingView = lazyWithPreload(() => import("./views/HomeMerchandisingView"));
 const InventoryView = lazyWithPreload(() => import("./views/InventoryView"));
+const LoginScreen = lazyWithPreload(() => import("./views/LoginScreen"));
 const OrdersView = lazyWithPreload(() => import("./views/OrdersView"));
 const UsersView = lazyWithPreload(() => import("./views/UsersView"));
 const WhatsappSettingsView = lazyWithPreload(() => import("./views/WhatsappSettingsView"));
+
+const _LAZY_SECTION_MAP = {
+  dashboard: DashboardView,
+  analytics: AnalyticsView,
+  custom: CustomContentView,
+  home: HomeMerchandisingView,
+  inventory: InventoryView,
+  orders: OrdersView,
+  whatsapp: WhatsappSettingsView,
+  users: UsersView,
+};
+
+(function preloadInitialSection() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const fromPath = Object.entries({
+    "/dashboard": "dashboard",
+    "/inventory": "inventory",
+    "/home": "home",
+    "/custom": "custom",
+    "/analytics": "analytics",
+    "/orders": "orders",
+    "/contacto": "whatsapp",
+    "/users": "users",
+  }).find(([path]) => window.location.pathname.replace(/\/+$/, "") === path)?.[1];
+
+  const stored = fromPath || (() => {
+    try {
+      return window.localStorage.getItem("duelvault_admin_last_section") || "dashboard";
+    } catch {
+      return "dashboard";
+    }
+  })();
+
+  void _LAZY_SECTION_MAP[stored]?.preload?.();
+})();
 
 const sections = [
   { key: "dashboard", label: "Panel", icon: BarChart3 },
@@ -107,12 +132,56 @@ const SECTION_PATHS = {
 
 const LAST_SECTION_KEY = "duelvault_admin_last_section";
 const ADMIN_SHELL_STATE_KEY = "duelvault_admin_shell_state_v3";
+const ADMIN_STOREFRONT_URL_KEY = "duelvault_admin_storefront_url";
 const DEFAULT_INVENTORY_FILTERS = {
   search: "",
   rarity: "all",
   cardType: "all",
   stockStatus: "all",
   visibility: "all",
+};
+const DEFAULT_INVENTORY_MODE = "stock";
+const DEFAULT_ORDERS_FILTERS = {
+  search: "",
+  status: "all",
+};
+const DEFAULT_USERS_FILTERS = {
+  search: "",
+  role: "all",
+};
+const HOME_PAGE_SIZE = 24;
+
+const EMPTY_ARRAY = [];
+const EMPTY_DASHBOARD = {
+  metrics: {
+    totalRevenue: 0,
+    totalOrders: 0,
+    totalProducts: 0,
+    totalCustomers: 0,
+    activeStaffCount: 0,
+    avgOrderValue: 0,
+    pendingPaymentCount: 0,
+    lowStockCount: "--",
+    outOfStockCount: "--",
+  },
+  analytics: {
+    statuses: {},
+    zones: [],
+    daily: [],
+    usersByDay: [],
+  },
+  recentOrders: [],
+  topSellingCards: [],
+  topCustomers: [],
+  recentUsers: [],
+};
+const EMPTY_ORDERS_SUMMARY = { totalOrders: 0, pendingCount: 0, countedCount: 0, filteredTotal: 0 };
+const EMPTY_USERS_SUMMARY = { totalUsers: 0, customerCount: 0, staffCount: 0, adminCount: 0, filteredTotal: 0 };
+const COUNTED_ORDER_STATUSES = new Set(["paid", "shipped", "completed"]);
+const USER_ROLE_SUMMARY_KEYS = {
+  user: "customerCount",
+  staff: "staffCount",
+  admin: "adminCount",
 };
 
 const SECTION_META = {
@@ -151,10 +220,10 @@ const SECTION_META = {
 };
 
 const SECTION_REQUIREMENTS = {
-  dashboard: { dashboard: true, orders: true, users: true, cards: true },
+  dashboard: { dashboard: true },
   analytics: { dashboard: true },
   inventory: { dashboard: true, inventoryCards: true },
-  home: { dashboard: true, cards: true },
+  home: { dashboard: true, homeCards: true },
   orders: { dashboard: true, orders: true },
   whatsapp: { dashboard: true, whatsapp: true },
   users: { dashboard: true, users: true },
@@ -175,32 +244,131 @@ function canUseStorage() {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
 }
 
-function readAdminShellState() {
-  if (!canUseStorage()) {
-    return {};
+function normalizeAbsoluteUrl(value) {
+  const normalizedValue = typeof value === "string" ? value.trim().replace(/\/$/, "") : "";
+  if (!normalizedValue) {
+    return "";
   }
 
+  return /^https?:\/\//i.test(normalizedValue) ? normalizedValue : "";
+}
+
+function getStoredStorefrontUrl() {
+  if (!canUseStorage()) {
+    return "";
+  }
+
+  return normalizeAbsoluteUrl(window.localStorage.getItem(ADMIN_STOREFRONT_URL_KEY));
+}
+
+function setStoredStorefrontUrl(value) {
+  if (!canUseStorage()) {
+    return;
+  }
+
+  const normalizedValue = normalizeAbsoluteUrl(value);
+  if (normalizedValue) {
+    window.localStorage.setItem(ADMIN_STOREFRONT_URL_KEY, normalizedValue);
+    return;
+  }
+
+  window.localStorage.removeItem(ADMIN_STOREFRONT_URL_KEY);
+}
+
+function clearStoredAdminUiState() {
+  if (!canUseStorage()) {
+    return;
+  }
+
+  window.localStorage.removeItem(LAST_SECTION_KEY);
+  window.localStorage.removeItem(ADMIN_SHELL_STATE_KEY);
+  window.localStorage.removeItem("duelvault_admin_dashboard_view_state_v2");
+}
+
+let _shellStateRawCache = null;
+let _shellStateParsedCache = null;
+let _activeAdminId = null;
+
+function setActiveAdminId(adminId) {
+  if (_activeAdminId === adminId) {
+    return;
+  }
+
+  _activeAdminId = adminId;
+  _shellStateRawCache = null;
+  _shellStateParsedCache = null;
+}
+
+function readAdminShellState() {
   try {
-    return JSON.parse(window.localStorage.getItem(ADMIN_SHELL_STATE_KEY) || "{}") || {};
+    if (!canUseStorage()) {
+      return {};
+    }
+
+    const rawState = window.localStorage.getItem(ADMIN_SHELL_STATE_KEY);
+    if (!rawState) {
+      return {};
+    }
+
+    if (rawState === _shellStateRawCache && _shellStateParsedCache !== null) {
+      return _shellStateParsedCache;
+    }
+
+    const parsedState = JSON.parse(rawState);
+    const result = parsedState && typeof parsedState === "object" && !Array.isArray(parsedState) ? parsedState : {};
+
+    if (_activeAdminId && result._adminId && result._adminId !== _activeAdminId) {
+      _shellStateRawCache = null;
+      _shellStateParsedCache = null;
+      try { window.localStorage.removeItem(ADMIN_SHELL_STATE_KEY); } catch {}
+      return {};
+    }
+
+    _shellStateRawCache = rawState;
+    _shellStateParsedCache = result;
+    return result;
   } catch {
+    _shellStateRawCache = null;
+    _shellStateParsedCache = null;
     return {};
   }
 }
 
 function writeAdminShellState(updater) {
-  if (!canUseStorage()) {
-    return {};
+  const currentState = readAdminShellState();
+  const candidateState = typeof updater === "function" ? updater(currentState) : { ...currentState, ...updater };
+  const nextState = candidateState && typeof candidateState === "object" && !Array.isArray(candidateState)
+    ? candidateState
+    : currentState;
+
+  if (_activeAdminId) {
+    nextState._adminId = _activeAdminId;
   }
 
-  const currentState = readAdminShellState();
-  const nextState = typeof updater === "function" ? updater(currentState) : { ...currentState, ...updater };
-  window.localStorage.setItem(ADMIN_SHELL_STATE_KEY, JSON.stringify(nextState));
+  try {
+    if (!canUseStorage()) {
+      return nextState;
+    }
+
+    const raw = JSON.stringify(nextState);
+    window.localStorage.setItem(ADMIN_SHELL_STATE_KEY, raw);
+    _shellStateRawCache = raw;
+    _shellStateParsedCache = nextState;
+  } catch {
+    return nextState;
+  }
+
   return nextState;
 }
 
 function getStoredInventoryPage() {
   const page = Number(readAdminShellState().inventoryPage);
   return Number.isFinite(page) && page > 0 ? page : 1;
+}
+
+function getStoredInventoryMode() {
+  const mode = String(readAdminShellState().inventoryMode || DEFAULT_INVENTORY_MODE).trim().toLowerCase();
+  return mode === "all" ? "all" : DEFAULT_INVENTORY_MODE;
 }
 
 function getStoredInventoryFilters() {
@@ -210,21 +378,33 @@ function getStoredInventoryFilters() {
   };
 }
 
+function getStoredOrdersPage() {
+  const page = Number(readAdminShellState().ordersPage);
+  return Number.isFinite(page) && page > 0 ? page : 1;
+}
+
+function getStoredOrdersFilters() {
+  return {
+    ...DEFAULT_ORDERS_FILTERS,
+    ...(readAdminShellState().ordersFilters || {}),
+  };
+}
+
+function getStoredUsersPage() {
+  const page = Number(readAdminShellState().usersPage);
+  return Number.isFinite(page) && page > 0 ? page : 1;
+}
+
+function getStoredUsersFilters() {
+  return {
+    ...DEFAULT_USERS_FILTERS,
+    ...(readAdminShellState().usersFilters || {}),
+  };
+}
+
 function getStoredScrollTop(section) {
   const top = Number(readAdminShellState().scrollPositions?.[section]);
   return Number.isFinite(top) && top > 0 ? top : 0;
-}
-
-function getCachedQueryOptions(queryClient, queryKey) {
-  const queryState = queryClient.getQueryState(queryKey);
-  if (typeof queryState?.data === "undefined") {
-    return {};
-  }
-
-  return {
-    initialData: queryState.data,
-    initialDataUpdatedAt: queryState.dataUpdatedAt,
-  };
 }
 
 function getCardInventoryStatus(card) {
@@ -265,6 +445,60 @@ function findCardSnapshot(cardId, ...sources) {
   }
 
   return null;
+}
+
+function getCardEntityQueryKey(cardId) {
+  return ["card", Number(cardId)];
+}
+
+function getOrderEntityQueryKey(orderId) {
+  return ["order", Number(orderId)];
+}
+
+function getUserEntityQueryKey(userId) {
+  return ["user", Number(userId)];
+}
+
+function mergeEntityQueryData(current, entityField, updates, { createIfMissing = true } = {}) {
+  if (!updates || typeof updates !== "object") {
+    return current;
+  }
+
+  if (typeof current === "undefined" || current === null) {
+    return createIfMissing ? { [entityField]: updates } : current;
+  }
+
+  if (Array.isArray(current) || typeof current !== "object") {
+    return current;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(current, entityField)) {
+    const currentEntity = current[entityField];
+    return {
+      ...current,
+      [entityField]: currentEntity && typeof currentEntity === "object" && !Array.isArray(currentEntity)
+        ? { ...currentEntity, ...updates }
+        : updates,
+    };
+  }
+
+  return {
+    ...current,
+    ...updates,
+  };
+}
+
+function mergeEntityCache(queryClient, queryKey, entityField, updates, options) {
+  queryClient.setQueryData(queryKey, (current) => mergeEntityQueryData(current, entityField, updates, options));
+}
+
+function restoreExactQuerySnapshot(queryClient, queryKey, snapshot) {
+  if (typeof snapshot === "undefined") {
+    queryClient.removeQueries({ queryKey, exact: true });
+    return;
+  }
+
+  queryClient.setQueryData(queryKey, snapshot);
 }
 
 function updateCardsResponse(response, updater) {
@@ -330,7 +564,161 @@ function removeOrdersFromResponse(response, predicate) {
     return response;
   }
 
-  return { ...response, orders: nextOrders };
+  const removedCount = response.orders.length - nextOrders.length;
+  const pagination = response.pagination
+    ? {
+      ...response.pagination,
+      total: Math.max(0, (response.pagination.total || 0) - removedCount),
+    }
+    : response.pagination;
+  const totalPages = pagination ? Math.max(1, Math.ceil(pagination.total / Math.max(pagination.pageSize || 1, 1))) : 1;
+
+  return {
+    ...response,
+    orders: nextOrders,
+    ...(pagination ? {
+      pagination: {
+        ...pagination,
+        totalPages,
+        hasNextPage: pagination.page < totalPages,
+        hasPreviousPage: pagination.page > 1,
+      },
+    } : {}),
+    ...(response.summary ? {
+      summary: {
+        ...response.summary,
+        totalOrders: Math.max(0, (response.summary.totalOrders || 0) - removedCount),
+        filteredTotal: Math.max(0, (response.summary.filteredTotal || 0) - removedCount),
+      },
+    } : {}),
+  };
+}
+
+function mergeOrderIntoResponse(response, queryKey, orderId, updates) {
+  const nextResponse = updateOrdersResponse(response, (order) => (order.id === orderId ? { ...order, ...updates } : order));
+  const statusFilter = String(queryKey?.[4] || "all").toLowerCase();
+
+  if (statusFilter === "all") {
+    return nextResponse;
+  }
+
+  return removeOrdersFromResponse(nextResponse, (order) => order.id === orderId && String(order.status || "").toLowerCase() !== statusFilter);
+}
+
+function applyOrderStatusToResponse(response, queryKey, orderId, nextStatus, previousStatus) {
+  let nextResponse = mergeOrderIntoResponse(response, queryKey, orderId, { status: nextStatus });
+  if (!nextResponse?.summary) {
+    return nextResponse;
+  }
+
+  const normalizedNextStatus = String(nextStatus || "").toLowerCase();
+  const normalizedPreviousStatus = String(previousStatus || "").toLowerCase();
+  if (!normalizedNextStatus || normalizedNextStatus === normalizedPreviousStatus) {
+    return nextResponse;
+  }
+
+  nextResponse = {
+    ...nextResponse,
+    summary: {
+      ...nextResponse.summary,
+      ...(typeof nextResponse.summary.pendingCount === "number"
+        ? {
+            pendingCount: Math.max(
+              0,
+              nextResponse.summary.pendingCount
+                + (normalizedNextStatus === "pending_payment" ? 1 : 0)
+                - (normalizedPreviousStatus === "pending_payment" ? 1 : 0)
+            ),
+          }
+        : {}),
+      ...(typeof nextResponse.summary.countedCount === "number"
+        ? {
+            countedCount: Math.max(
+              0,
+              nextResponse.summary.countedCount
+                + (COUNTED_ORDER_STATUSES.has(normalizedNextStatus) ? 1 : 0)
+                - (COUNTED_ORDER_STATUSES.has(normalizedPreviousStatus) ? 1 : 0)
+            ),
+          }
+        : {}),
+    },
+  };
+
+  return nextResponse;
+}
+
+function removeContactRequestsFromResponse(response, predicate) {
+  if (!response || !Array.isArray(response.contact_requests)) {
+    return response;
+  }
+
+  const nextRequests = response.contact_requests.filter((contactRequest) => !predicate(contactRequest));
+  if (nextRequests.length === response.contact_requests.length) {
+    return response;
+  }
+
+  const summary = nextRequests.reduce((accumulator, contactRequest) => {
+    const key = String(contactRequest.status || "").toLowerCase();
+    if (key in accumulator) {
+      accumulator[key] += 1;
+    }
+    return accumulator;
+  }, {
+    total: nextRequests.length,
+    new: 0,
+    in_progress: 0,
+    responded: 0,
+    archived: 0,
+  });
+
+  return {
+    ...response,
+    contact_requests: nextRequests,
+    summary,
+  };
+}
+
+function removeUsersFromResponse(response, predicate) {
+  if (!response || !Array.isArray(response.users)) {
+    return response;
+  }
+
+  const nextUsers = response.users.filter((user) => !predicate(user));
+  if (nextUsers.length === response.users.length) {
+    return response;
+  }
+
+  const removedCount = response.users.length - nextUsers.length;
+  const pagination = response.pagination
+    ? {
+        ...response.pagination,
+        total: Math.max(0, (response.pagination.total || 0) - removedCount),
+      }
+    : response.pagination;
+  const totalPages = pagination ? Math.max(1, Math.ceil(pagination.total / Math.max(pagination.pageSize || 1, 1))) : 1;
+
+  return {
+    ...response,
+    users: nextUsers,
+    ...(pagination
+      ? {
+          pagination: {
+            ...pagination,
+            totalPages,
+            hasNextPage: pagination.page < totalPages,
+            hasPreviousPage: pagination.page > 1,
+          },
+        }
+      : {}),
+    ...(response.summary
+      ? {
+          summary: {
+            ...response.summary,
+            filteredTotal: Math.max(0, (response.summary.filteredTotal || 0) - removedCount),
+          },
+        }
+      : {}),
+  };
 }
 
 function updateUsersResponse(response, updater) {
@@ -348,6 +736,51 @@ function updateUsersResponse(response, updater) {
   });
 
   return changed ? { ...response, users: nextUsers } : response;
+}
+
+function mergeUserIntoResponse(response, queryKey, userId, updates) {
+  const nextResponse = updateUsersResponse(response, (user) => (user.id === userId ? { ...user, ...updates } : user));
+  const roleFilter = String(queryKey?.[4] || "all").toLowerCase();
+
+  if (roleFilter === "all") {
+    return nextResponse;
+  }
+
+  return removeUsersFromResponse(nextResponse, (user) => user.id === userId && String(user.role || "").toLowerCase() !== roleFilter);
+}
+
+function applyUserRoleToResponse(response, queryKey, userId, nextRole, previousRole) {
+  let nextResponse = mergeUserIntoResponse(response, queryKey, userId, { role: nextRole });
+  if (!nextResponse?.summary) {
+    return nextResponse;
+  }
+
+  const normalizedNextRole = String(nextRole || "").toLowerCase();
+  const normalizedPreviousRole = String(previousRole || "").toLowerCase();
+  if (!normalizedNextRole || normalizedNextRole === normalizedPreviousRole) {
+    return nextResponse;
+  }
+
+  const previousSummaryKey = USER_ROLE_SUMMARY_KEYS[normalizedPreviousRole];
+  const nextSummaryKey = USER_ROLE_SUMMARY_KEYS[normalizedNextRole];
+  nextResponse = {
+    ...nextResponse,
+    summary: {
+      ...nextResponse.summary,
+      ...(previousSummaryKey && typeof nextResponse.summary[previousSummaryKey] === "number"
+        ? {
+            [previousSummaryKey]: Math.max(0, nextResponse.summary[previousSummaryKey] - 1),
+          }
+        : {}),
+      ...(nextSummaryKey && typeof nextResponse.summary[nextSummaryKey] === "number"
+        ? {
+            [nextSummaryKey]: nextResponse.summary[nextSummaryKey] + 1,
+          }
+        : {}),
+    },
+  };
+
+  return nextResponse;
 }
 
 function updateContactRequestsResponse(response, updater) {
@@ -491,31 +924,13 @@ function getReadableMutationError(error) {
   return error?.message || "No pudimos completar la operación.";
 }
 
-function warmAdminCache(queryClient, adminId) {
-  return Promise.allSettled([
-    queryClient.prefetchQuery({
-      queryKey: ["dashboard", adminId],
-      queryFn: getDashboard,
-      staleTime: 1000 * 60 * 5,
-    }),
-    queryClient.prefetchQuery({
-      queryKey: ["orders", adminId],
-      queryFn: getOrders,
-      staleTime: 1000 * 60 * 5,
-    }),
-    queryClient.prefetchQuery({
-      queryKey: ["users", adminId],
-      queryFn: getUsers,
-      staleTime: 1000 * 60 * 5,
-    }),
-  ]);
-}
+
 
 function SkeletonBlock({ className = "h-20" }) {
   return <div className={cn("animate-pulse rounded-3xl border border-white/5 bg-white/[0.04]", className)} />;
 }
 
-function SectionNav({ section, onSectionChange, onSectionIntent, className = "" }) {
+const SectionNav = memo(function SectionNav({ section, onSectionChange, onSectionIntent, className = "" }) {
   return (
     <nav className={className}>
       {sections.map(({ key, label, icon: Icon }) => (
@@ -535,9 +950,9 @@ function SectionNav({ section, onSectionChange, onSectionIntent, className = "" 
       ))}
     </nav>
   );
-}
+});
 
-function MobileSectionNav({ section, onSectionChange, onSectionIntent }) {
+const MobileSectionNav = memo(function MobileSectionNav({ section, onSectionChange, onSectionIntent }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
@@ -568,86 +983,7 @@ function MobileSectionNav({ section, onSectionChange, onSectionIntent }) {
       </div>
     </div>
   );
-}
-
-function LoginScreen({ onLoggedIn }) {
-  const [email, setEmail] = useState("admin@test.com");
-  const [password, setPassword] = useState("admin123");
-  const [error, setError] = useState("");
-
-  const loginMutation = useMutation({
-    mutationFn: loginAdmin,
-    onSuccess: (session) => {
-      setError("");
-      onLoggedIn(session);
-    },
-    onError: (err) => {
-      setError(err.message);
-    },
-  });
-
-  return (
-    <div className="min-h-screen flex items-center justify-center px-4 py-10">
-      <div className="glass w-full max-w-md rounded-3xl border border-white/10 p-8 shadow-glow">
-        <div className="mb-8">
-          <p className="inline-flex items-center gap-2 rounded-full border border-ember/30 bg-ember/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-amber-300">
-            <ShieldAlert className="h-3.5 w-3.5" />
-            DuelVault Admin 🐉
-          </p>
-          <h1 className="mt-5 text-3xl font-black text-white">Panel del duelista</h1>
-          <p className="mt-2 text-sm text-slate-300">Acceso por roles, sesión persistente y control táctico de la tienda.</p>
-        </div>
-
-        <form
-          className="space-y-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            loginMutation.mutate({ email, password });
-          }}
-        >
-          <div>
-            <label className="mb-1.5 block text-sm text-slate-300">Usuario o email</label>
-            <input
-              className="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3 text-sm outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-            />
-          </div>
-
-          <div>
-            <label className="mb-1.5 block text-sm text-slate-300">Contraseña</label>
-            <input
-              type="password"
-              className="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3 text-sm outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-            />
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-3 text-xs text-slate-400">
-            <p>👑 Admin por defecto: admin / admin</p>
-            <p className="mt-1">👑 Admin alternativo: admin@test.com / admin123</p>
-            <p className="mt-1">🛡️ Staff: staff@test.com / staff123</p>
-          </div>
-
-          {error ? (
-            <p className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-              {error}
-            </p>
-          ) : null}
-
-          <button
-            type="submit"
-            disabled={loginMutation.isPending}
-            className="w-full rounded-2xl bg-amber-500 px-4 py-3 text-sm font-bold text-slate-950 transition hover:bg-amber-400 disabled:opacity-60"
-          >
-            {loginMutation.isPending ? "Ingresando..." : "Ingresar"}
-          </button>
-        </form>
-      </div>
-    </div>
-  );
-}
+});
 
 function getBootstrapSession() {
   if (typeof window === "undefined") {
@@ -656,6 +992,11 @@ function getBootstrapSession() {
 
   const params = new URLSearchParams(window.location.search);
   const bootstrap = params.get("bootstrap");
+  const returnTo = normalizeAbsoluteUrl(params.get("return_to"));
+  if (returnTo) {
+    setStoredStorefrontUrl(returnTo);
+    params.delete("return_to");
+  }
   if (!bootstrap) {
     return null;
   }
@@ -677,47 +1018,30 @@ function getBootstrapSession() {
 }
 
 async function resolveStorefrontLoginUrl() {
-  const configuredStorefrontUrl = (import.meta.env.VITE_STOREFRONT_URL || "").replace(/\/$/, "");
+  const configuredStorefrontUrl = normalizeAbsoluteUrl(import.meta.env.VITE_STOREFRONT_URL || "") || getStoredStorefrontUrl();
 
   if (configuredStorefrontUrl) {
     return `${configuredStorefrontUrl}/auth?mode=login`;
   }
 
-  const fallbackPort = 5173;
+  const fallbackNextStorePort = 3000;
+  const fallbackLegacyStorePort = 5173;
 
   try {
     const response = await fetch("/api/health");
     const payload = await response.json().catch(() => ({}));
-    const storePort = payload?.runtime?.store_port || fallbackPort;
+    const storePort = payload?.runtime?.next_store_port || payload?.runtime?.store_port || fallbackNextStorePort;
     return `${window.location.protocol}//${window.location.hostname}:${storePort}/auth?mode=login`;
   } catch {
-    return `${window.location.protocol}//${window.location.hostname}:${fallbackPort}/auth?mode=login`;
+    return `${window.location.protocol}//${window.location.hostname}:${fallbackNextStorePort || fallbackLegacyStorePort}/auth?mode=login`;
   }
 }
 
-function AdminLoadingShell() {
-  return (
-    <div className="w-full min-h-screen px-4 py-4 md:px-6">
-      <div className="grid w-full gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
-        <SkeletonBlock className="h-[720px] rounded-[32px]" />
-        <div className="space-y-6">
-          <SkeletonBlock className="h-32 rounded-[32px]" />
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-            {Array.from({ length: 5 }).map((_, index) => <SkeletonBlock key={index} className="h-32" />)}
-          </div>
-          <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-            <SkeletonBlock className="h-[420px]" />
-            <SkeletonBlock className="h-[420px]" />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+
 
 function SectionLoadingPanel() {
   return (
-    <div className="glass rounded-[32px] border border-white/10 p-6">
+    <div className="glass min-h-[60vh] rounded-[32px] border border-white/10 p-6">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {Array.from({ length: 6 }).map((_, index) => <SkeletonBlock key={index} className="h-28" />)}
       </div>
@@ -733,7 +1057,7 @@ function SectionErrorPanel({ message }) {
   );
 }
 
-function OperationNotice({ notice, online }) {
+const OperationNotice = memo(function OperationNotice({ notice, online }) {
   if (!notice && online) {
     return null;
   }
@@ -755,14 +1079,24 @@ function OperationNotice({ notice, online }) {
       {message}
     </div>
   );
-}
+});
 
 function AdminShell({ session, onLogout }) {
+  setActiveAdminId(session.admin.id);
+
   const [section, setSection] = useState(() => getStoredSection());
+  const [inventoryMode, setInventoryMode] = useState(() => getStoredInventoryMode());
   const [inventoryPage, setInventoryPage] = useState(() => getStoredInventoryPage());
   const [inventoryFilters, setInventoryFilters] = useState(() => getStoredInventoryFilters());
+  const [homePage, setHomePage] = useState(1);
+  const [homeSearch, setHomeSearch] = useState("");
+  const [ordersPage, setOrdersPage] = useState(() => getStoredOrdersPage());
+  const [ordersFilters, setOrdersFilters] = useState(() => getStoredOrdersFilters());
+  const [usersPage, setUsersPage] = useState(() => getStoredUsersPage());
+  const [usersFilters, setUsersFilters] = useState(() => getStoredUsersFilters());
   const queryClient = useQueryClient();
   const [savingCardId, setSavingCardId] = useState(null);
+  const [addingInventoryCardId, setAddingInventoryCardId] = useState(null);
   const [isBulkSaving, setIsBulkSaving] = useState(false);
   const [isDeletingCards, setIsDeletingCards] = useState(false);
   const [updatingOrderId, setUpdatingOrderId] = useState(null);
@@ -780,6 +1114,9 @@ function AdminShell({ session, onLogout }) {
   const [isMobileHeaderCompact, setIsMobileHeaderCompact] = useState(false);
   const [isMobileCompactMenuOpen, setIsMobileCompactMenuOpen] = useState(false);
   const clearedLegacyCacheRef = useRef(false);
+  const deferredHomeSearch = useDeferredValue(homeSearch);
+  const deferredOrdersSearch = useDeferredValue(ordersFilters.search);
+  const deferredUsersSearch = useDeferredValue(usersFilters.search);
 
   useEffect(() => {
     if (clearedLegacyCacheRef.current) {
@@ -797,21 +1134,6 @@ function AdminShell({ session, onLogout }) {
   }, []);
 
   useEffect(() => {
-    return scheduleIdleTask(() => {
-      void Promise.allSettled([
-        OrdersView.preload?.(),
-        UsersView.preload?.(),
-      ]);
-    });
-  }, []);
-
-  useEffect(() => {
-    return scheduleIdleTask(() => {
-      void warmAdminCache(queryClient, session.admin.id);
-    });
-  }, [queryClient, session.admin.id]);
-
-  useEffect(() => {
     syncSectionPath(section, { replace: !getSectionFromPath(window.location.pathname) });
     window.localStorage.setItem(LAST_SECTION_KEY, section);
     recordAdminEvent("section-view", { section });
@@ -820,20 +1142,21 @@ function AdminShell({ session, onLogout }) {
   useEffect(() => {
     writeAdminShellState((current) => ({
       ...current,
+      inventoryMode,
       inventoryPage,
       inventoryFilters,
+      ordersPage,
+      ordersFilters,
+      usersPage,
+      usersFilters,
     }));
-  }, [inventoryFilters, inventoryPage]);
+  }, [inventoryFilters, inventoryMode, inventoryPage, ordersFilters, ordersPage, usersFilters, usersPage]);
 
   useEffect(() => {
-    let frameId = null;
+    let timeoutId = null;
 
     const persistScroll = () => {
-      if (frameId !== null) {
-        window.cancelAnimationFrame(frameId);
-        frameId = null;
-      }
-
+      timeoutId = null;
       writeAdminShellState((current) => ({
         ...current,
         scrollPositions: {
@@ -844,16 +1167,19 @@ function AdminShell({ session, onLogout }) {
     };
 
     const handleScroll = () => {
-      if (frameId !== null) {
-        return;
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
       }
 
-      frameId = window.requestAnimationFrame(persistScroll);
+      timeoutId = window.setTimeout(persistScroll, 400);
     };
 
     window.addEventListener("scroll", handleScroll, { passive: true });
     return () => {
       window.removeEventListener("scroll", handleScroll);
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
       persistScroll();
     };
   }, [section]);
@@ -939,14 +1265,31 @@ function AdminShell({ session, onLogout }) {
   }, [isMobileCompactMenuOpen]);
 
   const sectionRequirements = SECTION_REQUIREMENTS[section] || SECTION_REQUIREMENTS.dashboard;
+  const preloadedSectionsRef = useRef(new Set());
 
   const handleSectionIntent = (nextSection) => {
+    if (nextSection === section || preloadedSectionsRef.current.has(nextSection)) {
+      return;
+    }
+
+    preloadedSectionsRef.current.add(nextSection);
+
+    if (nextSection === "dashboard") {
+      void DashboardView.preload?.();
+      void queryClient.prefetchQuery({
+        queryKey: ["dashboard", session.admin.id],
+        queryFn: getDashboard,
+        staleTime: 1000 * 60 * 5,
+      });
+      return;
+    }
+
     if (nextSection === "inventory") {
       void InventoryView.preload?.();
       void queryClient.prefetchQuery({
         queryKey: ["inventory-cards", session.admin.id, 1, DEFAULT_INVENTORY_FILTERS.search, DEFAULT_INVENTORY_FILTERS.rarity, DEFAULT_INVENTORY_FILTERS.cardType, DEFAULT_INVENTORY_FILTERS.stockStatus, DEFAULT_INVENTORY_FILTERS.visibility],
         queryFn: () => getInventoryCards({ page: 1, pageSize: 100, ...DEFAULT_INVENTORY_FILTERS }),
-        staleTime: 1000 * 15,
+        staleTime: 1000 * 60 * 5,
       });
       return;
     }
@@ -954,9 +1297,15 @@ function AdminShell({ session, onLogout }) {
     if (nextSection === "home") {
       void HomeMerchandisingView.preload?.();
       void queryClient.prefetchQuery({
-        queryKey: ["cards", session.admin.id],
-        queryFn: getCards,
-        staleTime: 1000 * 30,
+        queryKey: ["home-cards", session.admin.id, homePage, HOME_PAGE_SIZE, deferredHomeSearch],
+        queryFn: () => getCards({
+          page: homePage,
+          pageSize: HOME_PAGE_SIZE,
+          mode: "stock",
+          visibility: "visible",
+          search: deferredHomeSearch,
+        }),
+        staleTime: 1000 * 60 * 5,
       });
       return;
     }
@@ -967,12 +1316,12 @@ function AdminShell({ session, onLogout }) {
         queryClient.prefetchQuery({
           queryKey: ["custom-categories", session.admin.id],
           queryFn: getCustomCategories,
-          staleTime: 1000 * 30,
+          staleTime: 1000 * 60 * 5,
         }),
         queryClient.prefetchQuery({
           queryKey: ["custom-products", session.admin.id],
           queryFn: getCustomProducts,
-          staleTime: 1000 * 30,
+          staleTime: 1000 * 60 * 5,
         }),
       ]);
       return;
@@ -980,125 +1329,237 @@ function AdminShell({ session, onLogout }) {
 
     if (nextSection === "analytics") {
       void AnalyticsView.preload?.();
+      void queryClient.prefetchQuery({
+        queryKey: ["dashboard", session.admin.id],
+        queryFn: getDashboard,
+        staleTime: 1000 * 60 * 5,
+      });
       return;
     }
 
     if (nextSection === "orders") {
       void OrdersView.preload?.();
       void queryClient.prefetchQuery({
-        queryKey: ["orders", session.admin.id],
-        queryFn: getOrders,
-        staleTime: 1000 * 15,
+        queryKey: ["orders", session.admin.id, ordersPage, deferredOrdersSearch, ordersFilters.status],
+        queryFn: () => getOrders({
+          page: ordersPage,
+          pageSize: 10,
+          search: deferredOrdersSearch,
+          status: ordersFilters.status,
+        }),
+        staleTime: 1000 * 60 * 3,
       });
       return;
     }
 
     if (nextSection === "whatsapp") {
       void WhatsappSettingsView.preload?.();
-      void queryClient.prefetchQuery({
-        queryKey: ["whatsapp-settings", session.admin.id],
-        queryFn: getWhatsappSettings,
-        staleTime: 1000 * 30,
-      });
+      void Promise.allSettled([
+        queryClient.prefetchQuery({
+          queryKey: ["whatsapp-settings", session.admin.id],
+          queryFn: getWhatsappSettings,
+          staleTime: 1000 * 60 * 5,
+        }),
+        queryClient.prefetchQuery({
+          queryKey: ["contact-requests", session.admin.id],
+          queryFn: getContactRequests,
+          staleTime: 1000 * 60 * 3,
+        }),
+      ]);
       return;
     }
 
     if (nextSection === "users") {
       void UsersView.preload?.();
       void queryClient.prefetchQuery({
-        queryKey: ["users", session.admin.id],
-        queryFn: getUsers,
-        staleTime: 1000 * 30,
+        queryKey: ["users", session.admin.id, usersPage, deferredUsersSearch, usersFilters.role],
+        queryFn: () => getUsers({
+          page: usersPage,
+          pageSize: 8,
+          search: deferredUsersSearch,
+          role: usersFilters.role,
+        }),
+        staleTime: 1000 * 60 * 5,
       });
     }
   };
 
-  const handleSectionChange = (nextSection) => {
+  const handleSectionChange = (nextSection, options) => {
     const flow = startAdminFlow("navigate-admin-section", {
       from: section,
       to: nextSection,
     });
     setIsMobileCompactMenuOpen(false);
+    preloadedSectionsRef.current.delete(nextSection);
     handleSectionIntent(nextSection);
     syncSectionPath(nextSection);
-    setSection(nextSection);
+    if (nextSection === "orders" && options?.status) {
+      setOrdersFilters((current) => ({ ...current, status: options.status }));
+      setOrdersPage(1);
+    }
+    startTransition(() => setSection(nextSection));
     flow.finish({ status: "ok" });
   };
 
+  const latestHandlersRef = useRef({});
+  latestHandlersRef.current.sectionChange = handleSectionChange;
+  latestHandlersRef.current.sectionIntent = handleSectionIntent;
+  const stableSectionChange = useCallback((key, options) => latestHandlersRef.current.sectionChange(key, options), []);
+  const stableSectionIntent = useCallback((key) => latestHandlersRef.current.sectionIntent(key), []);
+
   const dashboardQueryKey = ["dashboard", session.admin.id];
   const cardsQueryKey = ["cards", session.admin.id];
-  const ordersQueryKey = ["orders", session.admin.id];
-  const usersQueryKey = ["users", session.admin.id];
+  const homeCardsQueryPrefix = ["home-cards", session.admin.id];
+  const homeCardsQueryKey = ["home-cards", session.admin.id, homePage, HOME_PAGE_SIZE, deferredHomeSearch];
+  const ordersQueryKey = ["orders", session.admin.id, ordersPage, deferredOrdersSearch, ordersFilters.status];
+  const usersQueryKey = ["users", session.admin.id, usersPage, deferredUsersSearch, usersFilters.role];
   const whatsappSettingsQueryKey = ["whatsapp-settings", session.admin.id];
   const contactRequestsQueryKey = ["contact-requests", session.admin.id];
   const customCategoriesQueryKey = ["custom-categories", session.admin.id];
   const customProductsQueryKey = ["custom-products", session.admin.id];
   const inventoryCardsQueryKey = ["inventory-cards", session.admin.id, inventoryPage, inventoryFilters.search, inventoryFilters.rarity, inventoryFilters.cardType, inventoryFilters.stockStatus, inventoryFilters.visibility];
+  const adminCatalogSearchQueryKey = ["admin-card-search", session.admin.id, inventoryPage, inventoryFilters.search, inventoryFilters.rarity, inventoryFilters.cardType, inventoryFilters.stockStatus, inventoryFilters.visibility];
 
   const dashboardQuery = useQuery({
     queryKey: dashboardQueryKey,
     queryFn: getDashboard,
     staleTime: 1000 * 60 * 5,
     enabled: Boolean(sectionRequirements.dashboard),
-    ...getCachedQueryOptions(queryClient, dashboardQueryKey),
   });
   const cardsQuery = useQuery({
     queryKey: cardsQueryKey,
     queryFn: getCards,
     staleTime: 1000 * 60 * 5,
     enabled: Boolean(sectionRequirements.cards),
-    ...getCachedQueryOptions(queryClient, cardsQueryKey),
+  });
+  const homeCardsQuery = useQuery({
+    queryKey: homeCardsQueryKey,
+    queryFn: () => getCards({
+      page: homePage,
+      pageSize: HOME_PAGE_SIZE,
+      mode: "stock",
+      visibility: "visible",
+      search: deferredHomeSearch,
+    }),
+    placeholderData: (previousData) => previousData,
+    staleTime: 1000 * 30,
+    refetchOnReconnect: true,
+    enabled: Boolean(sectionRequirements.homeCards),
   });
   const inventoryCardsQuery = useQuery({
     queryKey: inventoryCardsQueryKey,
     queryFn: () => getInventoryCards({ page: inventoryPage, pageSize: 100, ...inventoryFilters }),
     placeholderData: (previousData) => previousData ?? queryClient.getQueryData(inventoryCardsQueryKey),
-    staleTime: 1000 * 60 * 3,
+    staleTime: 1000 * 60 * 5,
     refetchOnReconnect: true,
-    enabled: Boolean(sectionRequirements.inventoryCards),
-    ...getCachedQueryOptions(queryClient, inventoryCardsQueryKey),
+    enabled: Boolean(sectionRequirements.inventoryCards) && inventoryMode === "stock",
+  });
+  const adminCatalogSearchQuery = useQuery({
+    queryKey: adminCatalogSearchQueryKey,
+    queryFn: () => searchAdminCards({ page: inventoryPage, pageSize: 100, ...inventoryFilters }),
+    placeholderData: (previousData) => previousData,
+    staleTime: 1000 * 30,
+    refetchOnReconnect: true,
+    enabled: Boolean(sectionRequirements.inventoryCards) && inventoryMode === "all" && Boolean(inventoryFilters.search.trim()),
   });
   const ordersQuery = useQuery({
     queryKey: ordersQueryKey,
-    queryFn: getOrders,
+    queryFn: () => getOrders({
+      page: ordersPage,
+      pageSize: 10,
+      search: deferredOrdersSearch,
+      status: ordersFilters.status,
+    }),
+    placeholderData: (previousData) => previousData,
     staleTime: 1000 * 60 * 3,
     enabled: Boolean(sectionRequirements.orders),
-    ...getCachedQueryOptions(queryClient, ordersQueryKey),
   });
   const usersQuery = useQuery({
     queryKey: usersQueryKey,
-    queryFn: getUsers,
+    queryFn: () => getUsers({
+      page: usersPage,
+      pageSize: 8,
+      search: deferredUsersSearch,
+      role: usersFilters.role,
+    }),
+    placeholderData: (previousData) => previousData,
     staleTime: 1000 * 60 * 5,
     enabled: Boolean(sectionRequirements.users),
-    ...getCachedQueryOptions(queryClient, usersQueryKey),
   });
   const whatsappSettingsQuery = useQuery({
     queryKey: whatsappSettingsQueryKey,
     queryFn: getWhatsappSettings,
     staleTime: 1000 * 60 * 5,
     enabled: Boolean(sectionRequirements.whatsapp),
-    ...getCachedQueryOptions(queryClient, whatsappSettingsQueryKey),
   });
   const contactRequestsQuery = useQuery({
     queryKey: contactRequestsQueryKey,
     queryFn: getContactRequests,
     staleTime: 1000 * 60 * 3,
     enabled: Boolean(sectionRequirements.whatsapp),
-    ...getCachedQueryOptions(queryClient, contactRequestsQueryKey),
   });
   const customCategoriesQuery = useQuery({
     queryKey: customCategoriesQueryKey,
     queryFn: getCustomCategories,
     staleTime: 1000 * 60 * 5,
     enabled: Boolean(sectionRequirements.custom),
-    ...getCachedQueryOptions(queryClient, customCategoriesQueryKey),
   });
   const customProductsQuery = useQuery({
     queryKey: customProductsQueryKey,
     queryFn: getCustomProducts,
     staleTime: 1000 * 60 * 5,
     enabled: Boolean(sectionRequirements.custom),
-    ...getCachedQueryOptions(queryClient, customProductsQueryKey),
+  });
+
+  const addInventoryCardMutation = useMutation({
+    mutationFn: ({ cardId, quantity, expectedUpdatedAt }) => addCardToInventory(
+      createMutationPayload(
+        { cardId, quantity },
+        {
+          resourceType: "inventory",
+          action: "add",
+          resourceId: cardId,
+          expectedUpdatedAt,
+        }
+      )
+    ),
+    onMutate: async ({ cardId }) => {
+      setAddingInventoryCardId(cardId);
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: ["inventory-cards", session.admin.id] }),
+        queryClient.cancelQueries({ queryKey: ["admin-card-search", session.admin.id] }),
+      ]);
+    },
+    onError: (error, variables) => {
+      publishNotice("error", `Carta #${variables.cardId}: ${getReadableMutationError(error)}`);
+    },
+    onSuccess: (data, variables) => {
+      const updatedCard = data?.card;
+      if (updatedCard) {
+        queryClient.setQueriesData({ queryKey: ["cards", session.admin.id] }, (current) => updateCardsResponse(current, (card) => (card.id === variables.cardId ? applyCardUpdates(card, updatedCard) : card)));
+        queryClient.setQueriesData({ queryKey: homeCardsQueryPrefix }, (current) => updateCardsResponse(current, (card) => (card.id === variables.cardId ? applyCardUpdates(card, updatedCard) : card)));
+        queryClient.setQueriesData({ queryKey: ["inventory-cards", session.admin.id] }, (current) => updateCardsResponse(current, (card) => (card.id === variables.cardId ? applyCardUpdates(card, updatedCard) : card)));
+        queryClient.setQueriesData({ queryKey: ["admin-card-search", session.admin.id] }, (current) => updateCardsResponse(current, (card) => (card.id === variables.cardId ? applyCardUpdates(card, updatedCard) : card)));
+        mergeEntityCache(queryClient, getCardEntityQueryKey(variables.cardId), "card", updatedCard);
+      }
+
+      persistAdminQueryCacheNow();
+      publishNotice("success", `Se agregaron ${data?.addedQuantity || variables.quantity} unidades a la carta #${variables.cardId}.`);
+    },
+    onSettled: (_data, _error, variables) => {
+      setAddingInventoryCardId(null);
+      const tasks = [
+        queryClient.invalidateQueries({ queryKey: ["inventory-cards", session.admin.id], refetchType: "none" }),
+        queryClient.invalidateQueries({ queryKey: ["admin-card-search", session.admin.id], refetchType: "none" }),
+        queryClient.invalidateQueries({ queryKey: ["cards", session.admin.id], refetchType: "none" }),
+        queryClient.invalidateQueries({ queryKey: homeCardsQueryPrefix, refetchType: "none" }),
+        queryClient.invalidateQueries({ queryKey: dashboardQueryKey }),
+      ];
+      if (variables?.cardId) {
+        tasks.push(queryClient.invalidateQueries({ queryKey: getCardEntityQueryKey(variables.cardId), exact: true, refetchType: "active" }));
+      }
+      void Promise.allSettled(tasks);
+    },
   });
 
   const updateCardMutation = useMutation({
@@ -1113,22 +1574,35 @@ function AdminShell({ session, onLogout }) {
     ),
     onMutate: async ({ cardId, updates }) => {
       setSavingCardId(cardId);
+      const cardEntityQueryKey = getCardEntityQueryKey(cardId);
       await Promise.all([
-        queryClient.cancelQueries({ queryKey: cardsQueryKey }),
+        queryClient.cancelQueries({ queryKey: ["cards", session.admin.id] }),
+        queryClient.cancelQueries({ queryKey: homeCardsQueryPrefix }),
         queryClient.cancelQueries({ queryKey: ["inventory-cards", session.admin.id] }),
+        queryClient.cancelQueries({ queryKey: ["admin-card-search", session.admin.id] }),
+        queryClient.cancelQueries({ queryKey: cardEntityQueryKey, exact: true }),
       ]);
 
-      const previousCards = queryClient.getQueryData(cardsQueryKey);
+      const previousCards = queryClient.getQueriesData({ queryKey: ["cards", session.admin.id] });
+      const previousHomeCards = queryClient.getQueriesData({ queryKey: homeCardsQueryPrefix });
       const previousInventory = queryClient.getQueriesData({ queryKey: ["inventory-cards", session.admin.id] });
+      const previousAdminSearch = queryClient.getQueriesData({ queryKey: ["admin-card-search", session.admin.id] });
+      const previousCardDetail = queryClient.getQueryData(cardEntityQueryKey);
 
-      queryClient.setQueryData(cardsQueryKey, (current) => updateCardsResponse(current, (card) => (card.id === cardId ? applyCardUpdates(card, updates) : card)));
+      queryClient.setQueriesData({ queryKey: ["cards", session.admin.id] }, (current) => updateCardsResponse(current, (card) => (card.id === cardId ? applyCardUpdates(card, updates) : card)));
+      queryClient.setQueriesData({ queryKey: homeCardsQueryPrefix }, (current) => updateCardsResponse(current, (card) => (card.id === cardId ? applyCardUpdates(card, updates) : card)));
       queryClient.setQueriesData({ queryKey: ["inventory-cards", session.admin.id] }, (current) => updateCardsResponse(current, (card) => (card.id === cardId ? applyCardUpdates(card, updates) : card)));
+      queryClient.setQueriesData({ queryKey: ["admin-card-search", session.admin.id] }, (current) => updateCardsResponse(current, (card) => (card.id === cardId ? applyCardUpdates(card, updates) : card)));
+      mergeEntityCache(queryClient, cardEntityQueryKey, "card", updates, { createIfMissing: false });
 
-      return { previousCards, previousInventory };
+      return { previousCards, previousHomeCards, previousInventory, previousAdminSearch, previousCardDetail, cardEntityQueryKey };
     },
     onError: (error, variables, context) => {
-      queryClient.setQueryData(cardsQueryKey, context?.previousCards);
+      restoreQuerySnapshots(queryClient, context?.previousCards);
+      restoreQuerySnapshots(queryClient, context?.previousHomeCards);
       restoreQuerySnapshots(queryClient, context?.previousInventory);
+      restoreQuerySnapshots(queryClient, context?.previousAdminSearch);
+      restoreExactQuerySnapshot(queryClient, context?.cardEntityQueryKey || getCardEntityQueryKey(variables.cardId), context?.previousCardDetail);
       publishNotice("error", `Carta #${variables.cardId}: ${getReadableMutationError(error)}`);
     },
     onSuccess: (data, variables) => {
@@ -1137,14 +1611,27 @@ function AdminShell({ session, onLogout }) {
         return;
       }
 
-      queryClient.setQueryData(cardsQueryKey, (current) => updateCardsResponse(current, (card) => (card.id === variables.cardId ? applyCardUpdates(card, updatedCard) : card)));
+      queryClient.setQueriesData({ queryKey: ["cards", session.admin.id] }, (current) => updateCardsResponse(current, (card) => (card.id === variables.cardId ? applyCardUpdates(card, updatedCard) : card)));
+      queryClient.setQueriesData({ queryKey: homeCardsQueryPrefix }, (current) => updateCardsResponse(current, (card) => (card.id === variables.cardId ? applyCardUpdates(card, updatedCard) : card)));
       queryClient.setQueriesData({ queryKey: ["inventory-cards", session.admin.id] }, (current) => updateCardsResponse(current, (card) => (card.id === variables.cardId ? applyCardUpdates(card, updatedCard) : card)));
+      queryClient.setQueriesData({ queryKey: ["admin-card-search", session.admin.id] }, (current) => updateCardsResponse(current, (card) => (card.id === variables.cardId ? applyCardUpdates(card, updatedCard) : card)));
+      mergeEntityCache(queryClient, getCardEntityQueryKey(variables.cardId), "card", updatedCard);
       persistAdminQueryCacheNow();
       publishNotice("success", `Carta #${variables.cardId} actualizada.`);
     },
-    onSettled: () => {
+    onSettled: (_data, _error, variables) => {
       setSavingCardId(null);
-      void queryClient.invalidateQueries({ queryKey: dashboardQueryKey });
+      const tasks = [
+        queryClient.invalidateQueries({ queryKey: ["cards", session.admin.id], refetchType: "none" }),
+        queryClient.invalidateQueries({ queryKey: homeCardsQueryPrefix, refetchType: "none" }),
+        queryClient.invalidateQueries({ queryKey: ["inventory-cards", session.admin.id], refetchType: "none" }),
+        queryClient.invalidateQueries({ queryKey: ["admin-card-search", session.admin.id], refetchType: "none" }),
+        queryClient.invalidateQueries({ queryKey: dashboardQueryKey }),
+      ];
+      if (variables?.cardId) {
+        tasks.push(queryClient.invalidateQueries({ queryKey: getCardEntityQueryKey(variables.cardId), exact: true, refetchType: "active" }));
+      }
+      void Promise.allSettled(tasks);
     },
   });
 
@@ -1152,7 +1639,7 @@ function AdminShell({ session, onLogout }) {
     mutationFn: ({ selection, updates }) => updateCardsBulk(createSelectionPayload(
       selection,
       "bulk-cards",
-      buildCardSelectionResources(selection, [cards, inventoryCardsQuery.data?.cards])
+      buildCardSelectionResources(selection, [homeCardsQuery.data?.cards, cards, inventoryCardsQuery.data?.cards, adminCatalogSearchQuery.data?.cards])
     ), {
       ...updates,
       mutation_id: generateClientMutationId("bulk-cards-update"),
@@ -1160,31 +1647,54 @@ function AdminShell({ session, onLogout }) {
     onMutate: async ({ selection, updates }) => {
       setIsBulkSaving(true);
       await Promise.all([
-        queryClient.cancelQueries({ queryKey: cardsQueryKey }),
+        queryClient.cancelQueries({ queryKey: ["cards", session.admin.id] }),
+        queryClient.cancelQueries({ queryKey: homeCardsQueryPrefix }),
         queryClient.cancelQueries({ queryKey: ["inventory-cards", session.admin.id] }),
+        queryClient.cancelQueries({ queryKey: ["admin-card-search", session.admin.id] }),
       ]);
 
       const selectedIds = Array.isArray(selection) ? selection : Array.isArray(selection?.ids) ? selection.ids : [];
       const idsToUpdate = new Set(selectedIds);
-      const previousCards = queryClient.getQueryData(cardsQueryKey);
+      const previousCards = queryClient.getQueriesData({ queryKey: ["cards", session.admin.id] });
+      const previousHomeCards = queryClient.getQueriesData({ queryKey: homeCardsQueryPrefix });
       const previousInventory = queryClient.getQueriesData({ queryKey: ["inventory-cards", session.admin.id] });
+      const previousAdminSearch = queryClient.getQueriesData({ queryKey: ["admin-card-search", session.admin.id] });
 
       if (idsToUpdate.size > 0) {
-        queryClient.setQueryData(cardsQueryKey, (current) => updateCardsResponse(current, (card) => (idsToUpdate.has(card.id) ? applyCardUpdates(card, updates) : card)));
+        queryClient.setQueriesData({ queryKey: ["cards", session.admin.id] }, (current) => updateCardsResponse(current, (card) => (idsToUpdate.has(card.id) ? applyCardUpdates(card, updates) : card)));
+        queryClient.setQueriesData({ queryKey: homeCardsQueryPrefix }, (current) => updateCardsResponse(current, (card) => (idsToUpdate.has(card.id) ? applyCardUpdates(card, updates) : card)));
         queryClient.setQueriesData({ queryKey: ["inventory-cards", session.admin.id] }, (current) => updateCardsResponse(current, (card) => (idsToUpdate.has(card.id) ? applyCardUpdates(card, updates) : card)));
+        queryClient.setQueriesData({ queryKey: ["admin-card-search", session.admin.id] }, (current) => updateCardsResponse(current, (card) => (idsToUpdate.has(card.id) ? applyCardUpdates(card, updates) : card)));
       }
 
-      return { previousCards, previousInventory };
+      return { previousCards, previousHomeCards, previousInventory, previousAdminSearch };
     },
     onError: (error, _variables, context) => {
-      queryClient.setQueryData(cardsQueryKey, context?.previousCards);
+      restoreQuerySnapshots(queryClient, context?.previousCards);
+      restoreQuerySnapshots(queryClient, context?.previousHomeCards);
       restoreQuerySnapshots(queryClient, context?.previousInventory);
+      restoreQuerySnapshots(queryClient, context?.previousAdminSearch);
       publishNotice("error", getReadableMutationError(error));
     },
     onSuccess: (data) => {
       const successCount = Number(data?.success?.length || 0);
       const failedCount = Number(data?.failed?.length || 0);
       const conflictCount = Number(data?.conflicts?.length || 0);
+
+      // Reconcile cache with server-returned card data
+      const updatedCards = data?.updatedCards;
+      if (Array.isArray(updatedCards) && updatedCards.length > 0) {
+        const serverCardsById = new Map(updatedCards.map((c) => [c.id, c]));
+        const reconcile = (card) => {
+          const serverCard = serverCardsById.get(card.id);
+          return serverCard ? applyCardUpdates(card, serverCard) : card;
+        };
+        queryClient.setQueriesData({ queryKey: ["cards", session.admin.id] }, (current) => updateCardsResponse(current, reconcile));
+        queryClient.setQueriesData({ queryKey: homeCardsQueryPrefix }, (current) => updateCardsResponse(current, reconcile));
+        queryClient.setQueriesData({ queryKey: ["inventory-cards", session.admin.id] }, (current) => updateCardsResponse(current, reconcile));
+        queryClient.setQueriesData({ queryKey: ["admin-card-search", session.admin.id] }, (current) => updateCardsResponse(current, reconcile));
+        persistAdminQueryCacheNow();
+      }
 
       if (failedCount || conflictCount) {
         publishNotice("info", `Inventario actualizado parcialmente: ${successCount} ok, ${conflictCount} en conflicto, ${failedCount} fallidas.`);
@@ -1198,8 +1708,10 @@ function AdminShell({ session, onLogout }) {
     onSettled: () => {
       setIsBulkSaving(false);
       void Promise.allSettled([
-        queryClient.invalidateQueries({ queryKey: cardsQueryKey }),
-        queryClient.invalidateQueries({ queryKey: ["inventory-cards", session.admin.id] }),
+        queryClient.invalidateQueries({ queryKey: ["cards", session.admin.id], refetchType: "none" }),
+        queryClient.invalidateQueries({ queryKey: homeCardsQueryPrefix, refetchType: "none" }),
+        queryClient.invalidateQueries({ queryKey: ["inventory-cards", session.admin.id], refetchType: "none" }),
+        queryClient.invalidateQueries({ queryKey: ["admin-card-search", session.admin.id], refetchType: "none" }),
         queryClient.invalidateQueries({ queryKey: dashboardQueryKey }),
       ]);
     },
@@ -1209,30 +1721,38 @@ function AdminShell({ session, onLogout }) {
     mutationFn: (selection) => deleteCards(createSelectionPayload(
       selection,
       "delete-cards",
-      buildCardSelectionResources(selection, [cards, inventoryCardsQuery.data?.cards])
+      buildCardSelectionResources(selection, [homeCardsQuery.data?.cards, cards, inventoryCardsQuery.data?.cards, adminCatalogSearchQuery.data?.cards])
     )),
     onMutate: async (selection) => {
       setIsDeletingCards(true);
       await Promise.all([
-        queryClient.cancelQueries({ queryKey: cardsQueryKey }),
+        queryClient.cancelQueries({ queryKey: ["cards", session.admin.id] }),
+        queryClient.cancelQueries({ queryKey: homeCardsQueryPrefix }),
         queryClient.cancelQueries({ queryKey: ["inventory-cards", session.admin.id] }),
+        queryClient.cancelQueries({ queryKey: ["admin-card-search", session.admin.id] }),
       ]);
 
       const selectedIds = Array.isArray(selection) ? selection : Array.isArray(selection?.ids) ? selection.ids : [];
       const idsToRemove = new Set(selectedIds);
-      const previousCards = queryClient.getQueryData(cardsQueryKey);
+      const previousCards = queryClient.getQueriesData({ queryKey: ["cards", session.admin.id] });
+      const previousHomeCards = queryClient.getQueriesData({ queryKey: homeCardsQueryPrefix });
       const previousInventory = queryClient.getQueriesData({ queryKey: ["inventory-cards", session.admin.id] });
+      const previousAdminSearch = queryClient.getQueriesData({ queryKey: ["admin-card-search", session.admin.id] });
 
       if (idsToRemove.size > 0) {
-        queryClient.setQueryData(cardsQueryKey, (current) => removeCardsFromResponse(current, idsToRemove));
+        queryClient.setQueriesData({ queryKey: ["cards", session.admin.id] }, (current) => removeCardsFromResponse(current, idsToRemove));
+        queryClient.setQueriesData({ queryKey: homeCardsQueryPrefix }, (current) => removeCardsFromResponse(current, idsToRemove));
         queryClient.setQueriesData({ queryKey: ["inventory-cards", session.admin.id] }, (current) => removeCardsFromResponse(current, idsToRemove));
+        queryClient.setQueriesData({ queryKey: ["admin-card-search", session.admin.id] }, (current) => removeCardsFromResponse(current, idsToRemove));
       }
 
-      return { previousCards, previousInventory };
+      return { previousCards, previousHomeCards, previousInventory, previousAdminSearch };
     },
     onError: (error, _variables, context) => {
-      queryClient.setQueryData(cardsQueryKey, context?.previousCards);
+      restoreQuerySnapshots(queryClient, context?.previousCards);
+      restoreQuerySnapshots(queryClient, context?.previousHomeCards);
       restoreQuerySnapshots(queryClient, context?.previousInventory);
+      restoreQuerySnapshots(queryClient, context?.previousAdminSearch);
       publishNotice("error", getReadableMutationError(error));
     },
     onSuccess: (data) => {
@@ -1252,7 +1772,9 @@ function AdminShell({ session, onLogout }) {
       setIsDeletingCards(false);
       void Promise.allSettled([
         queryClient.invalidateQueries({ queryKey: ["inventory-cards", session.admin.id] }),
-        queryClient.invalidateQueries({ queryKey: cardsQueryKey }),
+        queryClient.invalidateQueries({ queryKey: ["admin-card-search", session.admin.id] }),
+        queryClient.invalidateQueries({ queryKey: ["cards", session.admin.id] }),
+        queryClient.invalidateQueries({ queryKey: homeCardsQueryPrefix }),
         queryClient.invalidateQueries({ queryKey: dashboardQueryKey }),
       ]);
     },
@@ -1273,28 +1795,53 @@ function AdminShell({ session, onLogout }) {
     ),
     onMutate: async ({ orderId, status }) => {
       setUpdatingOrderId(orderId);
-      await queryClient.cancelQueries({ queryKey: ordersQueryKey });
+      const orderEntityQueryKey = getOrderEntityQueryKey(orderId);
+      const previousOrder = ordersQuery.data?.orders?.find((order) => order.id === orderId) || null;
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: ["orders", session.admin.id] }),
+        queryClient.cancelQueries({ queryKey: orderEntityQueryKey, exact: true }),
+      ]);
 
-      const previousOrders = queryClient.getQueryData(ordersQueryKey);
-      queryClient.setQueryData(ordersQueryKey, (current) => updateOrdersResponse(current, (order) => (order.id === orderId ? { ...order, status } : order)));
+      const previousOrders = queryClient.getQueriesData({ queryKey: ["orders", session.admin.id] });
+      const previousOrderDetail = queryClient.getQueryData(orderEntityQueryKey);
+      for (const [queryKey] of previousOrders) {
+        queryClient.setQueryData(queryKey, (current) => applyOrderStatusToResponse(current, queryKey, orderId, status, previousOrder?.status));
+      }
+      mergeEntityCache(queryClient, orderEntityQueryKey, "order", { status }, { createIfMissing: false });
 
-      return { previousOrders };
+      return { previousOrders, previousOrderDetail, orderEntityQueryKey };
     },
     onError: (error, variables, context) => {
-      queryClient.setQueryData(ordersQueryKey, context?.previousOrders);
+      restoreQuerySnapshots(queryClient, context?.previousOrders);
+      restoreExactQuerySnapshot(queryClient, context?.orderEntityQueryKey || getOrderEntityQueryKey(variables.orderId), context?.previousOrderDetail);
       publishNotice("error", `Pedido #${variables.orderId}: ${getReadableMutationError(error)}`);
     },
-    onSuccess: (_data, variables) => {
+    onSuccess: (data, variables) => {
+      const updatedOrder = data?.order;
+      if (updatedOrder) {
+        for (const [queryKey] of queryClient.getQueriesData({ queryKey: ["orders", session.admin.id] })) {
+          queryClient.setQueryData(queryKey, (current) => mergeOrderIntoResponse(current, queryKey, variables.orderId, updatedOrder));
+        }
+        mergeEntityCache(queryClient, getOrderEntityQueryKey(variables.orderId), "order", updatedOrder);
+      }
+
       pulseSuccess(setCompletedOrderActionKey, `${variables.orderId}:${variables.status}`);
       publishNotice("success", `Pedido #${variables.orderId} actualizado a ${variables.status}.`);
     },
-    onSettled: () => {
+    onSettled: (_data, _error, variables) => {
       setUpdatingOrderId(null);
-      void Promise.allSettled([
-        queryClient.invalidateQueries({ queryKey: ordersQueryKey }),
+      const tasks = [
+        queryClient.invalidateQueries({ queryKey: ["orders", session.admin.id], refetchType: "none" }),
+        queryClient.invalidateQueries({ queryKey: cardsQueryKey, refetchType: "none" }),
+        queryClient.invalidateQueries({ queryKey: homeCardsQueryPrefix, refetchType: "none" }),
+        queryClient.invalidateQueries({ queryKey: ["inventory-cards", session.admin.id], refetchType: "none" }),
+        queryClient.invalidateQueries({ queryKey: ["admin-card-search", session.admin.id], refetchType: "none" }),
         queryClient.invalidateQueries({ queryKey: dashboardQueryKey }),
-        queryClient.invalidateQueries({ queryKey: cardsQueryKey }),
-      ]);
+      ];
+      if (variables?.orderId) {
+        tasks.push(queryClient.invalidateQueries({ queryKey: getOrderEntityQueryKey(variables.orderId), exact: true, refetchType: "active" }));
+      }
+      void Promise.allSettled(tasks);
     },
   });
 
@@ -1310,24 +1857,43 @@ function AdminShell({ session, onLogout }) {
     ),
     onMutate: async ({ orderId }) => {
       setDeletingOrderId(orderId);
-      await queryClient.cancelQueries({ queryKey: ordersQueryKey });
+      const orderEntityQueryKey = getOrderEntityQueryKey(orderId);
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: ["orders", session.admin.id] }),
+        queryClient.cancelQueries({ queryKey: orderEntityQueryKey, exact: true }),
+      ]);
 
-      const previousOrders = queryClient.getQueryData(ordersQueryKey);
-      queryClient.setQueryData(ordersQueryKey, (current) => removeOrdersFromResponse(current, (order) => order.id === orderId));
+      const previousOrders = queryClient.getQueriesData({ queryKey: ["orders", session.admin.id] });
+      const previousOrderDetail = queryClient.getQueryData(orderEntityQueryKey);
+      for (const [queryKey] of previousOrders) {
+        queryClient.setQueryData(queryKey, (current) => removeOrdersFromResponse(current, (order) => order.id === orderId));
+      }
+      queryClient.removeQueries({ queryKey: orderEntityQueryKey, exact: true });
 
-      return { previousOrders };
+      return { previousOrders, previousOrderDetail, orderEntityQueryKey };
     },
     onError: (error, variables, context) => {
-      queryClient.setQueryData(ordersQueryKey, context?.previousOrders);
+      restoreQuerySnapshots(queryClient, context?.previousOrders);
+      restoreExactQuerySnapshot(queryClient, context?.orderEntityQueryKey || getOrderEntityQueryKey(variables.orderId), context?.previousOrderDetail);
       publishNotice("error", `Pedido #${variables.orderId}: ${getReadableMutationError(error)}`);
     },
-    onSettled: () => {
+    onSuccess: (_data, variables) => {
+      queryClient.removeQueries({ queryKey: getOrderEntityQueryKey(variables.orderId), exact: true });
+    },
+    onSettled: (_data, _error, variables) => {
       setDeletingOrderId(null);
-      void Promise.allSettled([
-        queryClient.invalidateQueries({ queryKey: ordersQueryKey }),
+      const tasks = [
+        queryClient.invalidateQueries({ queryKey: ["orders", session.admin.id], refetchType: "none" }),
+        queryClient.invalidateQueries({ queryKey: cardsQueryKey, refetchType: "none" }),
+        queryClient.invalidateQueries({ queryKey: homeCardsQueryPrefix, refetchType: "none" }),
+        queryClient.invalidateQueries({ queryKey: ["inventory-cards", session.admin.id], refetchType: "none" }),
+        queryClient.invalidateQueries({ queryKey: ["admin-card-search", session.admin.id], refetchType: "none" }),
         queryClient.invalidateQueries({ queryKey: dashboardQueryKey }),
-        queryClient.invalidateQueries({ queryKey: cardsQueryKey }),
-      ]);
+      ];
+      if (variables?.orderId) {
+        tasks.push(queryClient.invalidateQueries({ queryKey: getOrderEntityQueryKey(variables.orderId), exact: true, refetchType: "active" }));
+      }
+      void Promise.allSettled(tasks);
     },
   });
 
@@ -1352,6 +1918,7 @@ function AdminShell({ session, onLogout }) {
         queryClient.invalidateQueries({ queryKey: ordersQueryKey }),
         queryClient.invalidateQueries({ queryKey: dashboardQueryKey }),
         queryClient.invalidateQueries({ queryKey: cardsQueryKey }),
+        queryClient.invalidateQueries({ queryKey: homeCardsQueryPrefix }),
       ]);
     },
   });
@@ -1374,31 +1941,51 @@ function AdminShell({ session, onLogout }) {
     ),
     onMutate: async ({ orderId, payload }) => {
       setSavingShippingOrderId(orderId);
-      await queryClient.cancelQueries({ queryKey: ordersQueryKey });
+      const orderEntityQueryKey = getOrderEntityQueryKey(orderId);
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: ["orders", session.admin.id] }),
+        queryClient.cancelQueries({ queryKey: orderEntityQueryKey, exact: true }),
+      ]);
 
-      const previousOrders = queryClient.getQueryData(ordersQueryKey);
-      queryClient.setQueryData(ordersQueryKey, (current) => updateOrdersResponse(current, (order) => (order.id === orderId ? {
-        ...order,
+      const previousOrders = queryClient.getQueriesData({ queryKey: ["orders", session.admin.id] });
+      const previousOrderDetail = queryClient.getQueryData(orderEntityQueryKey);
+      for (const [queryKey] of previousOrders) {
+        queryClient.setQueryData(queryKey, (current) => mergeOrderIntoResponse(current, queryKey, orderId, {
+          tracking_code: payload.tracking_code,
+          tracking_visible_to_user: payload.tracking_visible_to_user,
+        }));
+      }
+      mergeEntityCache(queryClient, orderEntityQueryKey, "order", {
         tracking_code: payload.tracking_code,
         tracking_visible_to_user: payload.tracking_visible_to_user,
-      } : order)));
+      }, { createIfMissing: false });
 
-      return { previousOrders };
+      return { previousOrders, previousOrderDetail, orderEntityQueryKey };
     },
     onError: (error, variables, context) => {
-      queryClient.setQueryData(ordersQueryKey, context?.previousOrders);
+      restoreQuerySnapshots(queryClient, context?.previousOrders);
+      restoreExactQuerySnapshot(queryClient, context?.orderEntityQueryKey || getOrderEntityQueryKey(variables.orderId), context?.previousOrderDetail);
       publishNotice("error", `Tracking de pedido #${variables.orderId}: ${getReadableMutationError(error)}`);
     },
-    onSuccess: (_data, variables) => {
+    onSuccess: (data, variables) => {
+      const updatedOrder = data?.order;
+      if (updatedOrder) {
+        for (const [queryKey] of queryClient.getQueriesData({ queryKey: ["orders", session.admin.id] })) {
+          queryClient.setQueryData(queryKey, (current) => mergeOrderIntoResponse(current, queryKey, variables.orderId, updatedOrder));
+        }
+        mergeEntityCache(queryClient, getOrderEntityQueryKey(variables.orderId), "order", updatedOrder);
+      }
+
       pulseSuccess(setCompletedShippingOrderId, variables.orderId);
       publishNotice("success", `Tracking guardado para pedido #${variables.orderId}.`);
     },
-    onSettled: () => {
+    onSettled: (_data, _error, variables) => {
       setSavingShippingOrderId(null);
-      void Promise.allSettled([
-        queryClient.invalidateQueries({ queryKey: ordersQueryKey }),
-        queryClient.invalidateQueries({ queryKey: dashboardQueryKey }),
-      ]);
+      const tasks = [];
+      if (variables?.orderId) {
+        tasks.push(queryClient.invalidateQueries({ queryKey: getOrderEntityQueryKey(variables.orderId), exact: true, refetchType: "active" }));
+      }
+      void Promise.allSettled(tasks);
     },
   });
 
@@ -1420,15 +2007,25 @@ function AdminShell({ session, onLogout }) {
     ),
     onMutate: async ({ userId, role }) => {
       setUpdatingUserId(userId);
-      await queryClient.cancelQueries({ queryKey: usersQueryKey });
+      const userEntityQueryKey = getUserEntityQueryKey(userId);
+      const previousUser = usersQuery.data?.users?.find((user) => user.id === userId) || null;
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: ["users", session.admin.id] }),
+        queryClient.cancelQueries({ queryKey: userEntityQueryKey, exact: true }),
+      ]);
 
-      const previousUsers = queryClient.getQueryData(usersQueryKey);
-      queryClient.setQueryData(usersQueryKey, (current) => updateUsersResponse(current, (user) => (user.id === userId ? { ...user, role } : user)));
+      const previousUsers = queryClient.getQueriesData({ queryKey: ["users", session.admin.id] });
+      const previousUserDetail = queryClient.getQueryData(userEntityQueryKey);
+      for (const [queryKey] of previousUsers) {
+        queryClient.setQueryData(queryKey, (current) => applyUserRoleToResponse(current, queryKey, userId, role, previousUser?.role));
+      }
+      mergeEntityCache(queryClient, userEntityQueryKey, "user", { role }, { createIfMissing: false });
 
-      return { previousUsers };
+      return { previousUsers, previousUserDetail, userEntityQueryKey };
     },
     onError: (error, variables, context) => {
-      queryClient.setQueryData(usersQueryKey, context?.previousUsers);
+      restoreQuerySnapshots(queryClient, context?.previousUsers);
+      restoreExactQuerySnapshot(queryClient, context?.userEntityQueryKey || getUserEntityQueryKey(variables.userId), context?.previousUserDetail);
 
       if (!variables.overrideConflict && isConflictError(error) && error?.details?.can_override_conflict) {
         const shouldOverride = window.confirm(`El usuario #${variables.userId} cambió en otra sesión. ¿Querés forzar el rol ${userRoleLabel[variables.role] || variables.role} con el estado actual?`);
@@ -1445,15 +2042,27 @@ function AdminShell({ session, onLogout }) {
 
       publishNotice("error", `Usuario #${variables.userId}: ${getReadableMutationError(error)}`);
     },
-    onSuccess: (_data, variables) => {
+    onSuccess: (data, variables) => {
+      const updatedUser = data?.user;
+      if (updatedUser) {
+        for (const [queryKey] of queryClient.getQueriesData({ queryKey: ["users", session.admin.id] })) {
+          queryClient.setQueryData(queryKey, (current) => mergeUserIntoResponse(current, queryKey, variables.userId, updatedUser));
+        }
+        mergeEntityCache(queryClient, getUserEntityQueryKey(variables.userId), "user", updatedUser);
+      }
+
       publishNotice("success", `Rol actualizado para usuario #${variables.userId}.`);
     },
-    onSettled: () => {
+    onSettled: (_data, _error, variables) => {
       setUpdatingUserId(null);
-      void Promise.allSettled([
-        queryClient.invalidateQueries({ queryKey: usersQueryKey }),
+      const tasks = [
+        queryClient.invalidateQueries({ queryKey: ["users", session.admin.id], refetchType: "none" }),
         queryClient.invalidateQueries({ queryKey: dashboardQueryKey }),
-      ]);
+      ];
+      if (variables?.userId) {
+        tasks.push(queryClient.invalidateQueries({ queryKey: getUserEntityQueryKey(variables.userId), exact: true, refetchType: "active" }));
+      }
+      void Promise.allSettled(tasks);
     },
   });
 
@@ -1503,16 +2112,20 @@ function AdminShell({ session, onLogout }) {
       await queryClient.cancelQueries({ queryKey: contactRequestsQueryKey });
 
       const previousContactRequests = queryClient.getQueryData(contactRequestsQueryKey);
-      queryClient.setQueryData(contactRequestsQueryKey, (current) => updateContactRequestsResponse(current, (contactRequest) => (
-        contactRequest.id === contactRequestId
-          ? {
-              ...contactRequest,
-              ...(payload.status ? { status: String(payload.status).toLowerCase() } : {}),
-              ...(payload.admin_notes !== undefined ? { admin_notes: payload.admin_notes } : {}),
-              ...(payload.response_message !== undefined ? { response_message: payload.response_message } : {}),
-            }
-          : contactRequest
-      )));
+      if (String(payload.status || "").toLowerCase() === "archived") {
+        queryClient.setQueryData(contactRequestsQueryKey, (current) => removeContactRequestsFromResponse(current, (contactRequest) => contactRequest.id === contactRequestId));
+      } else {
+        queryClient.setQueryData(contactRequestsQueryKey, (current) => updateContactRequestsResponse(current, (contactRequest) => (
+          contactRequest.id === contactRequestId
+            ? {
+                ...contactRequest,
+                ...(payload.status ? { status: String(payload.status).toLowerCase() } : {}),
+                ...(payload.admin_notes !== undefined ? { admin_notes: payload.admin_notes } : {}),
+                ...(payload.response_message !== undefined ? { response_message: payload.response_message } : {}),
+              }
+            : contactRequest
+        )));
+      }
 
       return { previousContactRequests };
     },
@@ -1521,7 +2134,8 @@ function AdminShell({ session, onLogout }) {
       publishNotice("error", getReadableMutationError(error));
     },
     onSuccess: async (_data, variables) => {
-      publishNotice("success", `Consulta #${variables.contactRequestId} actualizada.`);
+      const wasArchived = String(variables.status || "").toLowerCase() === "archived";
+      publishNotice("success", wasArchived ? `Consulta #${variables.contactRequestId} archivada y removida.` : `Consulta #${variables.contactRequestId} actualizada.`);
       await queryClient.invalidateQueries({ queryKey: ["contact-requests", session.admin.id] });
     },
   });
@@ -1542,7 +2156,9 @@ function AdminShell({ session, onLogout }) {
       setInventoryPage(1);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["inventory-cards", session.admin.id] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-card-search", session.admin.id] }),
         queryClient.invalidateQueries({ queryKey: ["cards", session.admin.id] }),
+        queryClient.invalidateQueries({ queryKey: homeCardsQueryPrefix }),
         queryClient.invalidateQueries({ queryKey: ["dashboard", session.admin.id] }),
       ]);
     },
@@ -1590,93 +2206,121 @@ function AdminShell({ session, onLogout }) {
     },
   });
 
-  if (section === "dashboard" && (dashboardQuery.isLoading && !dashboardQuery.data || ordersQuery.isLoading && !ordersQuery.data || usersQuery.isLoading && !usersQuery.data || cardsQuery.isLoading && !cardsQuery.data)) {
-    return <AdminLoadingShell />;
-  }
+  const hasDashboardData = Boolean(dashboardQuery.data);
+  useEffect(() => {
+    if (!hasDashboardData) {
+      return;
+    }
 
-  if (section === "dashboard" && ((dashboardQuery.error && !dashboardQuery.data) || (ordersQuery.error && !ordersQuery.data) || (usersQuery.error && !usersQuery.data) || (cardsQuery.error && !cardsQuery.data))) {
-    return (
-      <div className="flex min-h-screen items-center justify-center px-6">
-        <div className="glass rounded-3xl border border-red-500/30 p-8 text-center">
-          <p className="text-lg font-semibold text-red-200">{dashboardQuery.error?.message || ordersQuery.error?.message || usersQuery.error?.message || cardsQuery.error?.message}</p>
-        </div>
-      </div>
-    );
-  }
+    markDataReady();
+    requestAnimationFrame(() => reportBootMetrics());
+  }, [hasDashboardData]);
 
-  const dashboard = dashboardQuery.data || {
-    metrics: {
-      totalRevenue: 0,
-      totalOrders: 0,
-      totalProducts: 0,
-      totalCustomers: 0,
-      activeStaffCount: 0,
-      avgOrderValue: 0,
-      pendingPaymentCount: 0,
-      lowStockCount: "--",
-      outOfStockCount: "--",
-    },
-    analytics: {
-      statuses: {},
-      zones: [],
-      daily: [],
-      usersByDay: [],
-    },
-    recentOrders: [],
-    topSellingCards: [],
-    topCustomers: [],
-    recentUsers: [],
+  const dashboard = dashboardQuery.data || EMPTY_DASHBOARD;
+  const dashboardRecentOrders = dashboard.recentOrders || EMPTY_ARRAY;
+  const cards = cardsQuery.data?.cards || EMPTY_ARRAY;
+  const homePageData = homeCardsQuery.data || {
+    cards: [],
+    total: 0,
+    page: homePage,
+    pageSize: HOME_PAGE_SIZE,
+    totalPages: 1,
   };
-  const cards = cardsQuery.data?.cards || [];
-  const orders = ordersQuery.data?.orders || [];
-  const users = usersQuery.data?.users || [];
+  const homeCards = homePageData.cards || EMPTY_ARRAY;
+  const homeIsLoading = homeCardsQuery.isLoading && !homeCardsQuery.data;
+  const homeError = homeCardsQuery.error;
+  const homeIsRefreshing = homeCardsQuery.isFetching && !homeCardsQuery.isLoading;
+  const inventorySearchEnabled = inventoryMode === "all" && Boolean(inventoryFilters.search.trim());
+  const inventoryPageData = inventoryMode === "all"
+    ? (adminCatalogSearchQuery.data || {
+        cards: [],
+        total: 0,
+        page: inventoryPage,
+        pageSize: 100,
+        totalPages: inventorySearchEnabled ? 1 : 0,
+        filters: { rarities: [], cardTypes: [] },
+      })
+    : inventoryCardsQuery.data;
+  const inventoryIsLoading = inventoryMode === "all"
+    ? inventorySearchEnabled && adminCatalogSearchQuery.isLoading && !adminCatalogSearchQuery.data
+    : inventoryCardsQuery.isLoading && !inventoryCardsQuery.data;
+  const inventoryError = inventoryMode === "all" ? adminCatalogSearchQuery.error : inventoryCardsQuery.error;
+  const inventoryIsRefreshing = inventoryMode === "all"
+    ? adminCatalogSearchQuery.isFetching && !adminCatalogSearchQuery.isLoading
+    : inventoryCardsQuery.isFetching && !inventoryCardsQuery.isLoading;
+  const orders = ordersQuery.data?.orders || EMPTY_ARRAY;
+  const ordersSummary = ordersQuery.data?.summary || EMPTY_ORDERS_SUMMARY;
+  const ordersPagination = useMemo(() => ordersQuery.data?.pagination || { page: ordersPage, totalPages: 1 }, [ordersQuery.data?.pagination, ordersPage]);
+  const users = usersQuery.data?.users || EMPTY_ARRAY;
+  const usersSummary = usersQuery.data?.summary || EMPTY_USERS_SUMMARY;
+  const usersPagination = useMemo(() => usersQuery.data?.pagination || { page: usersPage, totalPages: 1 }, [usersQuery.data?.pagination, usersPage]);
   const whatsappSettings = whatsappSettingsQuery.data?.settings || null;
-  const contactRequests = contactRequestsQuery.data?.contact_requests || [];
+  const contactRequests = contactRequestsQuery.data?.contact_requests || EMPTY_ARRAY;
   const contactRequestsSummary = contactRequestsQuery.data?.summary || null;
-  const customCategories = customCategoriesQuery.data?.categories || [];
-  const customCategoryTree = customCategoriesQuery.data?.tree || [];
-  const customProducts = customProductsQuery.data?.products || [];
+  const customCategories = customCategoriesQuery.data?.categories || EMPTY_ARRAY;
+  const customCategoryTree = customCategoriesQuery.data?.tree || EMPTY_ARRAY;
+  const customProducts = customProductsQuery.data?.products || EMPTY_ARRAY;
   const isAdmin = session.admin.role === "ADMIN";
   const currentSectionMeta = SECTION_META[section] || SECTION_META.dashboard;
   const currentSectionLabel = sections.find((entry) => entry.key === section)?.label || currentSectionMeta.title;
   const renderSection = () => {
     if (section === "dashboard") {
+      if (dashboardQuery.isLoading && !dashboardQuery.data) {
+        return <SectionLoadingPanel />;
+      }
+
+      if (dashboardQuery.error && !dashboardQuery.data) {
+        return <SectionErrorPanel message={dashboardQuery.error?.message} />;
+      }
+
       return (
-        <DashboardView
-          dashboard={dashboard}
-          orders={orders}
-          users={users}
-          cards={cards}
-          admin={session.admin}
-          canCancelOrders={isAdmin}
-          updatingOrderId={updatingOrderId}
-          completedOrderActionKey={completedOrderActionKey}
-          onNavigateSection={handleSectionChange}
-          onNavigateSectionIntent={handleSectionIntent}
-          onStatusChange={(orderId, status) => updateOrderMutation.mutate({
-            orderId,
-            status,
-            expectedUpdatedAt: getResourceUpdatedAt(orders.find((order) => order.id === orderId)),
-          })}
-        />
+        <Suspense fallback={<SectionLoadingPanel />}>
+          <DashboardView
+            dashboard={dashboard}
+            orders={orders}
+            users={users}
+            cards={cards}
+            admin={session.admin}
+            canCancelOrders={isAdmin}
+            updatingOrderId={updatingOrderId}
+            completedOrderActionKey={completedOrderActionKey}
+            onNavigateSection={stableSectionChange}
+            onNavigateSectionIntent={stableSectionIntent}
+            onStatusChange={(orderId, status) => updateOrderMutation.mutate({
+              orderId,
+              status,
+              expectedUpdatedAt: getResourceUpdatedAt(orders.find((order) => order.id === orderId) || dashboardRecentOrders.find((order) => order.id === orderId)),
+            })}
+          />
+        </Suspense>
       );
     }
 
     if (section === "inventory") {
-      if (inventoryCardsQuery.isLoading && !inventoryCardsQuery.data) {
+      if (inventoryIsLoading) {
         return <SectionLoadingPanel />;
       }
 
-      if (inventoryCardsQuery.error) {
-        return <SectionErrorPanel message={inventoryCardsQuery.error.message} />;
+      if (inventoryError) {
+        return <SectionErrorPanel message={inventoryError.message} />;
       }
 
       return (
         <Suspense fallback={<SectionLoadingPanel />}>
           <InventoryView
-            cardsPage={inventoryCardsQuery.data}
+            mode={inventoryMode}
+            cardsPage={inventoryPageData}
             page={inventoryPage}
             filters={inventoryFilters}
+            onModeChange={(nextMode) => {
+              setInventoryMode(nextMode);
+              setInventoryPage(1);
+              setInventoryFilters((current) => (
+                nextMode === "stock" && current.stockStatus === "out_of_stock"
+                  ? { ...current, stockStatus: "all" }
+                  : current
+              ));
+            }}
             onFiltersChange={(nextFilters) => {
               setInventoryPage(1);
               setInventoryFilters((current) => ({ ...current, ...nextFilters }));
@@ -1685,17 +2329,20 @@ function AdminShell({ session, onLogout }) {
             onSyncCatalog={() => syncCatalogMutation.mutate()}
             syncMutation={syncCatalogMutation}
             catalogSyncToken={catalogSyncToken}
-            isInventoryRefreshing={inventoryCardsQuery.isFetching && !inventoryCardsQuery.isLoading}
-            onRefresh={() => inventoryCardsQuery.refetch()}
+            isInventoryRefreshing={inventoryIsRefreshing}
+            isLoadingResults={inventoryIsLoading}
+            onRefresh={() => (inventoryMode === "all" ? adminCatalogSearchQuery.refetch() : inventoryCardsQuery.refetch())}
             savingCardId={savingCardId}
+            addingInventoryCardId={addingInventoryCardId}
             isBulkSaving={isBulkSaving}
             isDeletingCards={isDeletingCards}
             canEditInventory={isAdmin}
             onBulkUpdate={(selection, updates) => bulkUpdateCardsMutation.mutateAsync({ selection, updates })}
             onDeleteCards={(selection) => deleteCardsMutation.mutateAsync(selection)}
+            onAddToInventory={(cardId, quantity, expectedUpdatedAt) => addInventoryCardMutation.mutateAsync({ cardId, quantity, expectedUpdatedAt })}
             onSave={(cardId, draft) => updateCardMutation.mutateAsync({
               cardId,
-              expectedUpdatedAt: getResourceUpdatedAt(findCardSnapshot(cardId, inventoryCardsQuery.data?.cards, cards)),
+              expectedUpdatedAt: getResourceUpdatedAt(findCardSnapshot(cardId, inventoryPageData?.cards, inventoryCardsQuery.data?.cards, adminCatalogSearchQuery.data?.cards, cards)),
               updates: {
                 price: Number(draft.price),
                 stock: Number(draft.stock),
@@ -1710,25 +2357,33 @@ function AdminShell({ session, onLogout }) {
     }
 
     if (section === "home") {
-      if (cardsQuery.isLoading && !cardsQuery.data) {
+      if (homeIsLoading) {
         return <SectionLoadingPanel />;
       }
 
-      if (cardsQuery.error) {
-        return <SectionErrorPanel message={cardsQuery.error.message} />;
+      if (homeError && !homeCardsQuery.data) {
+        return <SectionErrorPanel message={homeError.message} />;
       }
 
       return (
         <Suspense fallback={<SectionLoadingPanel />}>
           <HomeMerchandisingView
-            cards={cards}
+            cardsPage={homePageData}
+            search={homeSearch}
+            isRefreshing={homeIsRefreshing}
+            onSearchChange={(nextSearch) => {
+              setHomeSearch(nextSearch);
+              setHomePage(1);
+            }}
+            onPageChange={setHomePage}
+            onRefresh={() => homeCardsQuery.refetch()}
             savingCardId={savingCardId}
             isBulkSaving={isBulkSaving}
             canEditHome={isAdmin}
             onBulkUpdate={(selection, updates) => bulkUpdateCardsMutation.mutate({ selection, updates })}
             onSave={(cardId, draft) => updateCardMutation.mutate({
               cardId,
-              expectedUpdatedAt: getResourceUpdatedAt(cards.find((card) => card.id === cardId)),
+              expectedUpdatedAt: getResourceUpdatedAt(findCardSnapshot(cardId, homeCards, inventoryPageData?.cards, inventoryCardsQuery.data?.cards, adminCatalogSearchQuery.data?.cards, cards)),
               updates: {
                 is_featured: Boolean(draft.is_featured),
                 is_new_arrival: Boolean(draft.is_new_arrival),
@@ -1791,6 +2446,14 @@ function AdminShell({ session, onLogout }) {
         <Suspense fallback={<SectionLoadingPanel />}>
           <OrdersView
             orders={orders}
+            summary={ordersSummary}
+            pagination={ordersPagination}
+            filters={ordersFilters}
+            onFiltersChange={(nextFilters) => {
+              setOrdersPage(1);
+              setOrdersFilters((current) => ({ ...current, ...nextFilters }));
+            }}
+            onPageChange={setOrdersPage}
             updatingOrderId={updatingOrderId}
             completedOrderActionKey={completedOrderActionKey}
             savingShippingOrderId={savingShippingOrderId}
@@ -1858,8 +2521,16 @@ function AdminShell({ session, onLogout }) {
         <Suspense fallback={<SectionLoadingPanel />}>
           <UsersView
             users={users}
+            summary={usersSummary}
+            pagination={usersPagination}
+            filters={usersFilters}
             canEditRoles={isAdmin}
             updatingUserId={updatingUserId}
+            onFiltersChange={(nextFilters) => {
+              setUsersPage(1);
+              setUsersFilters((current) => ({ ...current, ...nextFilters }));
+            }}
+            onPageChange={setUsersPage}
             onRoleChange={(userId, role) => updateUserRoleMutation.mutate({
               userId,
               role,
@@ -1888,7 +2559,7 @@ function AdminShell({ session, onLogout }) {
             <p className="mt-1 inline-flex rounded-full border border-white/10 px-3 py-1 text-[11px] font-semibold tracking-[0.18em] text-amber-300">{userRoleLabel(session.admin.role)}</p>
           </div>
 
-          <SectionNav section={section} onSectionChange={handleSectionChange} onSectionIntent={handleSectionIntent} className="space-y-2" />
+          <SectionNav section={section} onSectionChange={stableSectionChange} onSectionIntent={stableSectionIntent} className="space-y-2" />
 
           <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-300">
             <p className="font-semibold text-white">Radar rápido</p>
@@ -1937,6 +2608,7 @@ function AdminShell({ session, onLogout }) {
 
                       <button
                         onClick={onLogout}
+                        aria-label="Cerrar sesión"
                         className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.06]"
                       >
                         <LogOut className="h-4 w-4" />
@@ -1947,23 +2619,17 @@ function AdminShell({ session, onLogout }) {
                 </div>
               </div>
 
-              <button
-                type="button"
-                aria-label="Cerrar menú lateral"
-                onClick={() => setIsMobileCompactMenuOpen(false)}
-                aria-hidden={!isMobileCompactMenuOpen}
-                className={cn(
-                  "fixed inset-0 z-40 bg-slate-950/72 backdrop-blur-sm transition duration-300 lg:hidden",
-                  isMobileCompactMenuOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
-                )}
-              />
-              <aside
-                aria-hidden={!isMobileCompactMenuOpen}
-                className={cn(
-                  "fixed inset-y-0 right-0 z-50 flex w-[min(88vw,372px)] flex-col border-l border-white/10 bg-[linear-gradient(180deg,rgba(10,14,31,0.98),rgba(8,12,26,0.95))] shadow-[-24px_0_90px_rgba(0,0,0,0.42)] backdrop-blur-xl transition duration-300 ease-out lg:hidden",
-                  isMobileCompactMenuOpen ? "translate-x-0 opacity-100" : "pointer-events-none translate-x-[104%] opacity-0"
-                )}
-              >
+              {isMobileCompactMenuOpen ? (
+                <>
+                  <button
+                    type="button"
+                    aria-label="Cerrar menú lateral"
+                    onClick={() => setIsMobileCompactMenuOpen(false)}
+                    className="fixed inset-0 z-40 bg-slate-950/72 backdrop-blur-sm lg:hidden"
+                  />
+                  <aside
+                    className="fixed inset-y-0 right-0 z-50 flex w-[min(88vw,372px)] flex-col border-l border-white/10 bg-[linear-gradient(180deg,rgba(10,14,31,0.98),rgba(8,12,26,0.95))] shadow-[-24px_0_90px_rgba(0,0,0,0.42)] backdrop-blur-xl lg:hidden"
+                  >
                 <div className="border-b border-white/10 px-5 pb-4 pt-5">
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0">
@@ -1990,7 +2656,7 @@ function AdminShell({ session, onLogout }) {
 
                 <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5">
                   <div className="rounded-[28px] border border-white/10 bg-slate-950/35 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-                    <MobileSectionNav section={section} onSectionChange={handleSectionChange} onSectionIntent={handleSectionIntent} />
+                    <MobileSectionNav section={section} onSectionChange={stableSectionChange} onSectionIntent={stableSectionIntent} />
                   </div>
 
                   <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-300">
@@ -2010,7 +2676,9 @@ function AdminShell({ session, onLogout }) {
                     </div>
                   </div>
                 </div>
-              </aside>
+                  </aside>
+                </>
+              ) : null}
             </div>
 
             <header className={cn("glass rounded-[32px] border border-white/10 p-4 sm:p-6 hidden lg:block", section === "dashboard" ? "lg:hidden" : "") }>
@@ -2042,51 +2710,43 @@ function AdminShell({ session, onLogout }) {
 }
 
 export default function App() {
+  const queryClient = useQueryClient();
   const [session, setSession] = useState(() => getBootstrapSession() || getStoredSession());
-  const [didBootstrapRefresh, setDidBootstrapRefresh] = useState(false);
 
-  useEffect(() => {
-    if (!session?.refreshToken || didBootstrapRefresh) {
-      return undefined;
-    }
+  /* ── Realtime SSE for admin panel ── */
+  useAdminRealtimeEvents(session, setSession);
 
-    let cancelled = false;
+  const handleLogout = async () => {
+    const storefrontLoginUrlPromise = resolveStorefrontLoginUrl();
 
-    const timeoutId = window.setTimeout(() => {
-      refreshAdminSession()
-        .then((nextSession) => {
-          if (!cancelled && nextSession) {
-            setSession(nextSession);
-          }
-        })
-        .catch(() => {
-          // Keep the restored session alive on boot. If the token is truly invalid,
-          // the authenticated requests will handle logout through the normal refresh flow.
-        });
-      if (!cancelled) {
-        setDidBootstrapRefresh(true);
-      }
-    }, 120);
+    setSession(null);
+    queryClient.clear();
+    clearStoredSession();
 
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeoutId);
-    };
-  }, [didBootstrapRefresh, session?.refreshToken]);
+    try {
+      window.sessionStorage.clear();
+    } catch {}
+
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    clearPersistedAdminQueryCache();
+    clearStoredAdminUiState();
+
+    const storefrontLoginUrl = await storefrontLoginUrlPromise;
+    window.location.assign(storefrontLoginUrl);
+  };
 
   if (!session) {
-    return <LoginScreen onLoggedIn={setSession} />;
+    return (
+      <Suspense fallback={<div className="min-h-screen bg-slate-950" />}>
+        <LoginScreen onLoggedIn={setSession} />
+      </Suspense>
+    );
   }
 
   return (
     <AdminShell
       session={session}
-      onLogout={async () => {
-        clearStoredSession();
-        clearPersistedAdminQueryCache();
-        const storefrontLoginUrl = await resolveStorefrontLoginUrl();
-        window.location.assign(storefrontLoginUrl);
-      }}
+      onLogout={handleLogout}
     />
   );
 }

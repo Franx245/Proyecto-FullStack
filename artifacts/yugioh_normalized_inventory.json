@@ -1,0 +1,6384 @@
+[
+  {
+    "name": "A Wingbeat of Giant Dragon",
+    "name_es": "El Batir de Alas del Dragón Gigante",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "A Wingbeat of Giant Dragon (El Batir de Alas del Dragón Gigante)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "A Wingbeat of Giant Dragon (El Batir de Alas del Dragón Gigante)"
+    ]
+  },
+  {
+    "name": "Aiza the Dragoness of Deranged Devotion",
+    "name_es": "Aiza la Dragona de la Devoción Desquiciada",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Aiza the Dragoness of Deranged Devotion (Aiza la Dragona de la Devoción Desquiciada)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Aiza the Dragoness of Deranged Devotion (Aiza la Dragona de la Devoción Desquiciada)"
+    ]
+  },
+  {
+    "name": "Allure of Darkness",
+    "name_es": "Atractivo de la Oscuridad",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Atractivo de la Oscuridad (Allure of Darkness)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Atractivo de la Oscuridad (Allure of Darkness)"
+    ]
+  },
+  {
+    "name": "Amphibian Beast",
+    "name_es": "Bestia Anfibio",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Amphibian Beast (Bestia Anfibio)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Amphibian Beast (Bestia Anfibio)"
+    ]
+  },
+  {
+    "name": "Amulet Dragon",
+    "name_es": "Dragon Amuleto",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Dragón Amuleto (Amulet Dragon)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Dragón Amuleto (Amulet Dragon)"
+    ]
+  },
+  {
+    "name": "Ancient Lamp",
+    "name_es": "Lámpara Antigua",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Ancient Lamp (Lámpara Antigua)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Ancient Lamp (Lámpara Antigua)"
+    ]
+  },
+  {
+    "name": "Apple Magician Girl",
+    "name_es": "Chica Maga Manzana",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Apple Magician Girl (Chica Maga Manzana)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Apple Magician Girl (Chica Maga Manzana)"
+    ]
+  },
+  {
+    "name": "Appropriate",
+    "name_es": "Apropiación",
+    "name_jp": null,
+    "quantity": 2,
+    "variants": [
+      {
+        "originalName": "Appropriate (Apropiación)",
+        "detectedLanguage": "mixed",
+        "count": 2
+      }
+    ],
+    "originalNames": [
+      "Appropriate (Apropiación)"
+    ]
+  },
+  {
+    "name": "Aqua Madoor",
+    "name_es": "Madoor Acuático",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Aqua Madoor (Madoor Acuático)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Aqua Madoor (Madoor Acuático)"
+    ]
+  },
+  {
+    "name": "Archnemeses Protos",
+    "name_es": "Archnemesis Protos",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Archnemeses Protos (Archnemesis Protos)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Archnemeses Protos (Archnemesis Protos)"
+    ]
+  },
+  {
+    "name": "Armageddon Knight",
+    "name_es": "Caballero del Armagedón",
+    "name_jp": null,
+    "quantity": 2,
+    "variants": [
+      {
+        "originalName": "Armageddon Knight (Caballero del Armagedón)",
+        "detectedLanguage": "mixed",
+        "count": 2
+      }
+    ],
+    "originalNames": [
+      "Armageddon Knight (Caballero del Armagedón)"
+    ]
+  },
+  {
+    "name": "Arsenal Bug",
+    "name_es": "Escarabajo de Arsenal",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Arsenal Bug (Escarabajo de Arsenal)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Arsenal Bug (Escarabajo de Arsenal)"
+    ]
+  },
+  {
+    "name": "Artifact Moralltach",
+    "name_es": "Artefacto Moralltach",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Artifact Moralltach (Artefacto Moralltach)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Artifact Moralltach (Artefacto Moralltach)"
+    ]
+  },
+  {
+    "name": "Aussa the Earth Charmer, Immovable",
+    "name_es": "Aussa la Encantadora de la Tierra, Inamovible",
+    "name_jp": null,
+    "quantity": 2,
+    "variants": [
+      {
+        "originalName": "Aussa the Earth Charmer, Immovable (Aussa la Encantadora de la Tierra, Inamovible)",
+        "detectedLanguage": "mixed",
+        "count": 2
+      }
+    ],
+    "originalNames": [
+      "Aussa the Earth Charmer, Immovable (Aussa la Encantadora de la Tierra, Inamovible)"
+    ]
+  },
+  {
+    "name": "Autonomous Action Unit",
+    "name_es": "Unidad de Acción Autónoma",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Autonomous Action Unit (Unidad de Acción Autónoma)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Autonomous Action Unit (Unidad de Acción Autónoma)"
+    ]
+  },
+  {
+    "name": "Bad Reaction to Simochi",
+    "name_es": "Reacción Terrible ante Simochi",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Bad Reaction to Simochi (Reacción Terrible ante Simochi)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Bad Reaction to Simochi (Reacción Terrible ante Simochi)"
+    ]
+  },
+  {
+    "name": "Barox",
+    "name_es": "Barox",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Barox (Barox)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Barox (Barox)"
+    ]
+  },
+  {
+    "name": "Bazoo the Soul-Eater",
+    "name_es": "Bazoo el Comedor de Almas",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Bazoo the Soul-Eater (Bazoo el Comedor de Almas)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Bazoo the Soul-Eater (Bazoo el Comedor de Almas)"
+    ]
+  },
+  {
+    "name": "Bean Soldier",
+    "name_es": "Soldado Judia",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Soldado Judía (Bean Soldier)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Soldado Judía (Bean Soldier)"
+    ]
+  },
+  {
+    "name": "Berry Magician Girl",
+    "name_es": "Chica Maga Baya",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Berry Magician Girl (Chica Maga Baya)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Berry Magician Girl (Chica Maga Baya)"
+    ]
+  },
+  {
+    "name": "Bingo Machine, Go!!!",
+    "name_es": "Máquina de Bingo, ¡¡¡Vamos!!!",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Bingo Machine, Go!!! (Máquina de Bingo, ¡¡¡Vamos!!!)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Bingo Machine, Go!!! (Máquina de Bingo, ¡¡¡Vamos!!!)"
+    ]
+  },
+  {
+    "name": "Black Illusion Ritual",
+    "name_es": "Ritual de la Ilusión Negra",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Black Illusion Ritual (Ritual de la Ilusión Negra)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Black Illusion Ritual (Ritual de la Ilusión Negra)"
+    ]
+  },
+  {
+    "name": "Black Metal Dragon",
+    "name_es": "Dragón Negro Metálico",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Black Metal Dragon (Dragón Negro Metálico)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Black Metal Dragon (Dragón Negro Metálico)"
+    ]
+  },
+  {
+    "name": "Blackwing - Etesian of the Two Swords",
+    "name_es": "Alanegra - Etesian de las Dos Espadas",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Alanegra - Etesian de las Dos Espadas (Blackwing - Etesian of the Two Swords)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Alanegra - Etesian de las Dos Espadas (Blackwing - Etesian of the Two Swords)"
+    ]
+  },
+  {
+    "name": "Blackwing - Gust the Backblast",
+    "name_es": "Alanegra - Ráfaga el Contrasoplido",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Blackwing - Gust the Backblast (Alanegra - Ráfaga el Contrasoplido)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Blackwing - Gust the Backblast (Alanegra - Ráfaga el Contrasoplido)"
+    ]
+  },
+  {
+    "name": "Blackwing - Shura the Blue Flame",
+    "name_es": "Alanegra - Shura la Llama Azul",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Blackwing - Shura the Blue Flame (Alanegra - Shura la Llama Azul)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Blackwing - Shura the Blue Flame (Alanegra - Shura la Llama Azul)"
+    ]
+  },
+  {
+    "name": "Blackwing - Zephyros the Elite",
+    "name_es": "Alanegra - Zephyros la Élite",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Blackwing - Zephyros the Elite (Alanegra - Zephyros la Élite)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Blackwing - Zephyros the Elite (Alanegra - Zephyros la Élite)"
+    ]
+  },
+  {
+    "name": "Blessing of the Voiceless Voice",
+    "name_es": "Bendición de la Voz Muda",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Blessing of the Voiceless Voice (Bendición de la Voz Muda)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Blessing of the Voiceless Voice (Bendición de la Voz Muda)"
+    ]
+  },
+  {
+    "name": "Blowback Dragon",
+    "name_es": "Dragón de Retroceso",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Blowback Dragon (Dragón de Retroceso)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Blowback Dragon (Dragón de Retroceso)"
+    ]
+  },
+  {
+    "name": "Blue-Eyes Alternative White Dragon",
+    "name_es": "Dragón Blanco Alternativo de Ojos Azules",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Blue-Eyes Alternative White Dragon (Dragón Blanco Alternativo de Ojos Azules)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Blue-Eyes Alternative White Dragon (Dragón Blanco Alternativo de Ojos Azules)"
+    ]
+  },
+  {
+    "name": "Blue-Eyes Chaos Dragon",
+    "name_es": "Dragón de Caos de Ojos Azules",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Blue-Eyes Chaos Dragon (Dragón de Caos de Ojos Azules)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Blue-Eyes Chaos Dragon (Dragón de Caos de Ojos Azules)"
+    ]
+  },
+  {
+    "name": "Blue-Eyes Chaos MAX Dragon",
+    "name_es": "Dragón Máximo de Caos de Ojos Azules",
+    "name_jp": null,
+    "quantity": 2,
+    "variants": [
+      {
+        "originalName": "Blue-Eyes Chaos MAX Dragon (Dragón Máximo de Caos de Ojos Azules)",
+        "detectedLanguage": "mixed",
+        "count": 2
+      }
+    ],
+    "originalNames": [
+      "Blue-Eyes Chaos MAX Dragon (Dragón Máximo de Caos de Ojos Azules)"
+    ]
+  },
+  {
+    "name": "Blue-Eyes Spirit Dragon",
+    "name_es": "Dragón Espíritu de Ojos Azules",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Blue-Eyes Spirit Dragon (Dragón Espíritu de Ojos Azules)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Blue-Eyes Spirit Dragon (Dragón Espíritu de Ojos Azules)"
+    ]
+  },
+  {
+    "name": "Blue-Eyes Twin Burst Dragon",
+    "name_es": "Dragón Gemelo Explosivo de Ojos Azules",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Blue-Eyes Twin Burst Dragon (Dragón Gemelo Explosivo de Ojos Azules)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Blue-Eyes Twin Burst Dragon (Dragón Gemelo Explosivo de Ojos Azules)"
+    ]
+  },
+  {
+    "name": "Blue-Eyes Tyrant Dragon",
+    "name_es": "Dragón Tirano de Ojos Azules",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Blue-Eyes Tyrant Dragon (Dragón Tirano de Ojos Azules)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Blue-Eyes Tyrant Dragon (Dragón Tirano de Ojos Azules)"
+    ]
+  },
+  {
+    "name": "Blue-Eyes Ultimate Dragon",
+    "name_es": "Dragón de Ojos Azules Definitivo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Blue-Eyes Ultimate Dragon (Dragón de Ojos Azules Definitivo)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Blue-Eyes Ultimate Dragon (Dragón de Ojos Azules Definitivo)"
+    ]
+  },
+  {
+    "name": "Blue-Eyes Ultimate Spirit Dragon",
+    "name_es": "Dragón Espíritu Definitivo de Ojos Azules",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Blue-Eyes Ultimate Spirit Dragon (Dragón Espíritu Definitivo de Ojos Azules)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Blue-Eyes Ultimate Spirit Dragon (Dragón Espíritu Definitivo de Ojos Azules)"
+    ]
+  },
+  {
+    "name": "Blue-Eyes White Dragon",
+    "name_es": "Dragón Blanco de Ojos Azules",
+    "name_jp": null,
+    "quantity": 2,
+    "variants": [
+      {
+        "originalName": "Blue-Eyes White Dragon (Dragón Blanco de Ojos Azules)",
+        "detectedLanguage": "mixed",
+        "count": 2
+      }
+    ],
+    "originalNames": [
+      "Blue-Eyes White Dragon (Dragón Blanco de Ojos Azules)"
+    ]
+  },
+  {
+    "name": "Borrelend Dragon",
+    "name_es": "Dragon Borrelfinal",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Dragón Borrelfinal (Borrelend Dragon)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Dragón Borrelfinal (Borrelend Dragon)"
+    ]
+  },
+  {
+    "name": "Bottomless Trap Hole",
+    "name_es": "Agujero de Trampa sin Fondo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Bottomless Trap Hole (Agujero de Trampa sin Fondo)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Bottomless Trap Hole (Agujero de Trampa sin Fondo)"
+    ]
+  },
+  {
+    "name": "Bountiful Artemis",
+    "name_es": "Artemis Generosa",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Bountiful Artemis (Artemis Generosa)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Bountiful Artemis (Artemis Generosa)"
+    ]
+  },
+  {
+    "name": "Branded Befallen",
+    "name_es": "Caída del Señalado",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Branded Befallen (Caída del Señalado)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Branded Befallen (Caída del Señalado)"
+    ]
+  },
+  {
+    "name": "Branded in White",
+    "name_es": "Señalado en Blanco",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Branded in White (Señalado en Blanco)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Branded in White (Señalado en Blanco)"
+    ]
+  },
+  {
+    "name": "Branded Judgment",
+    "name_es": "Juicio del Senalado",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Jugement du Marqué (Juicio del Señalado)",
+        "detectedLanguage": "es",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Jugement du Marqué (Juicio del Señalado)"
+    ]
+  },
+  {
+    "name": "Branded Loss",
+    "name_es": "Perdida del Senalado",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Perte du Marqué (Pérdida del Señalado)",
+        "detectedLanguage": "es",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Perte du Marqué (Pérdida del Señalado)"
+    ]
+  },
+  {
+    "name": "Branded Punishment",
+    "name_es": "Castigo del Senalado",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Châtiment du Marqué (Castigo del Señalado)",
+        "detectedLanguage": "es",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Châtiment du Marqué (Castigo del Señalado)"
+    ]
+  },
+  {
+    "name": "Branded Retribution",
+    "name_es": "Retribución Señalada",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Branded Retribution (Retribución Señalada)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Branded Retribution (Retribución Señalada)"
+    ]
+  },
+  {
+    "name": "Brightest, Blazing, Branded King",
+    "name_es": "Rey Señalado, el Más Brillante y Flameante",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Brightest, Blazing, Branded King (Rey Señalado, el Más Brillante y Flameante)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Brightest, Blazing, Branded King (Rey Señalado, el Más Brillante y Flameante)"
+    ]
+  },
+  {
+    "name": "Brigrand the Glory Dragon",
+    "name_es": "Brigrand el Dragon de la Gloria",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Brigrand le Dragon de la Gloire (Brigrand el Dragón de la Gloria)",
+        "detectedLanguage": "es",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Brigrand le Dragon de la Gloire (Brigrand el Dragón de la Gloria)"
+    ]
+  },
+  {
+    "name": "Buster Blader",
+    "name_es": "Buster Blader",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Buster Blader (Buster Blader)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Buster Blader (Buster Blader)"
+    ]
+  },
+  {
+    "name": "Bystial Magnamhut",
+    "name_es": "Bystial Magnamhut",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Bystial Magnamhut (Bystial Magnamhut)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Bystial Magnamhut (Bystial Magnamhut)"
+    ]
+  },
+  {
+    "name": "Call of the Haunted",
+    "name_es": "Llamada de los Condenados",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Call of the Haunted (Llamada de los Condenados)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Call of the Haunted (Llamada de los Condenados)"
+    ]
+  },
+  {
+    "name": "Call of the Mummy",
+    "name_es": "Llamada de la Momia",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Llamada de la Momia (Call of the Mummy)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Llamada de la Momia (Call of the Mummy)"
+    ]
+  },
+  {
+    "name": "Card of Safe Return",
+    "name_es": "Carta del Regreso Seguro",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Card of Safe Return (Carta del Regreso Seguro)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Card of Safe Return (Carta del Regreso Seguro)"
+    ]
+  },
+  {
+    "name": "Chain Burst",
+    "name_es": "Explosión en Cadena",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Chain Burst (Explosión en Cadena)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Chain Burst (Explosión en Cadena)"
+    ]
+  },
+  {
+    "name": "Chaos Sorcerer",
+    "name_es": "Hechicero del Caos",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Chaos Sorcerer (Hechicero del Caos)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Chaos Sorcerer (Hechicero del Caos)"
+    ]
+  },
+  {
+    "name": "Chimera the Flying Mythical Beast",
+    "name_es": "Quimera, la Bestia Mítica Voladora",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Chimera the Flying Mythical Beast (Quimera, la Bestia Mítica Voladora)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Chimera the Flying Mythical Beast (Quimera, la Bestia Mítica Voladora)"
+    ]
+  },
+  {
+    "name": "Cipher Twin Raptor",
+    "name_es": "Raptor Gemelo de Cifrado",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Cipher Twin Raptor (Raptor Gemelo de Cifrado)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Cipher Twin Raptor (Raptor Gemelo de Cifrado)"
+    ]
+  },
+  {
+    "name": "Cobraman Sakuzy",
+    "name_es": "Cobraman Sakuzy",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Cobraman Sakuzy (Cobraman Sakuzy)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Cobraman Sakuzy (Cobraman Sakuzy)"
+    ]
+  },
+  {
+    "name": "Code of Soul",
+    "name_es": "Código del Alma",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Code of Soul (Código del Alma)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Code of Soul (Código del Alma)"
+    ]
+  },
+  {
+    "name": "Compulsory Evacuation Device",
+    "name_es": "Dispositivo de Evacuación Compulsoria",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Compulsory Evacuation Device (Dispositivo de Evacuación Compulsoria)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Compulsory Evacuation Device (Dispositivo de Evacuación Compulsoria)"
+    ]
+  },
+  {
+    "name": "Creature Swap",
+    "name_es": "Intercambio de Criaturas",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Creature Swap (Intercambio de Criaturas)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Creature Swap (Intercambio de Criaturas)"
+    ]
+  },
+  {
+    "name": "Crossout Designator",
+    "name_es": "Designador de la Tachadura",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Crossout Designator (Designador de la Tachadura)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Crossout Designator (Designador de la Tachadura)"
+    ]
+  },
+  {
+    "name": "Crusader of Endymion",
+    "name_es": "Cruzado de Endymion",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Crusader of Endymion (Cruzado de Endymion)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Crusader of Endymion (Cruzado de Endymion)"
+    ]
+  },
+  {
+    "name": "Crystron Halqifibrax",
+    "name_es": "Cristron Halqifibrax",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Crystron Halqifibrax (Cristron Halqifibrax)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Crystron Halqifibrax (Cristron Halqifibrax)"
+    ]
+  },
+  {
+    "name": "Crystron Phoenix",
+    "name_es": "Cristron Fénix",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Crystron Phoenix (Cristron Fénix)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Crystron Phoenix (Cristron Fénix)"
+    ]
+  },
+  {
+    "name": "Curse of Darkness",
+    "name_es": "Maldición de la Oscuridad",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Curse of Darkness (Maldición de la Oscuridad)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Curse of Darkness (Maldición de la Oscuridad)"
+    ]
+  },
+  {
+    "name": "Curse of Fiend",
+    "name_es": "Maldición del Demonio",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Curse of Fiend (Maldición del Demonio)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Curse of Fiend (Maldición del Demonio)"
+    ]
+  },
+  {
+    "name": "Cyber Blader",
+    "name_es": "Cíber Patinadora",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Cyber Blader (Cíber Patinadora)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Cyber Blader (Cíber Patinadora)"
+    ]
+  },
+  {
+    "name": "Cyber Dragon",
+    "name_es": "Dragón Cíber",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Cyber Dragon (Dragón Cíber)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Cyber Dragon (Dragón Cíber)"
+    ]
+  },
+  {
+    "name": "Cyber Ogre",
+    "name_es": "Cíber Ogro",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Cyber Ogre (Cíber Ogro)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Cyber Ogre (Cíber Ogro)"
+    ]
+  },
+  {
+    "name": "Cyber Phoenix",
+    "name_es": "Cíber Fénix",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Cyber Phoenix (Cíber Fénix)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Cyber Phoenix (Cíber Fénix)"
+    ]
+  },
+  {
+    "name": "Cyber Twin Dragon",
+    "name_es": "Dragón Cíber Gemelo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Cyber Twin Dragon (Dragón Cíber Gemelo)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Cyber Twin Dragon (Dragón Cíber Gemelo)"
+    ]
+  },
+  {
+    "name": "Cyber Valley",
+    "name_es": "Valle Cíber",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Cyber Valley (Valle Cíber)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Cyber Valley (Valle Cíber)"
+    ]
+  },
+  {
+    "name": "Cybernetic Hidden Technology",
+    "name_es": "Tecnología Cíber Oculta",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Cybernetic Hidden Technology (Tecnología Cíber Oculta)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Cybernetic Hidden Technology (Tecnología Cíber Oculta)"
+    ]
+  },
+  {
+    "name": "D/D/D Duo-Dawn King Kali Yuga",
+    "name_es": "D/D/D Kali Yuga, Rey del Doble Amanecer",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "D/D/D Duo-Dawn King Kali Yuga (D/D/D Kali Yuga, Rey del Doble Amanecer)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "D/D/D Duo-Dawn King Kali Yuga (D/D/D Kali Yuga, Rey del Doble Amanecer)"
+    ]
+  },
+  {
+    "name": "Dark Bat",
+    "name_es": "Murciélago Oscuro",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Dark Bat (Murciélago Oscuro)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Dark Bat (Murciélago Oscuro)"
+    ]
+  },
+  {
+    "name": "Dark Bribe",
+    "name_es": "Soborno Oscuro",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Dark Bribe (Soborno Oscuro)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Dark Bribe (Soborno Oscuro)"
+    ]
+  },
+  {
+    "name": "Dark Burning Attack",
+    "name_es": "Ataque Ardiente Oscuro",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Dark Burning Attack (Ataque Ardiente Oscuro)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Dark Burning Attack (Ataque Ardiente Oscuro)"
+    ]
+  },
+  {
+    "name": "Dark Grepher",
+    "name_es": "Cruzado Oscuro",
+    "name_jp": null,
+    "quantity": 2,
+    "variants": [
+      {
+        "originalName": "Cruzado Oscuro (Dark Grepher)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      },
+      {
+        "originalName": "Dark Grepher (Grepher Oscuro)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Cruzado Oscuro (Dark Grepher)",
+      "Dark Grepher (Grepher Oscuro)"
+    ]
+  },
+  {
+    "name": "Dark Magic Twin Burst",
+    "name_es": "Explosión Gemela de Magia Oscura",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Dark Magic Twin Burst (Explosión Gemela de Magia Oscura)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Dark Magic Twin Burst (Explosión Gemela de Magia Oscura)"
+    ]
+  },
+  {
+    "name": "Dark Magician Girl the Dragon Knight",
+    "name_es": "Chica Maga Oscura, la Jinete del Dragon",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Chica Maga Oscura, la Jinete del Dragón (Dark Magician Girl the Dragon Knight)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Chica Maga Oscura, la Jinete del Dragón (Dark Magician Girl the Dragon Knight)"
+    ]
+  },
+  {
+    "name": "Dark Magician the Dragon Knight",
+    "name_es": "Mago Oscuro, el Jinete del Dragon",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Mago Oscuro, el Jinete del Dragón (Dark Magician the Dragon Knight)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Mago Oscuro, el Jinete del Dragón (Dark Magician the Dragon Knight)"
+    ]
+  },
+  {
+    "name": "Dark Necrofear",
+    "name_es": "Necrofiedo Oscuro",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Dark Necrofear (Necrofiedo Oscuro)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Dark Necrofear (Necrofiedo Oscuro)"
+    ]
+  },
+  {
+    "name": "Dark Necromancer",
+    "name_es": "Necromante Oscuro",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Dark Necromancer (Necromante Oscuro)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Dark Necromancer (Necromante Oscuro)"
+    ]
+  },
+  {
+    "name": "Dark Renewal",
+    "name_es": "Renovación Oscura",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Dark Renewal (Renovación Oscura)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Dark Renewal (Renovación Oscura)"
+    ]
+  },
+  {
+    "name": "Dark Spirit of the Silent",
+    "name_es": "Espíritu Oscuro del Silencio",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Dark Spirit of the Silent (Espíritu Oscuro del Silencio)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Dark Spirit of the Silent (Espíritu Oscuro del Silencio)"
+    ]
+  },
+  {
+    "name": "Dark Supremacy",
+    "name_es": "Supremacía Oscura",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Dark Supremacy (Supremacía Oscura)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Dark Supremacy (Supremacía Oscura)"
+    ]
+  },
+  {
+    "name": "Decode Talker Heatsoul",
+    "name_es": "Decodificador de Transmisión Almapiel",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Decode Talker Heatsoul (Decodificador de Transmisión Almapiel)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Decode Talker Heatsoul (Decodificador de Transmisión Almapiel)"
+    ]
+  },
+  {
+    "name": "Decoy Dragon",
+    "name_es": "Dragón Señuelo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Decoy Dragon (Dragón Señuelo)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Decoy Dragon (Dragón Señuelo)"
+    ]
+  },
+  {
+    "name": "Deep Sea Diva",
+    "name_es": "Diva del Mar Profundo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Deep Sea Diva (Diva del Mar Profundo)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Deep Sea Diva (Diva del Mar Profundo)"
+    ]
+  },
+  {
+    "name": "Denial Deity Dotan",
+    "name_es": "Deidad de la Negación Dotan",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Denial Deity Dotan (Deidad de la Negación Dotan)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Denial Deity Dotan (Deidad de la Negación Dotan)"
+    ]
+  },
+  {
+    "name": "Desert Twister",
+    "name_es": "Tornado del Desierto",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Desert Twister (Tornado del Desierto)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Desert Twister (Tornado del Desierto)"
+    ]
+  },
+  {
+    "name": "Despian Comedy",
+    "name_es": "Comedia Despiana",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Despian Comedy (Comedia Despiana)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Despian Comedy (Comedia Despiana)"
+    ]
+  },
+  {
+    "name": "Destined Rivals",
+    "name_es": "Rivales Destinados",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Destined Rivals (Rivales Destinados)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Destined Rivals (Rivales Destinados)"
+    ]
+  },
+  {
+    "name": "Destiny Board",
+    "name_es": "Tablero del Destino",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Destiny Board (Tablero del Destino)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Destiny Board (Tablero del Destino)"
+    ]
+  },
+  {
+    "name": "Destiny HERO - Denier",
+    "name_es": "HÉROE del Destino - Denier",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Destiny HERO - Denier (HÉROE del Destino - Denier)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Destiny HERO - Denier (HÉROE del Destino - Denier)"
+    ]
+  },
+  {
+    "name": "Destiny HERO - Dreadmaster",
+    "name_es": "HÉROE del Destino - Dreadmaster",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Destiny HERO - Dreadmaster (HÉROE del Destino - Dreadmaster)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Destiny HERO - Dreadmaster (HÉROE del Destino - Dreadmaster)"
+    ]
+  },
+  {
+    "name": "Destiny HERO - Drilldark",
+    "name_es": "HÉROE del Destino - Drilldark",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Destiny HERO - Drilldark (HÉROE del Destino - Drilldark)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Destiny HERO - Drilldark (HÉROE del Destino - Drilldark)"
+    ]
+  },
+  {
+    "name": "Destiny HERO - Dystopia",
+    "name_es": "HÉROE del Destino - Distopía",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Destiny HERO - Dystopia (HÉROE del Destino - Distopía)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Destiny HERO - Dystopia (HÉROE del Destino - Distopía)"
+    ]
+  },
+  {
+    "name": "Destruction Cyclone",
+    "name_es": "Ciclón de Destrucción",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Destruction Cyclone (Ciclón de Destrucción)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Destruction Cyclone (Ciclón de Destrucción)"
+    ]
+  },
+  {
+    "name": "Different Dimension Gate",
+    "name_es": "Portal a una Dimensión Diferente",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Different Dimension Gate (Portal a una Dimensión Diferente)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Different Dimension Gate (Portal a una Dimensión Diferente)"
+    ]
+  },
+  {
+    "name": "Dimensional Barrier",
+    "name_es": "Barrera Dimensional",
+    "name_jp": null,
+    "quantity": 2,
+    "variants": [
+      {
+        "originalName": "Dimensional Barrier (Barrera Dimensional)",
+        "detectedLanguage": "mixed",
+        "count": 2
+      }
+    ],
+    "originalNames": [
+      "Dimensional Barrier (Barrera Dimensional)"
+    ]
+  },
+  {
+    "name": "Dimensional Prison",
+    "name_es": "Prision Dimensional",
+    "name_jp": null,
+    "quantity": 3,
+    "variants": [
+      {
+        "originalName": "Prisión Dimensional (Dimensional Prison)",
+        "detectedLanguage": "mixed",
+        "count": 2
+      },
+      {
+        "originalName": "Dimensional Prison",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Dimensional Prison",
+      "Prisión Dimensional (Dimensional Prison)"
+    ]
+  },
+  {
+    "name": "Dinomight Knight, the True Dracofighter",
+    "name_es": "Dinomight Caballero, el Verdadero Dracoluchador",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Dinomight Knight, the True Dracofighter (Dinomight Caballero, el Verdadero Dracoluchador)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Dinomight Knight, the True Dracofighter (Dinomight Caballero, el Verdadero Dracoluchador)"
+    ]
+  },
+  {
+    "name": "Dinomorphia Diplos",
+    "name_es": "Dinomorfia Diplos",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Dinomorphia Diplos (Dinomorfia Diplos)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Dinomorphia Diplos (Dinomorfia Diplos)"
+    ]
+  },
+  {
+    "name": "Dinomorphia Stealthbergia",
+    "name_es": "Dinomorfia Stealthbergia",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Dinomorphia Stealthbergia (Dinomorfia Stealthbergia)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Dinomorphia Stealthbergia (Dinomorfia Stealthbergia)"
+    ]
+  },
+  {
+    "name": "Dokurorider",
+    "name_es": "Dokurorider",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Dokurorider (Dokurorider)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Dokurorider (Dokurorider)"
+    ]
+  },
+  {
+    "name": "Don Turtle",
+    "name_es": "Don Tortuga",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Don Turtle (Don Tortuga)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Don Turtle (Don Tortuga)"
+    ]
+  },
+  {
+    "name": "Duelist Heritage",
+    "name_es": "Legado del Duelista",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Legado del Duelista (Duelist Alliance / Duelist Heritage)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Legado del Duelista (Duelist Alliance / Duelist Heritage)"
+    ]
+  },
+  {
+    "name": "Earthbound Immortal Aslla Piscu",
+    "name_es": "Inmortal Terrestre Aslla Piscu",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Earthbound Immortal Aslla Piscu (Inmortal Terrestre Aslla Piscu)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Earthbound Immortal Aslla Piscu (Inmortal Terrestre Aslla Piscu)"
+    ]
+  },
+  {
+    "name": "Earthbound Immortal Wiraqocha Rasca",
+    "name_es": "Inmortal Terrestre Wiraqocha Rasca",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Earthbound Immortal Wiraqocha Rasca (Inmortal Terrestre Wiraqocha Rasca)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Earthbound Immortal Wiraqocha Rasca (Inmortal Terrestre Wiraqocha Rasca)"
+    ]
+  },
+  {
+    "name": "Ebon High Magician",
+    "name_es": "Alto Mago Ebon",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Alto Mago Ebon (Ebon High Magician)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Alto Mago Ebon (Ebon High Magician)"
+    ]
+  },
+  {
+    "name": "Egyptian God Slime",
+    "name_es": "Limo del Dios Egipcio",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Egyptian God Slime (Limo del Dios Egipcio)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Egyptian God Slime (Limo del Dios Egipcio)"
+    ]
+  },
+  {
+    "name": "Electro Blaster",
+    "name_es": "Electrochorro",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Electro Blaster (Electrochorro)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Electro Blaster (Electrochorro)"
+    ]
+  },
+  {
+    "name": "Elemental HERO Avian",
+    "name_es": "HÉROE Elemental Avian",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Elemental HERO Avian (HÉROE Elemental Avian)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Elemental HERO Avian (HÉROE Elemental Avian)"
+    ]
+  },
+  {
+    "name": "Elemental HERO Neos Alius",
+    "name_es": "HÉROE Elemental Neos Alius",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Elemental HERO Neos Alius (HÉROE Elemental Neos Alius)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Elemental HERO Neos Alius (HÉROE Elemental Neos Alius)"
+    ]
+  },
+  {
+    "name": "Elemental HERO Sparkman",
+    "name_es": "HÉROE Elemental Sparkman",
+    "name_jp": null,
+    "quantity": 2,
+    "variants": [
+      {
+        "originalName": "Elemental HERO Sparkman (HÉROE Elemental Sparkman)",
+        "detectedLanguage": "mixed",
+        "count": 2
+      }
+    ],
+    "originalNames": [
+      "Elemental HERO Sparkman (HÉROE Elemental Sparkman)"
+    ]
+  },
+  {
+    "name": "Erebus the Underworld Monarch",
+    "name_es": "Erebus el Monarca del Inframundo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Erebus the Underworld Monarch (Erebus el Monarca del Inframundo)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Erebus the Underworld Monarch (Erebus el Monarca del Inframundo)"
+    ]
+  },
+  {
+    "name": "Eria the Water Charmer, Gentle",
+    "name_es": "Eria la Encantadora del Agua, Gentil",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Eria the Water Charmer, Gentle (Eria la Encantadora del Agua, Gentil)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Eria the Water Charmer, Gentle (Eria la Encantadora del Agua, Gentil)"
+    ]
+  },
+  {
+    "name": "Evil HERO Infernal Prodigy",
+    "name_es": "HÉROE del Mal Presagio Infernal",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Evil HERO Infernal Prodigy (HÉROE del Mal Presagio Infernal)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Evil HERO Infernal Prodigy (HÉROE del Mal Presagio Infernal)"
+    ]
+  },
+  {
+    "name": "Evil HERO Infernal Rider",
+    "name_es": "HÉROE del Mal Jinete Infernal",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Evil HERO Infernal Rider (HÉROE del Mal Jinete Infernal)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Evil HERO Infernal Rider (HÉROE del Mal Jinete Infernal)"
+    ]
+  },
+  {
+    "name": "Exiled Force",
+    "name_es": "Fuerza del Exilio",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Exiled Force (Fuerza del Exilio)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Exiled Force (Fuerza del Exilio)"
+    ]
+  },
+  {
+    "name": "Exosister Returnia",
+    "name_es": "Exohermana Returnia",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Exosister Returnia (Exohermana Returnia)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Exosister Returnia (Exohermana Returnia)"
+    ]
+  },
+  {
+    "name": "Fenrir",
+    "name_es": "Fenrir",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Fenrir (Fenrir)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Fenrir (Fenrir)"
+    ]
+  },
+  {
+    "name": "Fire Formation - Tenki",
+    "name_es": "Formación de Fuego - Tenki",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Fire Formation - Tenki (Formación de Fuego - Tenki)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Fire Formation - Tenki (Formación de Fuego - Tenki)"
+    ]
+  },
+  {
+    "name": "First of the Dragonlords",
+    "name_es": "El Primero de los Señores Dragón",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "First of the Dragonlords (El Primero de los Señores Dragón)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "First of the Dragonlords (El Primero de los Señores Dragón)"
+    ]
+  },
+  {
+    "name": "Flame Swordsman",
+    "name_es": "Espadachín de Llama",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Flame Swordsman (Espadachín de Llama)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Flame Swordsman (Espadachín de Llama)"
+    ]
+  },
+  {
+    "name": "Flower Wolf",
+    "name_es": "Lobo de Flores",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Flower Wolf (Lobo de Flores)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Flower Wolf (Lobo de Flores)"
+    ]
+  },
+  {
+    "name": "Foolish Burial",
+    "name_es": "Entierro Insensato",
+    "name_jp": null,
+    "quantity": 2,
+    "variants": [
+      {
+        "originalName": "Foolish Burial (Entierro Insensato)",
+        "detectedLanguage": "en",
+        "count": 2
+      }
+    ],
+    "originalNames": [
+      "Foolish Burial (Entierro Insensato)"
+    ]
+  },
+  {
+    "name": "Forced Back",
+    "name_es": "Retorno Forzado",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Forced Back (Retorno Forzado)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Forced Back (Retorno Forzado)"
+    ]
+  },
+  {
+    "name": "Fossil Machine Skull Buggy",
+    "name_es": "Máquina Fósil Buggy de Calavera",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Fossil Machine Skull Buggy (Máquina Fósil Buggy de Calavera)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Fossil Machine Skull Buggy (Máquina Fósil Buggy de Calavera)"
+    ]
+  },
+  {
+    "name": "Fusion Weapon",
+    "name_es": "Arma de Fusión",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Fusion Weapon (Arma de Fusión)",
+        "detectedLanguage": "es",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Fusion Weapon (Arma de Fusión)"
+    ]
+  },
+  {
+    "name": "Gaia the Dragon Champion",
+    "name_es": "Gaia el Campeón de Dragones",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Gaia the Dragon Champion (Gaia el Campeón de Dragones)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Gaia the Dragon Champion (Gaia el Campeón de Dragones)"
+    ]
+  },
+  {
+    "name": "Garoth, Lightsworn Warrior",
+    "name_es": "Garoth, Guerrero Luminoso",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Garoth, Lightsworn Warrior (Garoth, Guerrero Luminoso)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Garoth, Lightsworn Warrior (Garoth, Guerrero Luminoso)"
+    ]
+  },
+  {
+    "name": "Gate Guardian",
+    "name_es": "Guardián de la Reja",
+    "name_jp": "ゲート・ガーディアン",
+    "quantity": 3,
+    "variants": [
+      {
+        "originalName": "Gate Guardian (Guardián de la Reja)",
+        "detectedLanguage": "mixed",
+        "count": 3
+      }
+    ],
+    "originalNames": [
+      "Gate Guardian (Guardián de la Reja)"
+    ]
+  },
+  {
+    "name": "General Raiho of the Ice Barrier",
+    "name_es": "General Raiho de la Barrera de Hielo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "General Raiho de la Barrera de Hielo (General Raiho of the Ice Barrier)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "General Raiho de la Barrera de Hielo (General Raiho of the Ice Barrier)"
+    ]
+  },
+  {
+    "name": "General Wayne of the Ice Barrier",
+    "name_es": "General Wayne de la Barrera de Hielo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "General Wayne of the Ice Barrier (General Wayne de la Barrera de Hielo)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "General Wayne of the Ice Barrier (General Wayne de la Barrera de Hielo)"
+    ]
+  },
+  {
+    "name": "Geomancer of the Ice Barrier",
+    "name_es": "Geomante de la Barrera de Hielo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Geomante de la Barrera de Hielo (Geomancer of the Ice Barrier)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Geomante de la Barrera de Hielo (Geomancer of the Ice Barrier)"
+    ]
+  },
+  {
+    "name": "Geomathmech Final Sigma",
+    "name_es": "Geomatemech Sigma Final",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Geomathmech Final Sigma (Geomatemech Sigma Final)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Geomathmech Final Sigma (Geomatemech Sigma Final)"
+    ]
+  },
+  {
+    "name": "Ghoti of the Deep Beyond",
+    "name_es": "Ghoti del Más Allá Profundo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Ghoti of the Deep Beyond (Ghoti del Más Allá Profundo)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Ghoti of the Deep Beyond (Ghoti del Más Allá Profundo)"
+    ]
+  },
+  {
+    "name": "Giga Gagagigo",
+    "name_es": "Giga Gagagigo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Giga Gagagigo (Giga Gagagigo)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Giga Gagagigo (Giga Gagagigo)"
+    ]
+  },
+  {
+    "name": "Gigantic Thundercross",
+    "name_es": "Rayocruz Gigante",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Gigantic Thundercross (Rayocruz Gigante)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Gigantic Thundercross (Rayocruz Gigante)"
+    ]
+  },
+  {
+    "name": "Gilasaurus",
+    "name_es": "Gilasaurus",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Gilasaurus (Gilasaurus)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Gilasaurus (Gilasaurus)"
+    ]
+  },
+  {
+    "name": "Gladiator Beast Octavius",
+    "name_es": "Bestia Gladiador Octavius",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Gladiator Beast Octavius (Bestia Gladiador Octavius)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Gladiator Beast Octavius (Bestia Gladiador Octavius)"
+    ]
+  },
+  {
+    "name": "Gladiator Beast War Chariot",
+    "name_es": "Carro de Guerra de la Bestia Gladiador",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Gladiator Beast War Chariot (Carro de Guerra de la Bestia Gladiador)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Gladiator Beast War Chariot (Carro de Guerra de la Bestia Gladiador)"
+    ]
+  },
+  {
+    "name": "Goblin Fan",
+    "name_es": "Abanico de Goblin",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Goblin Fan (Abanico de Goblin)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Goblin Fan (Abanico de Goblin)"
+    ]
+  },
+  {
+    "name": "Goblin King",
+    "name_es": "Rey de los Goblins",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Goblin King (Rey de los Goblins)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Goblin King (Rey de los Goblins)"
+    ]
+  },
+  {
+    "name": "Gora Turtle of Illusion",
+    "name_es": "Tortuga Gora de la Ilusión",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Gora Turtle of Illusion (Tortuga Gora de la Ilusión)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Gora Turtle of Illusion (Tortuga Gora de la Ilusión)"
+    ]
+  },
+  {
+    "name": "Gravekeeper's Assailant",
+    "name_es": "Asaltante del Cuidador de Tumbas",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Gravekeeper's Assailant (Asaltante del Cuidador de Tumbas)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Gravekeeper's Assailant (Asaltante del Cuidador de Tumbas)"
+    ]
+  },
+  {
+    "name": "Gravekeeper's Vassal",
+    "name_es": "Vasallo del Cuidador de Tumbas",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Gravekeeper's Vassal (Vasallo del Cuidador de Tumbas)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Gravekeeper's Vassal (Vasallo del Cuidador de Tumbas)"
+    ]
+  },
+  {
+    "name": "Guardian Sphinx",
+    "name_es": "Esfinge Guardiana",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Guardian Sphinx (Esfinge Guardiana)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Guardian Sphinx (Esfinge Guardiana)"
+    ]
+  },
+  {
+    "name": "Hailon, the Timelord",
+    "name_es": "Hailon, el Señor del Tiempo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Hailon, the Timelord (Hailon, el Señor del Tiempo)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Hailon, the Timelord (Hailon, el Señor del Tiempo)"
+    ]
+  },
+  {
+    "name": "Hamon, Lord of Striking Thunder",
+    "name_es": "Hamon, Señor del Trueno Golpeador",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Hamon, Lord of Striking Thunder (Hamon, Señor del Trueno Golpeador)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Hamon, Lord of Striking Thunder (Hamon, Señor del Trueno Golpeador)"
+    ]
+  },
+  {
+    "name": "Hapi, Guidance of Horus",
+    "name_es": "Hapi, Guía de Horus",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Hapi, Guidance of Horus (Hapi, Guía de Horus)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Hapi, Guidance of Horus (Hapi, Guía de Horus)"
+    ]
+  },
+  {
+    "name": "Harpie Lady",
+    "name_es": "Dama Arpía",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Harpie Lady (Dama Arpía)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Harpie Lady (Dama Arpía)"
+    ]
+  },
+  {
+    "name": "Hayabusa Knight",
+    "name_es": "Caballero Hayabusa",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Hayabusa Knight (Caballero Hayabusa)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Hayabusa Knight (Caballero Hayabusa)"
+    ]
+  },
+  {
+    "name": "Heavy Storm",
+    "name_es": "Tormenta Pesada",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Heavy Storm (Tormenta Pesada)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Heavy Storm (Tormenta Pesada)"
+    ]
+  },
+  {
+    "name": "Hedge Guard",
+    "name_es": "Guardia de Seto",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Hedge Guard (Guardia de Seto)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Hedge Guard (Guardia de Seto)"
+    ]
+  },
+  {
+    "name": "Herald of the Abyss",
+    "name_es": "Heraldo del Abismo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Herald of the Abyss (Heraldo del Abismo)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Herald of the Abyss (Heraldo del Abismo)"
+    ]
+  },
+  {
+    "name": "Hero Mask",
+    "name_es": "Máscara del HÉROE",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Hero Mask (Máscara del HÉROE)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Hero Mask (Máscara del HÉROE)"
+    ]
+  },
+  {
+    "name": "Hiita the Fire Charmer, Ablaze",
+    "name_es": "Hiita la Encantadora del Fuego, Ardiente",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Hiita the Fire Charmer, Ablaze (Hiita la Encantadora del Fuego, Ardiente)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Hiita the Fire Charmer, Ablaze (Hiita la Encantadora del Fuego, Ardiente)"
+    ]
+  },
+  {
+    "name": "Hiro's Shadow Scout",
+    "name_es": "Explorador de las Sombras de Hiro",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Hiro's Shadow Scout (Explorador de las Sombras de Hiro)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Hiro's Shadow Scout (Explorador de las Sombras de Hiro)"
+    ]
+  },
+  {
+    "name": "Hot Red Dragon Archfiend Abyss",
+    "name_es": "Abismo de Dragón de la Llama Roja Caliente",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Hot Red Dragon Archfiend Abyss (Abismo de Dragón de la Llama Roja Caliente)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Hot Red Dragon Archfiend Abyss (Abismo de Dragón de la Llama Roja Caliente)"
+    ]
+  },
+  {
+    "name": "Hyozanryu",
+    "name_es": "Hyozanryu",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Hyozanryu (Hyozanryu)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Hyozanryu (Hyozanryu)"
+    ]
+  },
+  {
+    "name": "Ice Hand",
+    "name_es": "Mano de Hielo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Ice Hand (Mano de Hielo)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Ice Hand (Mano de Hielo)"
+    ]
+  },
+  {
+    "name": "Indigo-Eyes Silver Dragon",
+    "name_es": "Dragón Plateado de Ojos Índigos",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Indigo-Eyes Silver Dragon (Dragón Plateado de Ojos Índigos)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Indigo-Eyes Silver Dragon (Dragón Plateado de Ojos Índigos)"
+    ]
+  },
+  {
+    "name": "Infernoid Piaty",
+    "name_es": "Infernoid Piaty",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Infernoid Piaty (Infernoid Piaty)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Infernoid Piaty (Infernoid Piaty)"
+    ]
+  },
+  {
+    "name": "Infinite Impermanence",
+    "name_es": "Impermanencia Infinita",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Infinite Impermanence (Impermanencia Infinita)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Infinite Impermanence (Impermanencia Infinita)"
+    ]
+  },
+  {
+    "name": "Insect Imitation",
+    "name_es": "Imitación de Insecto",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Insect Imitation (Imitación de Insecto)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Insect Imitation (Imitación de Insecto)"
+    ]
+  },
+  {
+    "name": "Insect Princess",
+    "name_es": "Princesa Insecto",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Insect Princess (Princesa Insecto)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Insect Princess (Princesa Insecto)"
+    ]
+  },
+  {
+    "name": "Intimidating Ore - Summonite",
+    "name_es": "Mineral Intimidante - Summonita",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Intimidating Ore - Summonite (Mineral Intimidante - Summonita)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Intimidating Ore - Summonite (Mineral Intimidante - Summonita)"
+    ]
+  },
+  {
+    "name": "Inzektor Dragonfly",
+    "name_es": "Libélula Inzektor",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Inzektor Dragonfly (Libélula Inzektor)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Inzektor Dragonfly (Libélula Inzektor)"
+    ]
+  },
+  {
+    "name": "Jack's Knight",
+    "name_es": "Caballero del Jack",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Jack's Knight (Caballero del Jack)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Jack's Knight (Caballero del Jack)"
+    ]
+  },
+  {
+    "name": "Judge Man",
+    "name_es": "Juez",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Judge Man (Juez)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Judge Man (Juez)"
+    ]
+  },
+  {
+    "name": "Kaiser Glider",
+    "name_es": "Planeador del Káiser",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Kaiser Glider (Planeador del Káiser)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Kaiser Glider (Planeador del Káiser)"
+    ]
+  },
+  {
+    "name": "Kaiser Sea Horse",
+    "name_es": "Hipocampo de Káiser",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Kaiser Sea Horse (Hipocampo de Káiser)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Kaiser Sea Horse (Hipocampo de Káiser)"
+    ]
+  },
+  {
+    "name": "Kamion, the Timelord",
+    "name_es": "Kamion, el Señor del Tiempo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Kamion, the Timelord (Kamion, el Señor del Tiempo)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Kamion, the Timelord (Kamion, el Señor del Tiempo)"
+    ]
+  },
+  {
+    "name": "King's Knight",
+    "name_es": "Caballero del Rey",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "King's Knight (Caballero del Rey)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "King's Knight (Caballero del Rey)"
+    ]
+  },
+  {
+    "name": "Kiwi Magician Girl",
+    "name_es": "Chica Maga Kiwi",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Kiwi Magician Girl (Chica Maga Kiwi)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Kiwi Magician Girl (Chica Maga Kiwi)"
+    ]
+  },
+  {
+    "name": "Labyrinth Heavy Tank",
+    "name_es": "Tanque Pesado Laberinto",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Labyrinth Heavy Tank (Tanque Pesado Laberinto)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Labyrinth Heavy Tank (Tanque Pesado Laberinto)"
+    ]
+  },
+  {
+    "name": "Lazion, the Timelord",
+    "name_es": "Lazion, el Señor del Tiempo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Lazion, the Timelord (Lazion, el Señor del Tiempo)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Lazion, the Timelord (Lazion, el Señor del Tiempo)"
+    ]
+  },
+  {
+    "name": "Left Arm Offering",
+    "name_es": "Ofrenda del Brazo Izquierdo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Left Arm Offering (Ofrenda del Brazo Izquierdo)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Left Arm Offering (Ofrenda del Brazo Izquierdo)"
+    ]
+  },
+  {
+    "name": "Legacy of Yata-Garasu",
+    "name_es": "Legado de Yata-Garasu",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Legacy of Yata-Garasu (Legado de Yata-Garasu)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Legacy of Yata-Garasu (Legado de Yata-Garasu)"
+    ]
+  },
+  {
+    "name": "Legendary Black Belt",
+    "name_es": "Cinturón Negro Legendario",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Legendary Black Belt (Cinturón Negro Legendario)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Legendary Black Belt (Cinturón Negro Legendario)"
+    ]
+  },
+  {
+    "name": "Lib the World Key Blademaster",
+    "name_es": "Lib la Maestra de la Espada de la Llave Mundial",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Lib the World Key Blademaster (Lib la Maestra de la Espada de la Llave Mundial)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Lib the World Key Blademaster (Lib la Maestra de la Espada de la Llave Mundial)"
+    ]
+  },
+  {
+    "name": "Libromancer Fire",
+    "name_es": "Fuego de Libromancia",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Libromancer Fire (Fuego de Libromancia)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Libromancer Fire (Fuego de Libromancia)"
+    ]
+  },
+  {
+    "name": "Light Spiral",
+    "name_es": "Espiral de Luz",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Light Spiral (Espiral de Luz)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Light Spiral (Espiral de Luz)"
+    ]
+  },
+  {
+    "name": "Lightforce Sword",
+    "name_es": "Espada de la Fuerza de la Luz",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Lightforce Sword (Espada de la Fuerza de la Luz)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Lightforce Sword (Espada de la Fuerza de la Luz)"
+    ]
+  },
+  {
+    "name": "Limiter Removal",
+    "name_es": "Quitar el Limitador",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Quitar el Limitador (Limiter Removal)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Quitar el Limitador (Limiter Removal)"
+    ]
+  },
+  {
+    "name": "Linguriboh",
+    "name_es": "Linguriboh",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Linguriboh (Linguriboh)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Linguriboh (Linguriboh)"
+    ]
+  },
+  {
+    "name": "Linkmail Archfiend",
+    "name_es": "Archidemonio Enlacemail",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Archidemonio Enlacemail (Linkmail Archfiend)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Archidemonio Enlacemail (Linkmail Archfiend)"
+    ]
+  },
+  {
+    "name": "Lo, the Prayers of the Voiceless Voice",
+    "name_es": "Lo, las Plegarias de la Voz Muda",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Lo, the Prayers of the Voiceless Voice (Lo, las Plegarias de la Voz Muda)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Lo, the Prayers of the Voiceless Voice (Lo, las Plegarias de la Voz Muda)"
+    ]
+  },
+  {
+    "name": "Lord of the Heavenly Prison",
+    "name_es": "Señor de la Prisión Celestial",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Lord of the Heavenly Prison (Señor de la Prisión Celestial)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Lord of the Heavenly Prison (Señor de la Prisión Celestial)"
+    ]
+  },
+  {
+    "name": "Lubellion the Searing Dragon",
+    "name_es": "Lubellion el Dragón Fogoso",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Lubellion the Searing Dragon (Lubellion el Dragón Fogoso)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Lubellion the Searing Dragon (Lubellion el Dragón Fogoso)"
+    ]
+  },
+  {
+    "name": "Luminous Spark",
+    "name_es": "Chispa Luminosa",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Luminous Spark (Chispa Luminosa)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Luminous Spark (Chispa Luminosa)"
+    ]
+  },
+  {
+    "name": "Machina Fortress",
+    "name_es": "Fortaleza Machina",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Machina Fortress (Fortaleza Machina)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Machina Fortress (Fortaleza Machina)"
+    ]
+  },
+  {
+    "name": "Machina Gearframe",
+    "name_es": "Chasis Machina",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Machina Gearframe (Chasis Machina)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Machina Gearframe (Chasis Machina)"
+    ]
+  },
+  {
+    "name": "Mad Sword Beast",
+    "name_es": "Bestia de la Espada Loca",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Mad Sword Beast (Bestia de la Espada Loca)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Mad Sword Beast (Bestia de la Espada Loca)"
+    ]
+  },
+  {
+    "name": "Magic Cylinder",
+    "name_es": "Cilindro Mágico",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Magic Cylinder (Cilindro Mágico)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Magic Cylinder (Cilindro Mágico)"
+    ]
+  },
+  {
+    "name": "Magic Drain",
+    "name_es": "Drenaje Mágico",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Magic Drain (Drenaje Mágico)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Magic Drain (Drenaje Mágico)"
+    ]
+  },
+  {
+    "name": "Magic Jammer",
+    "name_es": "Inhibidor de Magia",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Magic Jammer (Inhibidor de Magia)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Magic Jammer (Inhibidor de Magia)"
+    ]
+  },
+  {
+    "name": "Magical Dimension",
+    "name_es": "Dimensión Mágica",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Magical Dimension (Dimensión Mágica)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Magical Dimension (Dimensión Mágica)"
+    ]
+  },
+  {
+    "name": "Magicians' Defense",
+    "name_es": "Defensa de los Magos",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Magicians' Defense (Defensa de los Magos)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Magicians' Defense (Defensa de los Magos)"
+    ]
+  },
+  {
+    "name": "Maiden of White",
+    "name_es": "Doncella de Blanco",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Maiden of White (Doncella de Blanco)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Maiden of White (Doncella de Blanco)"
+    ]
+  },
+  {
+    "name": "Majestic Red Dragon",
+    "name_es": "Dragón Rojo Majestuoso",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Majestic Red Dragon (Dragón Rojo Majestuoso)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Majestic Red Dragon (Dragón Rojo Majestuoso)"
+    ]
+  },
+  {
+    "name": "Majestic Star Dragon",
+    "name_es": "Dragon Estelar Majestuoso",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Dragon Estelar Majestuoso (Majestic Star Dragon)",
+        "detectedLanguage": "fr",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Dragon Estelar Majestuoso (Majestic Star Dragon)"
+    ]
+  },
+  {
+    "name": "Majesty of the White Dragons",
+    "name_es": "Majestad de los Dragones Blancos",
+    "name_jp": null,
+    "quantity": 2,
+    "variants": [
+      {
+        "originalName": "Majesty of the White Dragons (Majestad de los Dragones Blancos)",
+        "detectedLanguage": "mixed",
+        "count": 2
+      }
+    ],
+    "originalNames": [
+      "Majesty of the White Dragons (Majestad de los Dragones Blancos)"
+    ]
+  },
+  {
+    "name": "Mammoth Graveyard",
+    "name_es": "Cementerio de Mamuts",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Mammoth Graveyard (Cementerio de Mamuts)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Mammoth Graveyard (Cementerio de Mamuts)"
+    ]
+  },
+  {
+    "name": "Mannadium Reframing",
+    "name_es": "Reencuadre de Mannadium",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Mannadium Reframing (Reencuadre de Mannadium)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Mannadium Reframing (Reencuadre de Mannadium)"
+    ]
+  },
+  {
+    "name": "Mask Change",
+    "name_es": "Cambio de Máscara",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Mask Change (Cambio de Máscara)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Mask Change (Cambio de Máscara)"
+    ]
+  },
+  {
+    "name": "Mask of Restrict",
+    "name_es": "Máscara de Restricción",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Mask of Restrict (Máscara de Restricción)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Mask of Restrict (Máscara de Restricción)"
+    ]
+  },
+  {
+    "name": "Mekk-Knight Blue Sky",
+    "name_es": "Mekk-Caballero Cielo Azul",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Mekk-Knight Blue Sky (Mekk-Caballero Cielo Azul)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Mekk-Knight Blue Sky (Mekk-Caballero Cielo Azul)"
+    ]
+  },
+  {
+    "name": "Mekk-Knight Purple Nightfall",
+    "name_es": "Mekk-Caballero Anochecer Púrpura",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Mekk-Knight Purple Nightfall (Mekk-Caballero Anochecer Púrpura)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Mekk-Knight Purple Nightfall (Mekk-Caballero Anochecer Púrpura)"
+    ]
+  },
+  {
+    "name": "Melchid the Four-Face Beast",
+    "name_es": "Melchid la Bestia de las Cuatro Caras",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Melchid the Four-Face Beast (Melchid la Bestia de las Cuatro Caras)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Melchid the Four-Face Beast (Melchid la Bestia de las Cuatro Caras)"
+    ]
+  },
+  {
+    "name": "Mementotlan Bone Party",
+    "name_es": "Fiesta de Huesos Mementotlán",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Mementotlan Bone Party (Fiesta de Huesos Mementotlán)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Mementotlan Bone Party (Fiesta de Huesos Mementotlán)"
+    ]
+  },
+  {
+    "name": "Metaion, the Timelord",
+    "name_es": "Metaion, el Señor del Tiempo",
+    "name_jp": null,
+    "quantity": 2,
+    "variants": [
+      {
+        "originalName": "Metaion, the Timelord (Metaion, el Señor del Tiempo)",
+        "detectedLanguage": "mixed",
+        "count": 2
+      }
+    ],
+    "originalNames": [
+      "Metaion, the Timelord (Metaion, el Señor del Tiempo)"
+    ]
+  },
+  {
+    "name": "Metaltronus",
+    "name_es": "Metaltrono",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Metaltronus (Metaltrono)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Metaltronus (Metaltrono)"
+    ]
+  },
+  {
+    "name": "Metalzoa",
+    "name_es": "Metalzoa",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Metalzoa (Metalzoa)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Metalzoa (Metalzoa)"
+    ]
+  },
+  {
+    "name": "Meteor B. Dragon",
+    "name_es": "Dragón Negro de Meteorito",
+    "name_jp": "メテオ・ブラック・ドラゴン",
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Meteor B. Dragon (Dragón Negro de Meteorito)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Meteor B. Dragon (Dragón Negro de Meteorito)"
+    ]
+  },
+  {
+    "name": "Meteor Dragon",
+    "name_es": "Dragon Meteoro",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Dragón Meteoro (Meteor Dragon)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Dragón Meteoro (Meteor Dragon)"
+    ]
+  },
+  {
+    "name": "Michion, the Timelord",
+    "name_es": "Michion, el Señor del Tiempo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Michion, the Timelord (Michion, el Señor del Tiempo)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Michion, the Timelord (Michion, el Señor del Tiempo)"
+    ]
+  },
+  {
+    "name": "Michizure",
+    "name_es": "Michizure",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Michizure (Michizure)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Michizure (Michizure)"
+    ]
+  },
+  {
+    "name": "Mind Control",
+    "name_es": "Control Mental",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Mind Control (Control Mental)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Mind Control (Control Mental)"
+    ]
+  },
+  {
+    "name": "Mind Crush",
+    "name_es": "Aplastamiento de la Mente",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Mind Crush (Aplastamiento de la Mente)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Mind Crush (Aplastamiento de la Mente)"
+    ]
+  },
+  {
+    "name": "Mirror Force",
+    "name_es": "Fuerza de Espejo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Mirror Force (Fuerza de Espejo)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Mirror Force (Fuerza de Espejo)"
+    ]
+  },
+  {
+    "name": "Mirrorjade the Iceblade Dragon",
+    "name_es": "Espejade el Dragon Hoja de Hielo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Espejade el Dragón Hoja de Hielo (Mirrorjade the Iceblade Dragon)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Espejade el Dragón Hoja de Hielo (Mirrorjade the Iceblade Dragon)"
+    ]
+  },
+  {
+    "name": "Miscellaneousaurus",
+    "name_es": "Miscelaneosaurio",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Miscellaneousaurus (Miscelaneosaurio)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Miscellaneousaurus (Miscelaneosaurio)"
+    ]
+  },
+  {
+    "name": "Mother Grizzly",
+    "name_es": "Madre Grizzly",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Mother Grizzly (Madre Grizzly)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Mother Grizzly (Madre Grizzly)"
+    ]
+  },
+  {
+    "name": "Motor Kaiser",
+    "name_es": "Káiser Motorizado",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Motor Kaiser (Káiser Motorizado)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Motor Kaiser (Káiser Motorizado)"
+    ]
+  },
+  {
+    "name": "Mountain",
+    "name_es": "Montaña",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Mountain (Montaña)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Mountain (Montaña)"
+    ]
+  },
+  {
+    "name": "Multiple Piece Golem",
+    "name_es": "Golem de Piezas Múltiples",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Multiple Piece Golem (Golem de Piezas Múltiples)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Multiple Piece Golem (Golem de Piezas Múltiples)"
+    ]
+  },
+  {
+    "name": "Munin the Runick Wings",
+    "name_es": "Munin las Alas Rúnicas",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Munin the Runick Wings (Munin las Alas Rúnicas)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Munin the Runick Wings (Munin las Alas Rúnicas)"
+    ]
+  },
+  {
+    "name": "Mystic Horseman",
+    "name_es": "Jinete Místico",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Mystic Horseman (Jinete Místico)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Mystic Horseman (Jinete Místico)"
+    ]
+  },
+  {
+    "name": "Mystic Piper",
+    "name_es": "Flautista Místico",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Mystic Piper (Flautista Místico)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Mystic Piper (Flautista Místico)"
+    ]
+  },
+  {
+    "name": "Mystic Plasma Zone",
+    "name_es": "Zona de Plasma Místico",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Mystic Plasma Zone (Zona de Plasma Místico)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Mystic Plasma Zone (Zona de Plasma Místico)"
+    ]
+  },
+  {
+    "name": "Mystic Swordsman LV6",
+    "name_es": "Espadachín Místico LV6",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Mystic Swordsman LV6 (Espadachín Místico LV6)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Mystic Swordsman LV6 (Espadachín Místico LV6)"
+    ]
+  },
+  {
+    "name": "Mystic Tomato",
+    "name_es": "Tomate Místico",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Mystic Tomato (Tomate Místico)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Mystic Tomato (Tomate Místico)"
+    ]
+  },
+  {
+    "name": "Mystical Cards of Light",
+    "name_es": "Cartas Místicas de la Luz",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Mystical Cards of Light (Cartas Místicas de la Luz)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Mystical Cards of Light (Cartas Místicas de la Luz)"
+    ]
+  },
+  {
+    "name": "Necroface",
+    "name_es": "Necrocara",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Necroface (Necrocara)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Necroface (Necrocara)"
+    ]
+  },
+  {
+    "name": "Nekroz of Clausolas",
+    "name_es": "Nekroz de Clausolas",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Nekroz of Clausolas (Nekroz de Clausolas)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Nekroz of Clausolas (Nekroz de Clausolas)"
+    ]
+  },
+  {
+    "name": "Neo Blue-Eyes Ultimate Dragon",
+    "name_es": "Neo Dragón de Ojos Azules Definitivo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Neo Blue-Eyes Ultimate Dragon (Neo Dragón de Ojos Azules Definitivo)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Neo Blue-Eyes Ultimate Dragon (Neo Dragón de Ojos Azules Definitivo)"
+    ]
+  },
+  {
+    "name": "Neo Galaxy-Eyes Cipher Dragon",
+    "name_es": "Neo Dragón de Cifrado de Ojos Galácticos",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Neo Galaxy-Eyes Cipher Dragon (Neo Dragón de Cifrado de Ojos Galácticos)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Neo Galaxy-Eyes Cipher Dragon (Neo Dragón de Cifrado de Ojos Galácticos)"
+    ]
+  },
+  {
+    "name": "Neo Kaiser Sea Horse",
+    "name_es": "Neo Hipocampo de Káiser",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Neo Kaiser Sea Horse (Neo Hipocampo de Káiser)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Neo Kaiser Sea Horse (Neo Hipocampo de Káiser)"
+    ]
+  },
+  {
+    "name": "Neutron Blast",
+    "name_es": "Explosión de Neutrones",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Neutron Blast (Explosión de Neutrones)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Neutron Blast (Explosión de Neutrones)"
+    ]
+  },
+  {
+    "name": "Nightmare Magician",
+    "name_es": "Mago de la Pesadilla",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Nightmare Magician (Mago de la Pesadilla)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Nightmare Magician (Mago de la Pesadilla)"
+    ]
+  },
+  {
+    "name": "Nightmare Pain",
+    "name_es": "Dolor de Pesadilla",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Dolor de Pesadilla (Nightmare Pain)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Dolor de Pesadilla (Nightmare Pain)"
+    ]
+  },
+  {
+    "name": "Noh-P.U.N.K. Foxy Tune",
+    "name_es": "Sinfonía del Zorro Noh-P.U.N.K.",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Noh-P.U.N.K. Foxy Tune (Sinfonía del Zorro Noh-P.U.N.K.)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Noh-P.U.N.K. Foxy Tune (Sinfonía del Zorro Noh-P.U.N.K.)"
+    ]
+  },
+  {
+    "name": "Number 38: Hope Harbinger Dragon Titanic Galaxy",
+    "name_es": "Número 38: Esperanza Heraldo Dragón Galáctico Titánico",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Number 38: Hope Harbinger Dragon Titanic Galaxy (Número 38: Esperanza Heraldo Dragón Galáctico Titánico)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Number 38: Hope Harbinger Dragon Titanic Galaxy (Número 38: Esperanza Heraldo Dragón Galáctico Titánico)"
+    ]
+  },
+  {
+    "name": "Number 59: Crooked Cook",
+    "name_es": "Número 59: Cocinero Corrupto",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Number 59: Crooked Cook (Número 59: Cocinero Corrupto)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Number 59: Crooked Cook (Número 59: Cocinero Corrupto)"
+    ]
+  },
+  {
+    "name": "Number 9: Dyson Sphere",
+    "name_es": "Número 9: Esfera de Dyson",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Number 9: Dyson Sphere (Número 9: Esfera de Dyson)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Number 9: Dyson Sphere (Número 9: Esfera de Dyson)"
+    ]
+  },
+  {
+    "name": "One for One",
+    "name_es": "Uno por Uno",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "One for One (Uno por Uno)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "One for One (Uno por Uno)"
+    ]
+  },
+  {
+    "name": "Oni Tank T-34",
+    "name_es": "Tanque Oni T-34",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Oni Tank T-34 (Tanque Oni T-34)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Oni Tank T-34 (Tanque Oni T-34)"
+    ]
+  },
+  {
+    "name": "Ordeal of a Traveler",
+    "name_es": "Prueba de un Viajero",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Ordeal of a Traveler (Prueba de un Viajero)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Ordeal of a Traveler (Prueba de un Viajero)"
+    ]
+  },
+  {
+    "name": "Over Destiny",
+    "name_es": "Sobre el Destino",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Over Destiny (Sobre el Destino)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Over Destiny (Sobre el Destino)"
+    ]
+  },
+  {
+    "name": "Parallel World Fusion",
+    "name_es": "Fusión de Mundo Paralelo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Parallel World Fusion (Fusión de Mundo Paralelo)",
+        "detectedLanguage": "es",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Parallel World Fusion (Fusión de Mundo Paralelo)"
+    ]
+  },
+  {
+    "name": "Parasite Paracide",
+    "name_es": "Parásito Paracida",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Parasite Paracide (Parásito Paracida)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Parasite Paracide (Parásito Paracida)"
+    ]
+  },
+  {
+    "name": "Peaceful Planet Calarium",
+    "name_es": "Planeta Pacífico Calarium",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Peaceful Planet Calarium (Planeta Pacífico Calarium)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Peaceful Planet Calarium (Planeta Pacífico Calarium)"
+    ]
+  },
+  {
+    "name": "Perfect Sync - A-Un",
+    "name_es": "Sincronía Perfecta - A-Un",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Perfect Sync - A-Un (Sincronía Perfecta - A-Un)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Perfect Sync - A-Un (Sincronía Perfecta - A-Un)"
+    ]
+  },
+  {
+    "name": "Performance of Sword",
+    "name_es": "Ejecución de la Espada",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Performance of Sword (Ejecución de la Espada)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Performance of Sword (Ejecución de la Espada)"
+    ]
+  },
+  {
+    "name": "Phoenix Wing Wind Blast",
+    "name_es": "Ráfaga de Viento del Ala del Fénix",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Phoenix Wing Wind Blast (Ráfaga de Viento del Ala del Fénix)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Phoenix Wing Wind Blast (Ráfaga de Viento del Ala del Fénix)"
+    ]
+  },
+  {
+    "name": "Prayers of the Voiceless Voice",
+    "name_es": "Plegarias de la Voz Muda",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Prayers of the Voiceless Voice (Plegarias de la Voz Muda)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Prayers of the Voiceless Voice (Plegarias de la Voz Muda)"
+    ]
+  },
+  {
+    "name": "Predaplant Dragostapelia",
+    "name_es": "Predaplanta Dragostapelia",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Predaplant Dragostapelia (Predaplanta Dragostapelia)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Predaplant Dragostapelia (Predaplanta Dragostapelia)"
+    ]
+  },
+  {
+    "name": "Predaplast",
+    "name_es": "Predaplanta",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Predaplast (Predaplanta)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Predaplast (Predaplanta)"
+    ]
+  },
+  {
+    "name": "Pressured Planet Wraitsoth",
+    "name_es": "Planeta Presurizado Wraitsoth",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Pressured Planet Wraitsoth (Planeta Presurizado Wraitsoth)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Pressured Planet Wraitsoth (Planeta Presurizado Wraitsoth)"
+    ]
+  },
+  {
+    "name": "Priestess with Eyes of Blue",
+    "name_es": "Sacerdotisa con Ojos de Azul",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Priestess with Eyes of Blue (Sacerdotisa con Ojos de Azul)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Priestess with Eyes of Blue (Sacerdotisa con Ojos de Azul)"
+    ]
+  },
+  {
+    "name": "Primal Seed",
+    "name_es": "Semilla Primitiva",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Primal Seed (Semilla Primitiva)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Primal Seed (Semilla Primitiva)"
+    ]
+  },
+  {
+    "name": "Pyramid Turtle",
+    "name_es": "Tortuga Pirámide",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Pyramid Turtle (Tortuga Pirámide)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Pyramid Turtle (Tortuga Pirámide)"
+    ]
+  },
+  {
+    "name": "Queen's Knight",
+    "name_es": "Caballero de la Reina",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Queen's Knight (Caballero de la Reina)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Queen's Knight (Caballero de la Reina)"
+    ]
+  },
+  {
+    "name": "R - Righteous Justice",
+    "name_es": "R - Justicia Justa",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "R - Righteous Justice (R - Justicia Justa)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "R - Righteous Justice (R - Justicia Justa)"
+    ]
+  },
+  {
+    "name": "Rainbow Gravity",
+    "name_es": "Gravedad del Arco Iris",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Rainbow Gravity (Gravedad del Arco Iris)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Rainbow Gravity (Gravedad del Arco Iris)"
+    ]
+  },
+  {
+    "name": "Rainbow Neos",
+    "name_es": "Neos Arcoíris",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Rainbow Neos (Neos Arcoíris)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Rainbow Neos (Neos Arcoíris)"
+    ]
+  },
+  {
+    "name": "Raiza the Storm Monarch",
+    "name_es": "Raiza el Monarca de las Tormentas",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Raiza el Monarca de las Tormentas (Raiza the Storm Monarch)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Raiza el Monarca de las Tormentas (Raiza the Storm Monarch)"
+    ]
+  },
+  {
+    "name": "Raphion, the Timelord",
+    "name_es": "Raphion, el Señor del Tiempo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Raphion, the Timelord (Raphion, el Señor del Tiempo)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Raphion, the Timelord (Raphion, el Señor del Tiempo)"
+    ]
+  },
+  {
+    "name": "Realm Resonance",
+    "name_es": "Resonancia del Reino",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Realm Resonance (Resonancia del Reino)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Realm Resonance (Resonancia del Reino)"
+    ]
+  },
+  {
+    "name": "Reasoning",
+    "name_es": "Razonamiento",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Reasoning (Razonamiento)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Reasoning (Razonamiento)"
+    ]
+  },
+  {
+    "name": "Red-Eyes Black Dragon",
+    "name_es": "Dragón Negro de Ojos Rojos",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Red-Eyes Black Dragon (Dragón Negro de Ojos Rojos)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Red-Eyes Black Dragon (Dragón Negro de Ojos Rojos)"
+    ]
+  },
+  {
+    "name": "Red-Eyes Black Metal Dragon",
+    "name_es": "Dragón de Metal Negro de Ojos Rojos",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Red-Eyes Black Metal Dragon (Dragón de Metal Negro de Ojos Rojos)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Red-Eyes Black Metal Dragon (Dragón de Metal Negro de Ojos Rojos)"
+    ]
+  },
+  {
+    "name": "REINFORCE!",
+    "name_es": "¡REFUERZOS!",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "REINFORCE! (¡REFUERZOS!)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "REINFORCE! (¡REFUERZOS!)"
+    ]
+  },
+  {
+    "name": "Reinforcement of the Army",
+    "name_es": "Refuerzo del Ejército",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Reinforcement of the Army (Refuerzo del Ejército)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Reinforcement of the Army (Refuerzo del Ejército)"
+    ]
+  },
+  {
+    "name": "Relinquished Anima",
+    "name_es": "Anima Abandonada",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Relinquished Anima (Anima Abandonada)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Relinquished Anima (Anima Abandonada)"
+    ]
+  },
+  {
+    "name": "Remove Trap",
+    "name_es": "Remover Trampa",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Remove Trap (Remover Trampa)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Remove Trap (Remover Trampa)"
+    ]
+  },
+  {
+    "name": "Reptilianne Medusa",
+    "name_es": "Reptilianne Medusa",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Reptilianne Medusa (Reptilianne Medusa)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Reptilianne Medusa (Reptilianne Medusa)"
+    ]
+  },
+  {
+    "name": "Return from the Different Dimension",
+    "name_es": "Regreso de una Dimensión Diferente",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Return from the Different Dimension (Regreso de una Dimensión Diferente)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Return from the Different Dimension (Regreso de una Dimensión Diferente)"
+    ]
+  },
+  {
+    "name": "Revendread Executor",
+    "name_es": "Ejecutor Revengamiedo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Ejecutor Revengamiedo (Vendread Executor)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Ejecutor Revengamiedo (Vendread Executor)"
+    ]
+  },
+  {
+    "name": "Revendread Slayer",
+    "name_es": "Asesino Revengamiedo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Revendread Slayer (Asesino Revengamiedo)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Revendread Slayer (Asesino Revengamiedo)"
+    ]
+  },
+  {
+    "name": "Revival of Dokurorider",
+    "name_es": "Renacimiento de Dokurorider",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Revival of Dokurorider (Renacimiento de Dokurorider)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Revival of Dokurorider (Renacimiento de Dokurorider)"
+    ]
+  },
+  {
+    "name": "Rider of the Storm Winds",
+    "name_es": "Jineta de los Vientos de Tormenta",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Rider of the Storm Winds (Jineta de los Vientos de Tormenta)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Rider of the Storm Winds (Jineta de los Vientos de Tormenta)"
+    ]
+  },
+  {
+    "name": "Rindbrumm the Striking Dragon",
+    "name_es": "Rindbrumm el Dragón Golpeador",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Rindbrumm the Striking Dragon (Rindbrumm el Dragón Golpeador)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Rindbrumm the Striking Dragon (Rindbrumm el Dragón Golpeador)"
+    ]
+  },
+  {
+    "name": "Rising Air Current",
+    "name_es": "Corriente de Aire Ascendente",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Rising Air Current (Corriente de Aire Ascendente)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Rising Air Current (Corriente de Aire Ascendente)"
+    ]
+  },
+  {
+    "name": "Roar of the Blue-Eyed Dragons",
+    "name_es": "Rugido de los Dragones de Ojos Azules",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Roar of the Blue-Eyed Dragons (Rugido de los Dragones de Ojos Azules)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Roar of the Blue-Eyed Dragons (Rugido de los Dragones de Ojos Azules)"
+    ]
+  },
+  {
+    "name": "Robbin' Zombie",
+    "name_es": "Zombi Ladrón",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Robbin' Zombie (Zombi Ladrón)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Robbin' Zombie (Zombi Ladrón)"
+    ]
+  },
+  {
+    "name": "Rokket Tracer",
+    "name_es": "Trazador Cohete",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Rokket Tracer (Trazador Cohete)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Rokket Tracer (Trazador Cohete)"
+    ]
+  },
+  {
+    "name": "Runick Destruction",
+    "name_es": "Destrucción Rúnica",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Runick Destruction (Destrucción Rúnica)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Runick Destruction (Destrucción Rúnica)"
+    ]
+  },
+  {
+    "name": "Runick Dispelling",
+    "name_es": "Disipación Rúnica",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Runick Dispelling (Disipación Rúnica)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Runick Dispelling (Disipación Rúnica)"
+    ]
+  },
+  {
+    "name": "Runick Fountain",
+    "name_es": "Fuente Rúnica",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Runick Fountain (Fuente Rúnica)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Runick Fountain (Fuente Rúnica)"
+    ]
+  },
+  {
+    "name": "Ryko, Lightsworn Hunter",
+    "name_es": "Ryko, Cazador Luminoso",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Ryko, Lightsworn Hunter (Ryko, Cazador Luminoso)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Ryko, Lightsworn Hunter (Ryko, Cazador Luminoso)"
+    ]
+  },
+  {
+    "name": "Saffira, Dragon Queen of the Voiceless Voice",
+    "name_es": "Saffira, Reina Dragón de la Voz Muda",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Saffira, Dragon Queen of the Voiceless Voice (Saffira, Reina Dragón de la Voz Muda)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Saffira, Dragon Queen of the Voiceless Voice (Saffira, Reina Dragón de la Voz Muda)"
+    ]
+  },
+  {
+    "name": "Sage with Eyes of Blue",
+    "name_es": "Sabio con Ojos de Azul",
+    "name_jp": null,
+    "quantity": 2,
+    "variants": [
+      {
+        "originalName": "Sabio de Azules Ojos (Sage with Eyes of Blue)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      },
+      {
+        "originalName": "Sage with Eyes of Blue (Sabio con Ojos de Azul)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Sabio de Azules Ojos (Sage with Eyes of Blue)",
+      "Sage with Eyes of Blue (Sabio con Ojos de Azul)"
+    ]
+  },
+  {
+    "name": "Salvage",
+    "name_es": "Salvamento",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Salvage (Salvamento)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Salvage (Salvamento)"
+    ]
+  },
+  {
+    "name": "Sandaion, the Timelord",
+    "name_es": "Sandaion, el Señor del Tiempo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Sandaion, the Timelord (Sandaion, el Señor del Tiempo)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Sandaion, the Timelord (Sandaion, el Señor del Tiempo)"
+    ]
+  },
+  {
+    "name": "Sanwitch",
+    "name_es": "Sanbruja",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Sanwitch (Sanbruja)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Sanwitch (Sanbruja)"
+    ]
+  },
+  {
+    "name": "Sari of the Silverwing Axe",
+    "name_es": "Sari del Hacha de Ala Plateada",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Sari of the Silverwing Axe (Sari del Hacha de Ala Plateada)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Sari of the Silverwing Axe (Sari del Hacha de Ala Plateada)"
+    ]
+  },
+  {
+    "name": "Scapegoat",
+    "name_es": "Chivo Expiatorio",
+    "name_jp": null,
+    "quantity": 2,
+    "variants": [
+      {
+        "originalName": "Scapegoat (Chivo Expiatorio)",
+        "detectedLanguage": "en",
+        "count": 2
+      }
+    ],
+    "originalNames": [
+      "Scapegoat (Chivo Expiatorio)"
+    ]
+  },
+  {
+    "name": "Scareclaw Twinsaw",
+    "name_es": "Sierra Gemela Espantagarra",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Scareclaw Twinsaw (Sierra Gemela Espantagarra)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Scareclaw Twinsaw (Sierra Gemela Espantagarra)"
+    ]
+  },
+  {
+    "name": "Sea Monster of Theseus",
+    "name_es": "Monstruo Marino de Teseo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Sea Monster of Theseus (Monstruo Marino de Teseo)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Sea Monster of Theseus (Monstruo Marino de Teseo)"
+    ]
+  },
+  {
+    "name": "Self-Destruct Button",
+    "name_es": "Botón de Autodestrucción",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Self-Destruct Button (Botón de Autodestrucción)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Self-Destruct Button (Botón de Autodestrucción)"
+    ]
+  },
+  {
+    "name": "Senju of the Thousand Hands",
+    "name_es": "Senju de las Mil Manos",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Senju of the Thousand Hands (Senju de las Mil Manos)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Senju of the Thousand Hands (Senju de las Mil Manos)"
+    ]
+  },
+  {
+    "name": "Seven Tools of the Bandit",
+    "name_es": "Siete Herramientas del Bandido",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Seven Tools of the Bandit (Siete Herramientas del Bandido)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Seven Tools of the Bandit (Siete Herramientas del Bandido)"
+    ]
+  },
+  {
+    "name": "Shadow of Eyes",
+    "name_es": "Sombra de Ojos",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Shadow of Eyes (Sombra de Ojos)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Shadow of Eyes (Sombra de Ojos)"
+    ]
+  },
+  {
+    "name": "Shadow Spell",
+    "name_es": "Hechizo de Sombra",
+    "name_jp": null,
+    "quantity": 2,
+    "variants": [
+      {
+        "originalName": "Shadow Spell (Hechizo de Sombra)",
+        "detectedLanguage": "mixed",
+        "count": 2
+      }
+    ],
+    "originalNames": [
+      "Shadow Spell (Hechizo de Sombra)"
+    ]
+  },
+  {
+    "name": "Shell Knight",
+    "name_es": "Caballero Concha",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Shell Knight (Caballero Concha)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Shell Knight (Caballero Concha)"
+    ]
+  },
+  {
+    "name": "Shining Angel",
+    "name_es": "Ángel Resplandeciente",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Shining Angel (Ángel Resplandeciente)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Shining Angel (Ángel Resplandeciente)"
+    ]
+  },
+  {
+    "name": "Shock Troops of the Ice Barrier",
+    "name_es": "Tropas de Choque de la Barrera de Hielo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Shock Troops of the Ice Barrier (Tropas de Choque de la Barrera de Hielo)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Shock Troops of the Ice Barrier (Tropas de Choque de la Barrera de Hielo)"
+    ]
+  },
+  {
+    "name": "Shrink",
+    "name_es": "Encoger",
+    "name_jp": null,
+    "quantity": 2,
+    "variants": [
+      {
+        "originalName": "Shrink (Encoger)",
+        "detectedLanguage": "en",
+        "count": 2
+      }
+    ],
+    "originalNames": [
+      "Shrink (Encoger)"
+    ]
+  },
+  {
+    "name": "Silent Magician",
+    "name_es": "Mago Silencioso",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Silent Magician (Mago Silencioso)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Silent Magician (Mago Silencioso)"
+    ]
+  },
+  {
+    "name": "Six Strike - Double Assault",
+    "name_es": "Seis Ataques - Asalto Doble",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Six Strike - Double Assault (Seis Ataques - Asalto Doble)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Six Strike - Double Assault (Seis Ataques - Asalto Doble)"
+    ]
+  },
+  {
+    "name": "Skill Drain",
+    "name_es": "Drenaje de Habilidad",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Drenaje de Habilidad (Skill Drain)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Drenaje de Habilidad (Skill Drain)"
+    ]
+  },
+  {
+    "name": "Skull Guardian, Protector of the Voiceless Voice",
+    "name_es": "Guardián de la Calavera, Protector de la Voz Muda",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Skull Guardian, Protector of the Voiceless Voice (Guardián de la Calavera, Protector de la Voz Muda)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Skull Guardian, Protector of the Voiceless Voice (Guardián de la Calavera, Protector de la Voz Muda)"
+    ]
+  },
+  {
+    "name": "Sky Striker Mecha - Hornet Drones",
+    "name_es": "Meca de Asalto del Cielo - Drones Avispa",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Sky Striker Mecha - Hornet Drones (Meca de Asalto del Cielo - Drones Avispa)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Sky Striker Mecha - Hornet Drones (Meca de Asalto del Cielo - Drones Avispa)"
+    ]
+  },
+  {
+    "name": "Sky Striker Mecha Modules - Multirole",
+    "name_es": "Módulos Mecatrónicos Sky Striker - Multifunción",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Sky Striker Mecha Modules - Multirole (Módulos Mecatrónicos Sky Striker - Multifunción)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Sky Striker Mecha Modules - Multirole (Módulos Mecatrónicos Sky Striker - Multifunción)"
+    ]
+  },
+  {
+    "name": "Slime Toad",
+    "name_es": "La Rana",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Frog the Jam (La Rana)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Frog the Jam (La Rana)"
+    ]
+  },
+  {
+    "name": "Snake-Eyes Flamberge Dragon",
+    "name_es": "Dragón de Flamberge de Ojos de Serpiente",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Snake-Eyes Flamberge Dragon (Dragón de Flamberge de Ojos de Serpiente)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Snake-Eyes Flamberge Dragon (Dragón de Flamberge de Ojos de Serpiente)"
+    ]
+  },
+  {
+    "name": "Solemn Strike",
+    "name_es": "Golpe Solemne",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Solemn Strike (Golpe Solemne)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Solemn Strike (Golpe Solemne)"
+    ]
+  },
+  {
+    "name": "Solomon's Lawbook",
+    "name_es": "Libro de la Ley de Salomón",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Solomon's Lawbook (Libro de la Ley de Salomón)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Solomon's Lawbook (Libro de la Ley de Salomón)"
+    ]
+  },
+  {
+    "name": "Soul Tiger",
+    "name_es": "Tigre del Alma",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Soul Tiger (Tigre del Alma)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Soul Tiger (Tigre del Alma)"
+    ]
+  },
+  {
+    "name": "Spell Shield Type-8",
+    "name_es": "Escudo de Hechizo Tipo-8",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Spell Shield Type-8 (Escudo de Hechizo Tipo-8)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Spell Shield Type-8 (Escudo de Hechizo Tipo-8)"
+    ]
+  },
+  {
+    "name": "Spellbook of Judgment",
+    "name_es": "Libro de Magia del Juicio",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Spellbook of Judgment (Libro de Magia del Juicio)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Spellbook of Judgment (Libro de Magia del Juicio)"
+    ]
+  },
+  {
+    "name": "Spellbook of Secrets",
+    "name_es": "Libro de Magia de los Secretos",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Spellbook of Secrets (Libro de Magia de los Secretos)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Spellbook of Secrets (Libro de Magia de los Secretos)"
+    ]
+  },
+  {
+    "name": "Spirit Message \"A\"",
+    "name_es": "Mensaje del Espíritu \"A\"",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Spirit Message \"A\" (Mensaje del Espíritu \"A\")",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Spirit Message \"A\" (Mensaje del Espíritu \"A\")"
+    ]
+  },
+  {
+    "name": "Spirit Message \"I\"",
+    "name_es": "Mensaje del Espíritu \"I\"",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Spirit Message \"I\" (Mensaje del Espíritu \"I\")",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Spirit Message \"I\" (Mensaje del Espíritu \"I\")"
+    ]
+  },
+  {
+    "name": "Spirit Message \"L\"",
+    "name_es": "Mensaje del Espíritu \"L\"",
+    "name_jp": null,
+    "quantity": 2,
+    "variants": [
+      {
+        "originalName": "Spirit Message \"L\" (Mensaje del Espíritu \"L\")",
+        "detectedLanguage": "mixed",
+        "count": 1
+      },
+      {
+        "originalName": "Spirit Message \"L\" (Otra copia de la \"L\")",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Spirit Message \"L\" (Mensaje del Espíritu \"L\")",
+      "Spirit Message \"L\" (Otra copia de la \"L\")"
+    ]
+  },
+  {
+    "name": "Spirit Message \"N\"",
+    "name_es": "Mensaje del Espíritu \"N\"",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Spirit Message \"N\" (Mensaje del Espíritu \"N\")",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Spirit Message \"N\" (Mensaje del Espíritu \"N\")"
+    ]
+  },
+  {
+    "name": "Spirit of the Pot of Greed",
+    "name_es": "Espíritu del Jarro de la Codicia",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Spirit of the Pot of Greed (Espíritu del Jarro de la Codicia)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Spirit of the Pot of Greed (Espíritu del Jarro de la Codicia)"
+    ]
+  },
+  {
+    "name": "Spiritual Fire Art - Kurenai",
+    "name_es": "Arte Espiritual del Fuego - Kurenai",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Spiritual Fire Art - Kurenai (Arte Espiritual del Fuego - Kurenai)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Spiritual Fire Art - Kurenai (Arte Espiritual del Fuego - Kurenai)"
+    ]
+  },
+  {
+    "name": "Sprind the Irondash Dragon",
+    "name_es": "Sprind el Dragon de Hierro",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Sprind le Dragon Filefer (Sprind el Dragón de Hierro)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Sprind le Dragon Filefer (Sprind el Dragón de Hierro)"
+    ]
+  },
+  {
+    "name": "Stardust Dragon",
+    "name_es": "Dragón de Polvo de Estrellas",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Stardust Dragon (Dragón de Polvo de Estrellas)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Stardust Dragon (Dragón de Polvo de Estrellas)"
+    ]
+  },
+  {
+    "name": "Stellarknight Constellar Diamond",
+    "name_es": "Caballero Estelar Constelar Diamante",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Stellarknight Constellar Diamond (Caballero Estelar Constelar Diamante)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Stellarknight Constellar Diamond (Caballero Estelar Constelar Diamante)"
+    ]
+  },
+  {
+    "name": "Stumbling",
+    "name_es": "Tropezón",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Stumbling (Tropezón)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Stumbling (Tropezón)"
+    ]
+  },
+  {
+    "name": "Succession of Soul",
+    "name_es": "Sucesión de Almas",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Succession of Soul (Sucesión de Almas)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Succession of Soul (Sucesión de Almas)"
+    ]
+  },
+  {
+    "name": "Summon Limit",
+    "name_es": "Límite de Invocación",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Summon Limit (Límite de Invocación)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Summon Limit (Límite de Invocación)"
+    ]
+  },
+  {
+    "name": "Super Conductor Tyranno",
+    "name_es": "Superconductor Tiranno",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Tyranno Superconductor (Superconductor Tiranno)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Tyranno Superconductor (Superconductor Tiranno)"
+    ]
+  },
+  {
+    "name": "Superdreadnought Rail Cannon Gustav Max",
+    "name_es": "Supercañón de Riel de Artillería Ferroviaria Gustav Max",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Superdreadnought Rail Cannon Gustav Max (Supercañón de Riel de Artillería Ferroviaria Gustav Max)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Superdreadnought Rail Cannon Gustav Max (Supercañón de Riel de Artillería Ferroviaria Gustav Max)"
+    ]
+  },
+  {
+    "name": "Synchro Rumble",
+    "name_es": "Estruendo de Sincronía",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Synchro Rumble (Estruendo de Sincronía)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Synchro Rumble (Estruendo de Sincronía)"
+    ]
+  },
+  {
+    "name": "Tactical Espionage Expert",
+    "name_es": "Experto en Espionaje Táctico",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Tactical Espionage Expert (Experto en Espionaje Táctico)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Tactical Espionage Expert (Experto en Espionaje Táctico)"
+    ]
+  },
+  {
+    "name": "Terraforming",
+    "name_es": "Formación de Tierra",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Terraforming (Formación de Tierra)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Terraforming (Formación de Tierra)"
+    ]
+  },
+  {
+    "name": "The Dark - Hex-Sealed Fusion",
+    "name_es": "Lo Oscuro - Fusión de Sellado Hexagonal",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "The Dark - Hex-Sealed Fusion (Lo Oscuro - Fusión de Sellado Hexagonal)",
+        "detectedLanguage": "es",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "The Dark - Hex-Sealed Fusion (Lo Oscuro - Fusión de Sellado Hexagonal)"
+    ]
+  },
+  {
+    "name": "The Eye of Truth",
+    "name_es": "El Ojo de la Verdad",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "The Eye of Truth (El Ojo de la Verdad)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "The Eye of Truth (El Ojo de la Verdad)"
+    ]
+  },
+  {
+    "name": "The Great Emperor Penguin",
+    "name_es": "El Gran Pingüino Emperador",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "The Great Emperor Penguin (El Gran Pingüino Emperador)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "The Great Emperor Penguin (El Gran Pingüino Emperador)"
+    ]
+  },
+  {
+    "name": "The Lady in Wight",
+    "name_es": "La Señora del Espectro",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "The Lady in Wight (La Señora del Espectro)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "The Lady in Wight (La Señora del Espectro)"
+    ]
+  },
+  {
+    "name": "The Legendary Exodia Incarnate",
+    "name_es": "El Legendario Exodia Encarnado",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "The Legendary Exodia Incarnate (El Legendario Exodia Encarnado)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "The Legendary Exodia Incarnate (El Legendario Exodia Encarnado)"
+    ]
+  },
+  {
+    "name": "The Phantom Knights of Ancient Cloak",
+    "name_es": "Los Caballeros Fantasmas de la Capa Antigua",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "The Phantom Knights of Ancient Cloak (Los Caballeros Fantasmas de la Capa Antigua)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "The Phantom Knights of Ancient Cloak (Los Caballeros Fantasmas de la Capa Antigua)"
+    ]
+  },
+  {
+    "name": "The Phantom Knights of Silent Boots",
+    "name_es": "Los Caballeros Fantasmas de las Botas Silenciosas",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "The Phantom Knights of Silent Boots (Los Caballeros Fantasmas de las Botas Silenciosas)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "The Phantom Knights of Silent Boots (Los Caballeros Fantasmas de las Botas Silenciosas)"
+    ]
+  },
+  {
+    "name": "The Revived Sky God",
+    "name_es": "El Dios del Cielo Revivido",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "The Revived Sky God (El Dios del Cielo Revivido)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "The Revived Sky God (El Dios del Cielo Revivido)"
+    ]
+  },
+  {
+    "name": "The Shallow Grave",
+    "name_es": "La Tumba Superficial",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "The Shallow Grave (La Tumba Superficial)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "The Shallow Grave (La Tumba Superficial)"
+    ]
+  },
+  {
+    "name": "The Warrior Returning Alive",
+    "name_es": "El Guerrero Volviendo con Vida",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "The Warrior Returning Alive (El Guerrero Volviendo con Vida)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "The Warrior Returning Alive (El Guerrero Volviendo con Vida)"
+    ]
+  },
+  {
+    "name": "The White Stone of Ancients",
+    "name_es": "La Piedra Blanca de los Antiguos",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "The White Stone of Ancients (La Piedra Blanca de los Antiguos)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "The White Stone of Ancients (La Piedra Blanca de los Antiguos)"
+    ]
+  },
+  {
+    "name": "Theia, the Primal Being",
+    "name_es": "Theia, el Ser Primordial",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Theia, the Primal Being (Theia, el Ser Primordial)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Theia, the Primal Being (Theia, el Ser Primordial)"
+    ]
+  },
+  {
+    "name": "Titaniklad the Ash Dragon",
+    "name_es": "Titaniklad el Dragón de las Cenizas",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Titaniklad the Ash Dragon (Titaniklad el Dragón de las Cenizas)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Titaniklad the Ash Dragon (Titaniklad el Dragón de las Cenizas)"
+    ]
+  },
+  {
+    "name": "Toon Mermaid",
+    "name_es": "Sirena Toon",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Toon Mermaid (Sirena Toon)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Toon Mermaid (Sirena Toon)"
+    ]
+  },
+  {
+    "name": "Tornado Wall",
+    "name_es": "Muro de Tornado",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Tornado Wall (Muro de Tornado)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Tornado Wall (Muro de Tornado)"
+    ]
+  },
+  {
+    "name": "Torrential Tribute",
+    "name_es": "Tributo Torrencial",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Torrential Tribute (Tributo Torrencial)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Torrential Tribute (Tributo Torrencial)"
+    ]
+  },
+  {
+    "name": "Tragedy",
+    "name_es": "Tragedia",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Tragedy (Tragedia)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Tragedy (Tragedia)"
+    ]
+  },
+  {
+    "name": "Trap of Board Eraser",
+    "name_es": "Trampa del Borrador del Tablero",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Trap of Board Eraser (Trampa del Borrador del Tablero)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Trap of Board Eraser (Trampa del Borrador del Tablero)"
+    ]
+  },
+  {
+    "name": "Traptrix Sera",
+    "name_es": "Atrapadora Sera",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Traptrix Sera (Atrapadora Sera)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Traptrix Sera (Atrapadora Sera)"
+    ]
+  },
+  {
+    "name": "Tri-Brigade Mercourier",
+    "name_es": "Mercourier de la Tri-Brigada",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Tri-Brigade Mercourier (Mercourier de la Tri-Brigada)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Tri-Brigade Mercourier (Mercourier de la Tri-Brigada)"
+    ]
+  },
+  {
+    "name": "Trident Dragion",
+    "name_es": "Dragón Tridente",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Trident Dragion (Dragón Tridente)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Trident Dragion (Dragón Tridente)"
+    ]
+  },
+  {
+    "name": "Twin Twisters",
+    "name_es": "Torbellinos Gemelos",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Twin Twisters (Torbellinos Gemelos)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Twin Twisters (Torbellinos Gemelos)"
+    ]
+  },
+  {
+    "name": "Two-Mouth Darkruler",
+    "name_es": "Gobernante Oscuro de Dos Bocas",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Two-Mouth Darkruler (Gobernante Oscuro de Dos Bocas)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Two-Mouth Darkruler (Gobernante Oscuro de Dos Bocas)"
+    ]
+  },
+  {
+    "name": "Ukiyoe-P.U.N.K. Amazing Dragon",
+    "name_es": "Ukiyoe-P.U.N.K. Dragón Asombroso",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Ukiyoe-P.U.N.K. Amazing Dragon (Ukiyoe-P.U.N.K. Dragón Asombroso)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Ukiyoe-P.U.N.K. Amazing Dragon (Ukiyoe-P.U.N.K. Dragón Asombroso)"
+    ]
+  },
+  {
+    "name": "Unifrog",
+    "name_es": "Unirrana",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Unifrog (Unirrana)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Unifrog (Unirrana)"
+    ]
+  },
+  {
+    "name": "Upstart Goblin",
+    "name_es": "Goblin Advenedizo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Upstart Goblin (Goblin Advenedizo)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Upstart Goblin (Goblin Advenedizo)"
+    ]
+  },
+  {
+    "name": "Vampire Lord",
+    "name_es": "Señor de los Vampiros",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Vampire Lord (Señor de los Vampiros)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Vampire Lord (Señor de los Vampiros)"
+    ]
+  },
+  {
+    "name": "Vanquish Soul Dr. Mad Love",
+    "name_es": "Vanquish Soul Dr. Mad Love",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Vanquish Soul Dr. Mad Love (Vanquish Soul Dr. Mad Love)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Vanquish Soul Dr. Mad Love (Vanquish Soul Dr. Mad Love)"
+    ]
+  },
+  {
+    "name": "Veidos the Dragon of Endless Darkness",
+    "name_es": "Veidos el Dragón de la Oscuridad Infinita",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Veidos the Dragon of Endless Darkness (Veidos el Dragón de la Oscuridad Infinita)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Veidos the Dragon of Endless Darkness (Veidos el Dragón de la Oscuridad Infinita)"
+    ]
+  },
+  {
+    "name": "Vendread Battlelord",
+    "name_es": "Señor del Combate Revengamiedo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Vendread Battlelord (Señor del Combate Revengamiedo)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Vendread Battlelord (Señor del Combate Revengamiedo)"
+    ]
+  },
+  {
+    "name": "Vermillion Dragon Mech",
+    "name_es": "Meca Dragón Bermellón",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Vermillion Dragon Mech (Meca Dragón Bermellón)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Vermillion Dragon Mech (Meca Dragón Bermellón)"
+    ]
+  },
+  {
+    "name": "Vesper Girsu",
+    "name_es": "Vesper Girsu",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Vesper Girsu (Vesper Girsu)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Vesper Girsu (Vesper Girsu)"
+    ]
+  },
+  {
+    "name": "Void Reignition",
+    "name_es": "Reignición del Vacío",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Void Reignition (Reignición del Vacío)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Void Reignition (Reignición del Vacío)"
+    ]
+  },
+  {
+    "name": "Whiptail Crow",
+    "name_es": "Cuervo de Cola de Látigo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Whiptail Crow (Cuervo de Cola de Látigo)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Whiptail Crow (Cuervo de Cola de Látigo)"
+    ]
+  },
+  {
+    "name": "Whirlwind Prodigy",
+    "name_es": "Prodigio del Torbellino",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Whirlwind Prodigy (Prodigio del Torbellino)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Whirlwind Prodigy (Prodigio del Torbellino)"
+    ]
+  },
+  {
+    "name": "White Dragon Ninja",
+    "name_es": "Ninja Dragón Blanco",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "White Dragon Ninja (Ninja Dragón Blanco)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "White Dragon Ninja (Ninja Dragón Blanco)"
+    ]
+  },
+  {
+    "name": "White-Horned Dragon",
+    "name_es": "Dragón de Cuernos Blancos",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "White-Horned Dragon (Dragón de Cuernos Blancos)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "White-Horned Dragon (Dragón de Cuernos Blancos)"
+    ]
+  },
+  {
+    "name": "Wind-Up Carrier Zenmaity",
+    "name_es": "Transportador de Cuerda Zenmaity",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Wind-Up Carrier Zenmaity (Transportador de Cuerda Zenmaity)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Wind-Up Carrier Zenmaity (Transportador de Cuerda Zenmaity)"
+    ]
+  },
+  {
+    "name": "Wishes for Eyes of Blue",
+    "name_es": "Deseos para Ojos de Azul",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Wishes for Eyes of Blue (Deseos para Ojos de Azul)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Wishes for Eyes of Blue (Deseos para Ojos de Azul)"
+    ]
+  },
+  {
+    "name": "Witch Doctor of Chaos",
+    "name_es": "Médico Brujo del Caos",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Witch Doctor of Chaos (Médico Brujo del Caos)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Witch Doctor of Chaos (Médico Brujo del Caos)"
+    ]
+  },
+  {
+    "name": "Witch of the Black Forest",
+    "name_es": "Bruja del Bosque Negro",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Witch of the Black Forest (Bruja del Bosque Negro)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Witch of the Black Forest (Bruja del Bosque Negro)"
+    ]
+  },
+  {
+    "name": "Wizard @Ignister",
+    "name_es": "Mago @Ignister",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Wizard @Ignister (Mago @Ignister)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Wizard @Ignister (Mago @Ignister)"
+    ]
+  },
+  {
+    "name": "Wollow, Founder of the Drudge Dragons",
+    "name_es": "Wollow, Fundador de los Dragones Esclavos",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Wollow, Founder of the Drudge Dragons (Wollow, Fundador de los Dragones Esclavos)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Wollow, Founder of the Drudge Dragons (Wollow, Fundador de los Dragones Esclavos)"
+    ]
+  },
+  {
+    "name": "World Legacy - \"World Wand\"",
+    "name_es": "Legado Mundial - \"Varita Mundial\"",
+    "name_jp": null,
+    "quantity": 2,
+    "variants": [
+      {
+        "originalName": "World Legacy - \"World Wand\"",
+        "detectedLanguage": "en",
+        "count": 1
+      },
+      {
+        "originalName": "World Legacy - \"World Wand\" (Legado Mundial - \"Varita Mundial\")",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "World Legacy - \"World Wand\"",
+      "World Legacy - \"World Wand\" (Legado Mundial - \"Varita Mundial\")"
+    ]
+  },
+  {
+    "name": "Worldsea Dragon Zealantis",
+    "name_es": "Dragón Marítimo Mundial Zealantis",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Worldsea Dragon Zealantis (Dragón Marítimo Mundial Zealantis)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Worldsea Dragon Zealantis (Dragón Marítimo Mundial Zealantis)"
+    ]
+  },
+  {
+    "name": "Wynn the Wind Charmer, Verdant",
+    "name_es": "Wynn la Encantadora del Viento, Exuberante",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Wynn the Wind Charmer, Verdant (Wynn la Encantadora del Viento, Exuberante)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Wynn the Wind Charmer, Verdant (Wynn la Encantadora del Viento, Exuberante)"
+    ]
+  },
+  {
+    "name": "X-Saber Axel",
+    "name_es": "X-Saber Axel",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "X-Saber Axel (X-Saber Axel)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "X-Saber Axel (X-Saber Axel)"
+    ]
+  },
+  {
+    "name": "XYZ-Dragon Cannon",
+    "name_es": "Cañón Dragón XYZ",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "XYZ-Dragon Cannon (Cañón Dragón XYZ)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "XYZ-Dragon Cannon (Cañón Dragón XYZ)"
+    ]
+  },
+  {
+    "name": "Yata-Garasu",
+    "name_es": "Yata-Garasu",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Yata-Garasu (Yata-Garasu)",
+        "detectedLanguage": "en",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Yata-Garasu (Yata-Garasu)"
+    ]
+  },
+  {
+    "name": "Yomi Ship",
+    "name_es": "Barco de Yomi",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Yomi Ship (Barco de Yomi)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Yomi Ship (Barco de Yomi)"
+    ]
+  },
+  {
+    "name": "Zaphion, the Timelord",
+    "name_es": "Zaphion, el Senor del Tiempo",
+    "name_jp": null,
+    "quantity": 1,
+    "variants": [
+      {
+        "originalName": "Zaphion, el Señor del Tiempo (Zaphion, the Timelord)",
+        "detectedLanguage": "mixed",
+        "count": 1
+      }
+    ],
+    "originalNames": [
+      "Zaphion, el Señor del Tiempo (Zaphion, the Timelord)"
+    ]
+  }
+]

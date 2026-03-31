@@ -12,6 +12,8 @@ export function getShippingOption(zone) {
 export function orderStatusLabel(status) {
   const labels = {
     pending_payment: "Pendiente de pago",
+    failed: "Pago rechazado",
+    expired: "Pago expirado",
     paid: "Pagado",
     shipped: "Enviado",
     completed: "Completado",
@@ -24,11 +26,12 @@ export function orderStatusLabel(status) {
 export function getOrderProgress(status) {
   const steps = ["pending_payment", "paid", "shipped", "completed"];
   const currentIndex = steps.indexOf(status);
+  const isStopped = status === "cancelled" || status === "failed" || status === "expired";
 
   return steps.map((step, index) => ({
     key: step,
     label: orderStatusLabel(step),
-    state: status === "cancelled"
+    state: isStopped
       ? "cancelled"
       : index < currentIndex
         ? "done"

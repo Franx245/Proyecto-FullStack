@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Search, Star } from "lucide-react";
 import {
   EmptyState,
@@ -8,41 +8,47 @@ import {
   getAdminCardImageProps,
 } from "./shared";
 
-export default function HomeMerchandisingView({ cards, onSave, onBulkUpdate, savingCardId, isBulkSaving, canEditHome }) {
+export default function HomeMerchandisingView({
+  cardsPage,
+  search,
+  isRefreshing,
+  onSearchChange,
+  onPageChange,
+  onRefresh,
+  onSave,
+  onBulkUpdate,
+  savingCardId,
+  isBulkSaving,
+  canEditHome,
+}) {
   const [drafts, setDrafts] = useState(() => new Map());
-  const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState(() => new Set());
-  const [page, setPage] = useState(1);
-  const deferredSearch = useDeferredValue(search);
-  const pageSize = 24;
+  const cards = Array.isArray(cardsPage?.cards) ? cardsPage.cards : [];
+  const page = Number(cardsPage?.page) || 1;
+  const totalPages = Math.max(1, Number(cardsPage?.totalPages) || 1);
+  const totalResults = Number(cardsPage?.total) || 0;
 
   const rows = useMemo(() => {
-    return cards.filter((card) => {
-      const needle = deferredSearch.trim().toLowerCase();
-      if (!needle) return true;
-      return [card.name, card.rarity, card.card_type].some((value) => value?.toLowerCase().includes(needle));
-    }).map((card) => ({
+    return cards.map((card) => ({
       ...card,
       draft: drafts.get(card.id) || {
         is_featured: card.is_featured,
         is_new_arrival: card.is_new_arrival,
       },
     }));
-  }, [cards, deferredSearch, drafts]);
-
-  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
-  const paginatedRows = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return rows.slice(start, start + pageSize);
-  }, [page, rows]);
+  }, [cards, drafts]);
 
   useEffect(() => {
-    setPage(1);
-  }, [search]);
+    setSelectedIds((prev) => {
+      if (!prev.size) {
+        return prev;
+      }
 
-  useEffect(() => {
-    setPage((currentPage) => Math.min(currentPage, totalPages));
-  }, [totalPages]);
+      const currentPageIds = new Set(rows.map((card) => card.id));
+      const next = new Set(Array.from(prev).filter((cardId) => currentPageIds.has(cardId)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [rows]);
 
   const featuredCount = rows.filter((card) => Boolean(card.draft.is_featured)).length;
   const newArrivalCount = rows.filter((card) => Boolean(card.draft.is_new_arrival)).length;
@@ -69,7 +75,7 @@ export default function HomeMerchandisingView({ cards, onSave, onBulkUpdate, sav
   }, []);
 
   const togglePageSelection = useCallback((checked) => {
-    const pageIds = paginatedRows.map((card) => card.id);
+    const pageIds = rows.map((card) => card.id);
     setSelectedIds((prev) => {
       const next = new Set(prev);
       pageIds.forEach((cardId) => {
@@ -81,10 +87,6 @@ export default function HomeMerchandisingView({ cards, onSave, onBulkUpdate, sav
       });
       return next;
     });
-  }, [paginatedRows]);
-
-  const selectFilteredRows = useCallback(() => {
-    setSelectedIds(new Set(rows.map((card) => card.id)));
   }, [rows]);
 
   const clearSelection = useCallback(() => {
@@ -100,7 +102,7 @@ export default function HomeMerchandisingView({ cards, onSave, onBulkUpdate, sav
     onBulkUpdate(ids, updates);
   }, [onBulkUpdate, selectedIds]);
 
-  const pageIds = paginatedRows.map((card) => card.id);
+  const pageIds = rows.map((card) => card.id);
   const allPageSelected = pageIds.length > 0 && pageIds.every((cardId) => selectedIds.has(cardId));
 
   return (
@@ -110,13 +112,13 @@ export default function HomeMerchandisingView({ cards, onSave, onBulkUpdate, sav
           <div>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">✨ Curaduría de portada</p>
             <h2 className="mt-1 text-xl font-black text-white">Destacados y últimos ingresos</h2>
-            <p className="mt-2 text-sm text-slate-400">La búsqueda recorre todo el catálogo y la edición se pagina para que responda mejor en desktop y mobile.</p>
+            <p className="mt-2 text-sm text-slate-400">La búsqueda consulta solo las cartas activas de la storefront y trae una página por vez para evitar cargar todo el catálogo en el navegador.</p>
           </div>
           <div className="relative w-full md:max-w-sm">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
             <input
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => onSearchChange(event.target.value)}
               placeholder="Buscar cartas para la home"
               className="h-11 w-full rounded-2xl border border-white/10 bg-slate-950/70 pl-10 pr-4 text-sm outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
             />
@@ -124,29 +126,29 @@ export default function HomeMerchandisingView({ cards, onSave, onBulkUpdate, sav
         </div>
 
         <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <StatCard title="Resultados" value={rows.length} />
-          <StatCard title="Destacadas" value={featuredCount} />
-          <StatCard title="Últimos ingresos" value={newArrivalCount} />
+          <StatCard title="Resultados" value={totalResults} />
+          <StatCard title="Destacadas en página" value={featuredCount} />
+          <StatCard title="Ingresos en página" value={newArrivalCount} />
         </div>
 
         <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4 text-sm text-slate-300">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-semibold text-white">Selección:</span>
             <span>{selectedIds.size} cartas</span>
-            <button onClick={selectFilteredRows} className="rounded-xl border border-white/10 px-3 py-2 transition hover:bg-white/[0.06]" disabled={!rows.length}>
-              Seleccionar resultados
-            </button>
-            <button onClick={() => togglePageSelection(true)} className="rounded-xl border border-white/10 px-3 py-2 transition hover:bg-white/[0.06]" disabled={!paginatedRows.length}>
+            <button onClick={() => togglePageSelection(true)} className="rounded-xl border border-white/10 px-3 py-2 transition hover:bg-white/[0.06]" disabled={!rows.length}>
               Seleccionar página
             </button>
             <button onClick={clearSelection} className="rounded-xl border border-white/10 px-3 py-2 transition hover:bg-white/[0.06]" disabled={!selectedIds.size}>
               Limpiar selección
             </button>
+            <button onClick={onRefresh} className="rounded-xl border border-white/10 px-3 py-2 transition hover:bg-white/[0.06]" disabled={Boolean(isRefreshing)}>
+              {isRefreshing ? "Actualizando..." : "Refrescar"}
+            </button>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.18em] text-slate-500">
             <span className="rounded-full border border-white/10 px-3 py-2">Página {page} de {totalPages}</span>
-            <span className="rounded-full border border-white/10 px-3 py-2">{paginatedRows.length} visibles ahora</span>
-            <span className="rounded-full border border-white/10 px-3 py-2">Búsqueda global</span>
+            <span className="rounded-full border border-white/10 px-3 py-2">{rows.length} visibles ahora</span>
+            <span className="rounded-full border border-white/10 px-3 py-2">Búsqueda server-side</span>
           </div>
           {canEditHome ? (
             <div className="flex flex-wrap items-center gap-2">
@@ -171,12 +173,12 @@ export default function HomeMerchandisingView({ cards, onSave, onBulkUpdate, sav
         <EmptyState
           icon={Star}
           title="No hay cartas para configurar"
-          description="Probá otra búsqueda para seleccionar qué cartas van a la portada."
+          description="Probá otra búsqueda o refrescá la página actual para revisar qué cartas quedan disponibles en la storefront."
         />
       ) : (
         <div className="glass overflow-hidden rounded-3xl border border-white/10">
           <div className="space-y-3 p-4 lg:hidden">
-            {paginatedRows.map((card) => (
+            {rows.map((card) => (
               <div key={card.id} className="rounded-3xl border border-white/10 bg-slate-950/40 p-4">
                 <div className="flex items-start gap-3">
                   <input type="checkbox" checked={selectedIds.has(card.id)} onChange={(event) => toggleCardSelection(card.id, event.target.checked)} className="mt-2" />
@@ -217,7 +219,7 @@ export default function HomeMerchandisingView({ cards, onSave, onBulkUpdate, sav
               <thead className="bg-white/[0.04] text-slate-400">
                 <tr>
                   <th className="px-4 py-3 font-medium">
-                    <input type="checkbox" disabled={!paginatedRows.length} checked={allPageSelected} onChange={(event) => togglePageSelection(event.target.checked)} />
+                    <input type="checkbox" disabled={!rows.length} checked={allPageSelected} onChange={(event) => togglePageSelection(event.target.checked)} />
                   </th>
                   <th className="px-4 py-3 font-medium">Carta</th>
                   <th className="px-4 py-3 font-medium">Visible</th>
@@ -227,7 +229,7 @@ export default function HomeMerchandisingView({ cards, onSave, onBulkUpdate, sav
                 </tr>
               </thead>
               <tbody>
-                {paginatedRows.map((card) => (
+                {rows.map((card) => (
                   <tr key={card.id} className="border-t border-white/5">
                     <td className="px-4 py-3">
                       <input type="checkbox" checked={selectedIds.has(card.id)} onChange={(event) => toggleCardSelection(card.id, event.target.checked)} />
@@ -267,7 +269,7 @@ export default function HomeMerchandisingView({ cards, onSave, onBulkUpdate, sav
             </table>
           </div>
 
-          <PaginationControls page={page} totalPages={totalPages} onPageChange={setPage} />
+          <PaginationControls page={page} totalPages={totalPages} onPageChange={onPageChange} />
         </div>
       )}
     </div>

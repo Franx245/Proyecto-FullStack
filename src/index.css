@@ -245,3 +245,32 @@
   background: hsl(145 65% 48% / 0.3);
   color: white;
 }
+
+#form-checkout .mp-hosted-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 3rem;
+  isolation: isolate;
+  pointer-events: auto;
+}
+
+#form-checkout .mp-hosted-field iframe {
+  display: block;
+  width: 100% !important;
+  min-height: 1.5rem !important;
+  border: 0;
+  background: transparent;
+}
+
+#form-checkout input,
+#form-checkout select {
+  appearance: none;
+  color: hsl(var(--foreground));
+  pointer-events: auto;
+}
+
+#form-checkout input::placeholder {
+  color: hsl(var(--muted-foreground));
+}

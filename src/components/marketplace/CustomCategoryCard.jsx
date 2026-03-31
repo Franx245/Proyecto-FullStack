@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { cloudinaryFetchUrl } from "@/lib/cardImage";
 
 export default function CustomCategoryCard({ category, basePath = "/custom" }) {
   const targetPath = `${basePath}/${category.slug}`.replace(/\/+/g, "/");
@@ -10,7 +11,7 @@ export default function CustomCategoryCard({ category, basePath = "/custom" }) {
     >
       <div className="aspect-[16/9] bg-secondary">
         {category.image ? (
-          <img src={category.image} alt={category.name} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" />
+          <img src={cloudinaryFetchUrl(category.image, { width: 640 })} alt={category.name} loading="lazy" className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Sin imagen</div>
         )}

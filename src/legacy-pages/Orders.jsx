@@ -1,0 +1,560 @@
+import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { motion } from "framer-motion";
+import { useNavigate } from "react-router-dom";
+import {
+  ClipboardList,
+  Loader2,
+  Copy,
+  MapPin,
+  MessageCircle,
+  CheckCircle,
+  Clock3,
+  Wallet,
+} from "lucide-react";
+import { fetchMyOrders, fetchOrdersByIds, fetchStorefrontConfig } from "@/api/store";
+import { useAuth } from "@/lib/auth";
+import { getOrderProgress, getShippingOption, orderStatusLabel } from "@/lib/shipping";
+import { getTrackedOrderIds } from "@/lib/orderTracking";
+import { toast } from "sonner";
+import CardImage from "@/components/marketplace/CardImage";
+
+const NON_RETRYABLE_PAYMENT_STATUSES = new Set(["approved", "pending", "in_process", "authorized", "in_mediation"]);
+const PENDING_PAYMENT_FEEDBACK_KEY = "duelvault_pending_payment_feedback";
+
+/** @param {Order | null | undefined} order */
+function hasProcessingPaymentAttempt(order) {
+  return Boolean(String(order?.payment_id || "").trim());
+}
+
+/**
+ * @typedef {{
+ *  orderId: number,
+ *  paymentStatus: string,
+ *  createdAt: number,
+ *  approvalNoticeShown: boolean,
+ * }} PendingPaymentFeedback
+ */
+
+/** @returns {PendingPaymentFeedback | null} */
+function readPendingPaymentFeedback() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(PENDING_PAYMENT_FEEDBACK_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** @param {PendingPaymentFeedback | null} payload */
+function writePendingPaymentFeedback(payload) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (!payload) {
+    window.sessionStorage.removeItem(PENDING_PAYMENT_FEEDBACK_KEY);
+    return;
+  }
+
+  window.sessionStorage.setItem(PENDING_PAYMENT_FEEDBACK_KEY, JSON.stringify(payload));
+}
+
+/** @param {Order | null | undefined} order */
+function isWebhookConfirmationPending(order) {
+  if (!order) {
+    return false;
+  }
+
+  return String(order.status || "") === "pending_payment"
+    && hasProcessingPaymentAttempt(order)
+    && NON_RETRYABLE_PAYMENT_STATUSES.has(String(order.payment_status || "").toLowerCase());
+}
+
+/**
+ * @typedef {"pending_payment" | "failed" | "expired" | "paid" | "shipped" | "completed" | "cancelled"} OrderStatus
+ *
+ * @typedef {{
+ *  version_id: string | number,
+ *  detail_id?: string | number,
+ *  name: string,
+ *  quantity: number,
+ *  price: number,
+ *  rarity?: string,
+ *  image?: string,
+ *  ygopro_id?: string | number,
+ *  set_code?: string,
+ *  set_name?: string
+ * }} OrderItem
+ */
+
+/**
+ * @typedef {{
+ *  id: string,
+ *  created_at: string,
+ *  status: OrderStatus,
+ *  total: number,
+ *  subtotal: number,
+ *  shipping_cost: number,
+ *  currency?: string | null,
+ *  total_ars?: number | null,
+ *  exchange_rate?: number | null,
+ *  payment_status?: string | null,
+ *  payment_id?: string | null,
+ *  preference_id?: string | null,
+ *  expires_at?: string | null,
+ *  processing_payment?: boolean,
+ *  shipping_label?: string,
+ *  shipping_zone?: string,
+ *  shipping_address?: string | null,
+ *  tracking_code?: string | null,
+ *  customer_name?: string | null,
+ *  customer_email?: string | null,
+ *  customer_phone?: string,
+ *  items: Array<{
+ *    id: string | number,
+ *    quantity: number,
+ *    price: number,
+ *    subtotal: number,
+ *    card: OrderItem
+ *  }>
+ * }} Order
+ */
+
+// 🧠 WhatsApp message
+/** @param {Order} order */
+function buildWhatsAppMessage(order) {
+  const lines = order.items.map(
+    /** @param {{ quantity: number, card: OrderItem }} i */
+    (i) =>
+      `${i.quantity}x ${i.card?.name}${
+        i.card?.set_code ? ` (${i.card.set_code})` : ""
+      }`
+  );
+
+  return encodeURIComponent(
+    `¡Hola! Quisiera consultar sobre mi pedido #${order.id}:\n\n` +
+      `Total: $${order.total.toFixed(2)}\n\n` +
+      `Artículos:\n${lines.join("\n")}`
+  );
+}
+
+/** @param {Order} order */
+function canRetryDirectPayment(order) {
+  if (!order) {
+    return false;
+  }
+
+  if (!["pending_payment", "failed"].includes(String(order.status || ""))) {
+    return false;
+  }
+
+  if (hasProcessingPaymentAttempt(order)
+    && NON_RETRYABLE_PAYMENT_STATUSES.has(String(order.payment_status || "").toLowerCase())) {
+    return false;
+  }
+
+  if (!order.expires_at) {
+    return true;
+  }
+
+  return new Date(order.expires_at).getTime() > Date.now();
+}
+
+/** @param {unknown} value */
+function normalizeWhatsappNumber(value) {
+  return typeof value === "string" ? value.replace(/[^\d]/g, "") : "";
+}
+
+/** @param {{ card?: OrderItem | null }} item */
+function getOrderItemDetailPath(item) {
+  const detailId = item?.card?.detail_id ?? item?.card?.version_id;
+  return detailId ? `/card/${detailId}` : null;
+}
+
+export default function Orders() {
+  const { isAuthenticated, isBootstrapping } = useAuth();
+  const navigate = useNavigate();
+  const [payingOrderId, setPayingOrderId] = useState(/** @type {string | null} */ (null));
+  const [pendingPaymentFeedback, setPendingPaymentFeedback] = useState(() => readPendingPaymentFeedback());
+  const trackedOrderIds = useMemo(() => (isAuthenticated ? getTrackedOrderIds() : []), [isAuthenticated]);
+  const storefrontConfigQuery = useQuery({
+    queryKey: ["storefront-config"],
+    queryFn: fetchStorefrontConfig,
+    staleTime: 1000 * 60,
+  });
+  const trackedOrdersQuery = useQuery({
+    queryKey: ["public-orders", trackedOrderIds],
+    queryFn: () => fetchOrdersByIds(trackedOrderIds),
+    staleTime: 1000 * 30,
+    refetchInterval: pendingPaymentFeedback ? 4000 : false,
+    enabled: trackedOrderIds.length > 0,
+  });
+
+  const myOrdersQuery = useQuery({
+    queryKey: ["my-orders"],
+    queryFn: fetchMyOrders,
+    staleTime: 1000 * 30,
+    refetchInterval: pendingPaymentFeedback ? 4000 : false,
+    enabled: !isBootstrapping && isAuthenticated,
+  });
+
+  const orders = useMemo(() => {
+    const merged = new Map();
+    const publicOrders = /** @type {Order[]} */ (isAuthenticated ? trackedOrdersQuery.data?.orders ?? [] : []);
+    const myOrders = /** @type {Order[]} */ (isAuthenticated ? myOrdersQuery.data?.orders ?? [] : []);
+
+    for (const order of publicOrders) {
+      merged.set(String(order.id), order);
+    }
+
+    for (const order of myOrders) {
+      merged.set(String(order.id), order);
+    }
+
+    return Array.from(merged.values()).sort(
+      (left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime()
+    );
+  }, [isAuthenticated, myOrdersQuery.data?.orders, trackedOrdersQuery.data?.orders]);
+
+  const isLoading = isBootstrapping || trackedOrdersQuery.isLoading || myOrdersQuery.isLoading;
+  const supportWhatsappNumber = normalizeWhatsappNumber(storefrontConfigQuery.data?.storefront?.support_whatsapp_number || "");
+
+  useEffect(() => {
+    writePendingPaymentFeedback(pendingPaymentFeedback);
+  }, [pendingPaymentFeedback]);
+
+  useEffect(() => {
+    if (!pendingPaymentFeedback?.orderId) {
+      return;
+    }
+
+    const watchedOrder = orders.find((entry) => Number(entry.id) === Number(pendingPaymentFeedback.orderId));
+    if (!watchedOrder) {
+      return;
+    }
+
+    if (!pendingPaymentFeedback.approvalNoticeShown) {
+      const copy = pendingPaymentFeedback.paymentStatus === "approved"
+        ? {
+            title: "Pago aprobado",
+            description: `La orden #${watchedOrder.id} esta esperando la confirmacion final del webhook.`,
+          }
+        : {
+            title: "Pago en proceso",
+            description: `La orden #${watchedOrder.id} se actualizara automaticamente cuando responda el webhook.`,
+          };
+
+      toast.info(copy.title, { description: copy.description, duration: 5000 });
+      setPendingPaymentFeedback((/** @type {PendingPaymentFeedback | null} */ current) => current
+        ? { ...current, approvalNoticeShown: true }
+        : current);
+      return;
+    }
+
+    if (watchedOrder.status === "paid") {
+      toast.success("Pedido pagado", {
+        description: `La orden #${watchedOrder.id} fue confirmada y el aviso desaparecera automaticamente.`,
+        duration: 5000,
+      });
+      setPendingPaymentFeedback(null);
+      return;
+    }
+
+    if (["failed", "expired", "cancelled"].includes(watchedOrder.status)) {
+      toast.error("El pago no se confirmo", {
+        description: `La orden #${watchedOrder.id} cambio a ${orderStatusLabel(watchedOrder.status)}.`,
+        duration: 5000,
+      });
+      setPendingPaymentFeedback(null);
+    }
+  }, [orders, pendingPaymentFeedback]);
+
+  /** @type {Record<string, string>} */
+  const statusClasses = {
+    pending_payment: "bg-slate-500/15 text-slate-200 border-slate-400/20",
+    failed: "bg-rose-500/15 text-rose-300 border-rose-400/20",
+    expired: "bg-amber-500/15 text-amber-300 border-amber-400/20",
+    paid: "bg-sky-500/15 text-sky-300 border-sky-400/20",
+    shipped: "bg-emerald-500/15 text-emerald-300 border-emerald-400/20",
+    completed: "bg-amber-500/15 text-amber-300 border-amber-400/20",
+    cancelled: "bg-rose-500/15 text-rose-300 border-rose-400/20",
+  };
+
+  /** @param {Order} order */
+  const handleCopy = (order) => {
+    const lines = order.items.map(
+      /** @param {{ quantity: number, price: number, card: OrderItem }} i */
+      (i) =>
+        `${i.quantity}x ${i.card?.name} — $${(
+          i.price * i.quantity
+        ).toFixed(2)}`
+    );
+
+    const text =
+      `Pedido #${order.id}\n` +
+      `Fecha: ${new Date(order.created_at).toLocaleString("es-AR")}\n\n` +
+      `${lines.join("\n")}\n\n` +
+      `Estado: ${orderStatusLabel(order.status)}\n` +
+      `Envío: ${order.shipping_label || getShippingOption(order.shipping_zone).label}\n` +
+      `Total: $${order.total.toFixed(2)}`;
+
+    navigator.clipboard.writeText(text);
+    toast.success("Pedido copiado al portapapeles");
+  };
+
+  /** @param {Order} order */
+  const handleWhatsApp = (order) => {
+    if (!supportWhatsappNumber) {
+      toast.error("WhatsApp de soporte no configurado");
+      return;
+    }
+
+    window.open(
+      `https://wa.me/${supportWhatsappNumber}?text=${buildWhatsAppMessage(order)}`,
+      "_blank"
+    );
+  };
+
+  /** @param {Order} order */
+  const handlePayOrder = (order) => {
+    setPayingOrderId(String(order.id));
+    navigate(`/checkout/pay/${order.id}`);
+  };
+
+  /** @param {{ id: string | number, quantity: number, subtotal: number, card: OrderItem }} item */
+  const handleOpenOrderItem = (item) => {
+    const detailPath = getOrderItemDetailPath(item);
+    if (detailPath) {
+      navigate(detailPath);
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="max-w-[900px] mx-auto px-4 py-6"
+    >
+      {/* Header */}
+      <h1 className="text-2xl font-black tracking-tight mb-6 flex items-center gap-3">
+        <ClipboardList className="w-6 h-6 text-primary" />
+        Historial de Pedidos
+      </h1>
+
+      {isLoading ? (
+        <div className="flex min-h-[260px] items-center justify-center rounded-3xl border border-border bg-card/60">
+          <div className="flex items-center gap-3 text-muted-foreground">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            Cargando pedidos...
+          </div>
+        </div>
+      ) : !isAuthenticated && trackedOrderIds.length === 0 ? (
+        <div className="text-center py-20 text-muted-foreground">
+          <ClipboardList className="w-14 h-14 mx-auto mb-4 opacity-20" />
+          <p className="text-base font-semibold text-foreground">
+            Iniciá sesión para ver tu historial completo.
+          </p>
+          <p className="mt-2 text-sm">
+            Si hiciste una compra en esta sesión, el pedido volverá a aparecer automáticamente cuando ingreses.
+          </p>
+        </div>
+      ) : orders.length === 0 ? (
+        <div className="text-center py-20 text-muted-foreground">
+          <ClipboardList className="w-14 h-14 mx-auto mb-4 opacity-20" />
+          <p className="text-base font-semibold text-foreground">
+            Todavía no realizaste ningún pedido.
+          </p>
+          <p className="mt-2 text-sm">
+            Cuando confirmes una compra, vas a poder seguir el estado desde esta vista.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {orders.map((order, idx) => {
+            const isPaymentPendingConfirmation = order.processing_payment || isWebhookConfirmationPending(order);
+
+            return (
+            <motion.div
+              key={order.id}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: idx * 0.05 }}
+              className="bg-card border border-border rounded-2xl p-5"
+            >
+              {/* Header */}
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <div>
+                  <p className="font-bold text-sm">
+                    #{order.id}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {new Date(order.created_at).toLocaleString("es-AR")}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-semibold ${statusClasses[order.status] || statusClasses.pending_payment}`}>
+                    <CheckCircle className="w-3 h-3" />
+                    {orderStatusLabel(order.status)}
+                  </span>
+
+                  <span className="text-lg font-black text-primary">
+                    ${order.total.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="mb-4 rounded-2xl border border-border bg-background/40 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Seguimiento</p>
+                    <p className="mt-1 text-sm font-semibold">{order.shipping_label || getShippingOption(order.shipping_zone).label}</p>
+                    {order.tracking_code ? <p className="mt-2 text-sm text-primary">Tracking: {order.tracking_code}</p> : null}
+                    {order.total_ars ? <p className="mt-2 text-sm text-slate-400">Cobro Mercado Pago: ${order.total_ars.toFixed(2)} {order.currency || "ARS"}</p> : null}
+                    {isPaymentPendingConfirmation ? (
+                      <p className="mt-2 inline-flex items-center gap-2 text-sm text-amber-300">
+                        <Clock3 className="h-4 w-4" />
+                        Pago en conciliacion. La confirmación final llega por webhook.
+                      </p>
+                    ) : null}
+                    {!isPaymentPendingConfirmation && order.expires_at && ["pending_payment", "failed", "expired"].includes(order.status) ? (
+                      <p className="mt-2 text-xs text-muted-foreground">Vence o venció: {new Date(order.expires_at).toLocaleString("es-AR")}</p>
+                    ) : null}
+                  </div>
+                  {order.shipping_address ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <MapPin className="w-4 h-4" />
+                      {order.shipping_address}
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-4">
+                  {getOrderProgress(order.status).map((step) => (
+                    <div key={step.key} className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className={`h-2.5 w-2.5 rounded-full ${step.state === "done" ? "bg-primary" : step.state === "current" ? "bg-yellow-400" : step.state === "cancelled" ? "bg-destructive" : "bg-border"}`} />
+                        <span className={`text-xs font-semibold ${step.state === "upcoming" ? "text-muted-foreground" : "text-foreground"}`}>
+                          {step.label}
+                        </span>
+                      </div>
+                      <div className={`h-1 rounded-full ${step.state === "done" ? "bg-primary/70" : step.state === "current" ? "bg-yellow-400/70" : step.state === "cancelled" ? "bg-destructive/70" : "bg-border"}`} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-2 mb-4">
+                {order.items.map(
+                  /** @param {{ id: string | number, quantity: number, subtotal: number, card: OrderItem }} item */
+                  (item) => (
+                  <div
+                    key={item.id}
+                    onClick={() => handleOpenOrderItem(item)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        handleOpenOrderItem(item);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                    className="flex cursor-pointer items-center gap-3 rounded-xl px-2 py-2 transition hover:bg-background/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    <div className="w-10 h-14 rounded-md bg-secondary overflow-hidden shrink-0">
+                      {item.card?.image ? (
+                        <CardImage
+                          id={item.card.ygopro_id}
+                          name={item.card.name}
+                          fallbackSrc={item.card.image}
+                          sizes="40px"
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-secondary" />
+                      )}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">
+                        {item.card?.name}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {item.card?.rarity}
+                        {item.card?.set_code
+                          ? ` · ${item.card.set_code}`
+                          : ""}
+                      </p>
+                    </div>
+
+                    {/* Price */}
+                    <div className="text-right shrink-0">
+                      <p className="text-sm font-bold text-primary">
+                        ${item.subtotal.toFixed(2)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        x{item.quantity}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mb-4 grid gap-2 rounded-2xl border border-border bg-background/40 p-4 text-sm sm:grid-cols-2">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Cliente</p>
+                  <p className="mt-1 font-medium">{order.customer_name || "Sin nombre"}</p>
+                  <p className="text-muted-foreground">{order.customer_email || order.customer_phone || "Sin contacto"}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Montos</p>
+                  <p className="mt-1 text-muted-foreground">Subtotal: ${order.subtotal.toFixed(2)}</p>
+                  <p className="text-muted-foreground">Envío: ${order.shipping_cost.toFixed(2)}</p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2 border-t border-border pt-4">
+                {isAuthenticated && canRetryDirectPayment(order) ? (
+                  <button
+                    onClick={() => handlePayOrder(order)}
+                    disabled={payingOrderId === String(order.id)}
+                    className="flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-2 text-sm font-medium text-primary transition hover:bg-primary/20 disabled:opacity-50"
+                  >
+                    {payingOrderId === String(order.id) ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Wallet className="h-3.5 w-3.5" />
+                    )}
+                    {order.status === "pending_payment" ? "Continuar pago" : "Reintentar pago"}
+                  </button>
+                ) : null}
+
+                <button
+                  onClick={() => handleCopy(order)}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-secondary text-sm text-muted-foreground hover:text-foreground hover:bg-secondary/80 transition"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  Copiar pedido
+                </button>
+
+                <button
+                  onClick={() => handleWhatsApp(order)}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/10 text-primary text-sm font-medium hover:bg-primary/20 transition"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  Consultar por WhatsApp
+                </button>
+              </div>
+            </motion.div>
+            );
+          })}
+        </div>
+      )}
+    </motion.div>
+  );
+}

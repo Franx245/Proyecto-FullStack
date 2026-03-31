@@ -16,6 +16,7 @@ interface CartItem {
 interface CartContextType {
   items: CartItem[];
   isOpen: boolean;
+  isHydrated: boolean;
   addItem: (version: Omit<CartItem, "quantity">, qty: number) => void;
   removeItem: (versionId: string) => void;
   updateQuantity: (versionId: string, quantity: number) => void;
@@ -28,6 +29,14 @@ interface CartContextType {
 const CartContext = createContext<CartContextType | null>(null);
 const STORAGE_KEY = "yugioh_cart";
 
+function getSafeStorage() {
+  if (typeof window === "undefined" || typeof window.localStorage === "undefined") {
+    return null;
+  }
+
+  return window.localStorage;
+}
+
 function clampQuantity(quantity: number, stock?: number) {
   if (typeof stock !== "number") {
     return quantity;
@@ -39,7 +48,12 @@ function clampQuantity(quantity: number, stock?: number) {
 // 🧠 Carga segura
 function loadCart(): CartItem[] {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const storage = getSafeStorage();
+    if (!storage) {
+      return [];
+    }
+
+    const stored = storage.getItem(STORAGE_KEY);
     return stored ? (JSON.parse(stored) as CartItem[]) : [];
   } catch {
     return [];
@@ -48,17 +62,32 @@ function loadCart(): CartItem[] {
 
 // 💾 Guardado
 function saveCart(items: CartItem[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  const storage = getSafeStorage();
+  if (!storage) {
+    return;
+  }
+
+  storage.setItem(STORAGE_KEY, JSON.stringify(items));
 }
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
-  const [items, setItems] = useState(loadCart);
+  const [items, setItems] = useState<CartItem[]>([]);
   const [isOpen, setIsOpen] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  useEffect(() => {
+    setItems(loadCart());
+    setIsHydrated(true);
+  }, []);
 
   // Persistencia automática
   useEffect(() => {
+    if (!isHydrated) {
+      return;
+    }
+
     saveCart(items);
-  }, [items]);
+  }, [isHydrated, items]);
 
   // 🛒 Agregar item (por versión)
   const addItem = useCallback((version: Omit<CartItem, "quantity">, qty: number) => {
@@ -126,6 +155,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         totalItems,
         totalPrice,
         isOpen,
+        isHydrated,
         setIsOpen,
       }}
     >

@@ -137,7 +137,7 @@ export default function CardInfo({ card = {}, ygoproData = {} }) {
               <CardImage
                 id={data.imageId}
                 name={data.name}
-                priority={true}
+                variant="detail"
                 fallbackSrc={data.image}
                 sizes="(max-width: 768px) 280px, 320px"
                 className="w-[280px] md:w-[320px] rounded-xl shadow-2xl shadow-black/60 ring-1 ring-border"

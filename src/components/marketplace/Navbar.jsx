@@ -1,8 +1,9 @@
 import { useState, useCallback } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { ShoppingCart, Search, Menu, X, UserCircle2, LogOut, Sparkles } from "lucide-react";
+import { ShoppingCart, Search, Menu, X, LogOut, Sparkles } from "lucide-react";
 import { useCart } from "@/lib/cartStore";
 import { useAuth } from "@/lib/auth";
+import UserAvatar from "@/components/ui/UserAvatar";
 
 /**
  * @param {{ searchQuery?: string, onSearchChange?: (value: string) => void }} props
@@ -119,7 +120,13 @@ export default function Navbar({ searchQuery, onSearchChange }) {
                 onClick={() => navigate("/account")}
                 className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-slate-200 transition duration-300 hover:border-emerald-400/20 hover:bg-white/[0.06] hover:text-white"
               >
-                {user?.avatar_url ? <img src={user.avatar_url} alt={user.full_name || user.username || "Usuario"} className="h-7 w-7 rounded-full object-cover" /> : <UserCircle2 className="h-4 w-4" />}
+                <UserAvatar
+                  src={user?.avatar_url}
+                  alt={user?.full_name || user?.username || "Usuario"}
+                  name={user?.full_name || user?.username || "Usuario"}
+                  className="h-7 w-7 rounded-full object-cover"
+                  iconClassName="h-4 w-4"
+                />
                 <span className="max-w-[140px] truncate">{user?.full_name || user?.username}</span>
               </button>
               <button

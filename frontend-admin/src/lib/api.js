@@ -38,7 +38,7 @@ function resolveApiBaseUrl() {
 }
 
 const API_BASE_URL = resolveApiBaseUrl();
-const DEFAULT_API_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT || 12000);
+const DEFAULT_API_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT || 20000);
 const inflightMutationRequests = new Map();
 
 export class ApiRequestError extends Error {
@@ -103,6 +103,17 @@ export function setStoredSession(session) {
 
 export function clearStoredSession() {
   localStorage.removeItem(SESSION_KEY);
+}
+
+export function buildAdminEventStreamUrl(session = getStoredSession()) {
+  if (!session?.accessToken) {
+    return "";
+  }
+
+  const baseOrigin = typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1";
+  const url = new URL(buildApiUrl("/api/admin/events/stream"), baseOrigin);
+  url.searchParams.set("accessToken", session.accessToken);
+  return url.toString();
 }
 
 function delay(ms) {
@@ -411,12 +422,26 @@ export async function updateContactRequestStatus(contactRequestId, payload) {
   });
 }
 
-export async function getCards() {
-  return request("/api/admin/cards", { requestLabel: "load-admin-cards" });
+export async function getCards(params = {}) {
+  return request(`/api/admin/cards${buildQueryString(params)}`, { requestLabel: "load-admin-cards" });
 }
 
 export async function getInventoryCards(params = {}) {
-  return request(`/api/admin/cards/inventory${buildQueryString(params)}`, { requestLabel: "load-inventory-cards" });
+  return request(`/api/admin/inventory${buildQueryString(params)}`, { requestLabel: "load-inventory-cards" });
+}
+
+export async function searchAdminCards(params = {}) {
+  return request(`/api/admin/cards/search${buildQueryString(params)}`, { requestLabel: "search-admin-cards" });
+}
+
+export async function addCardToInventory(payload) {
+  return request("/api/admin/inventory", {
+    method: "POST",
+    body: payload,
+    requestLabel: "add-card-to-inventory",
+    idempotencyKey: payload?.mutation_id,
+    dedupeKey: `${payload?.cardId || payload?.card_id || "card"}:${payload?.quantity || 0}`,
+  });
 }
 
 export async function getCatalogScopeSettings() {
@@ -491,8 +516,8 @@ export async function getAdminCardDetail(cardId) {
   return request(`/api/admin/cards/${cardId}`, { requestLabel: "load-admin-card-detail" });
 }
 
-export async function getOrders() {
-  return request("/api/admin/orders", { requestLabel: "load-orders" });
+export async function getOrders(params = {}) {
+  return request(`/api/admin/orders${buildQueryString(params)}`, { requestLabel: "load-orders" });
 }
 
 export async function updateOrderShipping(orderId, payload) {
@@ -517,8 +542,8 @@ export async function exportOrdersWorkbook() {
   window.URL.revokeObjectURL(objectUrl);
 }
 
-export async function getUsers() {
-  return request("/api/admin/users", { requestLabel: "load-users" });
+export async function getUsers(params = {}) {
+  return request(`/api/admin/users${buildQueryString(params)}`, { requestLabel: "load-users" });
 }
 
 export async function updateUserRole(userId, payload) {

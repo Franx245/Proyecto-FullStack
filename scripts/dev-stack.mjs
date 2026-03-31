@@ -1,3 +1,4 @@
+import "../backend/src/lib/load-env.js";
 import { spawn } from "child_process";
 import net from "net";
 
@@ -156,6 +157,9 @@ async function main() {
   const storePort = await findPort(Number(process.env.STORE_PORT || 5173), reservedPorts);
   reservedPorts.add(storePort);
   const adminPort = await findPort(Number(process.env.ADMIN_PORT || 5174), reservedPorts);
+  const apiBaseUrl = `http://${host}:${apiPort}`;
+  const storeBaseUrl = `http://${host}:${storePort}`;
+  const adminBaseUrl = `http://${host}:${adminPort}`;
 
   console.log(`[boot] Using ports api=${apiPort} store=${storePort} admin=${adminPort}`);
   console.log("[boot] Syncing schema...");
@@ -171,6 +175,13 @@ async function main() {
     API_PORT: String(apiPort),
     STORE_PORT: String(storePort),
     ADMIN_PORT: String(adminPort),
+    BACKEND_URL: apiBaseUrl,
+    FRONTEND_URL: storeBaseUrl,
+    ADMIN_URL: adminBaseUrl,
+    VITE_API_BASE_URL: apiBaseUrl,
+    VITE_STOREFRONT_URL: storeBaseUrl,
+    NEXT_PUBLIC_API_BASE_URL: apiBaseUrl,
+    NEXT_PUBLIC_LEGACY_STOREFRONT_URL: storeBaseUrl,
     SKIP_FULL_SEED_IF_READY: "1",
   };
 
@@ -230,7 +241,7 @@ async function main() {
   console.log(`[boot] Store: http://${host}:${storePort}`);
   console.log(`[boot] Admin: http://${host}:${adminPort}`);
   console.log(`[boot] API:   http://${host}:${apiPort}`);
-  console.log("[boot] Default admin login: admin / admin");
+  console.log("[boot] Default admin login: admin@test.com / admin123");
 }
 
 main().catch((error) => {

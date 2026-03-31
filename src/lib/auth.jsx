@@ -49,9 +49,54 @@ import { clearTrackedOrderIds } from "@/lib/orderTracking";
 /** @type {import("react").Context<AuthContextValue | null>} */
 const AuthContext = createContext(null);
 
+let authBootstrapPromise = null;
+let authBootstrapToken = "";
+
+function resetBootstrapCache() {
+  authBootstrapPromise = null;
+  authBootstrapToken = "";
+}
+
+function isSessionExpiredError(error) {
+  return Boolean(
+    error &&
+    typeof error === "object" &&
+    (
+      error.code === "SESSION_EXPIRED" ||
+      error.status === 401 ||
+      error.message === "Session expired"
+    )
+  );
+}
+
+async function resolveBootstrappedSession() {
+  const storedSession = getUsableStoredUserSession();
+  if (!storedSession?.accessToken) {
+    resetBootstrapCache();
+    return null;
+  }
+
+  if (authBootstrapPromise && authBootstrapToken === storedSession.accessToken) {
+    return authBootstrapPromise;
+  }
+
+  authBootstrapToken = storedSession.accessToken;
+  authBootstrapPromise = fetchCurrentUser()
+    .then((payload) => ({
+      ...storedSession,
+      user: payload.user,
+    }))
+    .catch((error) => {
+      resetBootstrapCache();
+      throw error;
+    });
+
+  return authBootstrapPromise;
+}
+
 export function AuthProvider({ children }) {
-  const [session, setSessionState] = useState(/** @type {UserSession | null} */ (getUsableStoredUserSession()));
-  const [user, setUserState] = useState(/** @type {AuthUser | null} */ (getUsableStoredUserSession()?.user ?? null));
+  const [session, setSessionState] = useState(/** @type {UserSession | null} */ (null));
+  const [user, setUserState] = useState(/** @type {AuthUser | null} */ (null));
   const [isBootstrapping, setIsBootstrapping] = useState(true);
 
   useEffect(() => {
@@ -69,26 +114,41 @@ export function AuthProvider({ children }) {
         return;
       }
 
+      if (!cancelled) {
+        setSessionState(storedSession);
+        setUserState(storedSession.user ?? null);
+      }
+
       try {
-        const payload = await fetchCurrentUser();
+        const nextSession = await resolveBootstrappedSession();
         if (cancelled) {
           return;
         }
 
-        const nextSession = {
-          ...storedSession,
-          user: payload.user,
-        };
+        if (!nextSession) {
+          setSessionState(null);
+          setUserState(null);
+          return;
+        }
 
         setStoredUserSession(nextSession);
         setSessionState(nextSession);
-        setUserState(payload.user);
-      } catch {
-        clearStoredUserSession();
-        clearTrackedOrderIds();
+        setUserState(nextSession.user);
+      } catch (error) {
+        resetBootstrapCache();
+        if (isSessionExpiredError(error)) {
+          clearStoredUserSession();
+          clearTrackedOrderIds();
+          if (!cancelled) {
+            setSessionState(null);
+            setUserState(null);
+          }
+          return;
+        }
+
         if (!cancelled) {
-          setSessionState(null);
-          setUserState(null);
+          setSessionState(storedSession);
+          setUserState(storedSession.user ?? null);
         }
       } finally {
         if (!cancelled) {
@@ -113,12 +173,16 @@ export function AuthProvider({ children }) {
     isStaff: user?.role === "STAFF",
     async login(credentials) {
       const nextSession = await loginUser(credentials);
+      authBootstrapToken = nextSession.accessToken;
+      authBootstrapPromise = Promise.resolve(nextSession);
       setSessionState(nextSession);
       setUserState(nextSession.user);
       return nextSession;
     },
     async register(payload) {
       const nextSession = await registerUser(payload);
+      authBootstrapToken = nextSession.accessToken;
+      authBootstrapPromise = Promise.resolve(nextSession);
       setSessionState(nextSession);
       setUserState(nextSession.user);
       return nextSession;
@@ -138,6 +202,8 @@ export function AuthProvider({ children }) {
       const nextSession = current ? { ...current, user: payload.user } : null;
       if (nextSession) {
         setStoredUserSession(nextSession);
+        authBootstrapToken = nextSession.accessToken;
+        authBootstrapPromise = Promise.resolve(nextSession);
       }
       setSessionState(nextSession);
       setUserState(payload.user);
@@ -145,6 +211,7 @@ export function AuthProvider({ children }) {
     },
     async logout() {
       await logoutUser();
+      resetBootstrapCache();
       clearTrackedOrderIds();
       clearStoredUserSession();
       setSessionState(null);
@@ -153,7 +220,10 @@ export function AuthProvider({ children }) {
     setSession(nextSession) {
       if (nextSession) {
         setStoredUserSession(nextSession);
+        authBootstrapToken = nextSession.accessToken;
+        authBootstrapPromise = Promise.resolve(nextSession);
       } else {
+        resetBootstrapCache();
         clearStoredUserSession();
       }
       setSessionState(nextSession);

@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { cloudinaryFetchUrl } from "@/lib/cardImage";
 
 function currency(value) {
   return new Intl.NumberFormat("es-AR", {
@@ -16,7 +17,7 @@ export default function CustomProductCard({ product }) {
     >
       <div className="aspect-[4/3] bg-secondary">
         {product.image ? (
-          <img src={product.image} alt={product.title} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" />
+          <img src={cloudinaryFetchUrl(product.image, { width: 480 })} alt={product.title} loading="lazy" className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Sin imagen</div>
         )}

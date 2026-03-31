@@ -78,6 +78,10 @@ if (typeof window !== "undefined") {
   }, { once: true });
 }
 
+if (typeof window !== "undefined") {
+  performance.mark("admin-boot-start");
+}
+
 const queryClient = createAdminQueryClient();
 
 ReactDOM.createRoot(document.getElementById("root")).render(
@@ -85,3 +89,12 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <App />
   </QueryClientProvider>
 );
+
+if (typeof window !== "undefined") {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      performance.mark("admin-shell-painted");
+      performance.measure("admin-tti", "admin-boot-start", "admin-shell-painted");
+    });
+  });
+}

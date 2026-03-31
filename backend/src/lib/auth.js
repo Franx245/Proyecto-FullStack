@@ -1,11 +1,47 @@
+import "./load-env.js";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 
-const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET || process.env.JWT_SECRET || "duelvault-local-access-secret";
-const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || process.env.JWT_SECRET || "duelvault-local-refresh-secret";
+function requireEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`FATAL: ${name} environment variable is not set. Server cannot start without JWT secrets.`);
+  }
+  return value;
+}
+
+const ACCESS_TOKEN_SECRET = requireEnv("ACCESS_TOKEN_SECRET");
+const REFRESH_TOKEN_SECRET = requireEnv("REFRESH_TOKEN_SECRET");
 
 const ACCESS_TOKEN_EXPIRES_IN = "15m";
 const REFRESH_TOKEN_EXPIRES_IN = "30d";
+
+export function verifyAccessToken(token) {
+  const payload = jwt.verify(token, ACCESS_TOKEN_SECRET);
+
+  if (payload.type !== "access") {
+    throw new Error("Invalid token");
+  }
+
+  return payload;
+}
+
+function resolveAccessTokenFromRequest(req, queryParamName = null) {
+  const header = req.headers.authorization;
+
+  if (header?.startsWith("Bearer ")) {
+    return header.slice(7);
+  }
+
+  if (queryParamName) {
+    const queryToken = req.query?.[queryParamName];
+    if (typeof queryToken === "string" && queryToken.trim()) {
+      return queryToken.trim();
+    }
+  }
+
+  return "";
+}
 
 export function signAccessToken(user) {
   return jwt.sign(
@@ -49,28 +85,39 @@ export function getRefreshTokenExpiryDate() {
 }
 
 export function requireAuth(req, res, next) {
-  const header = req.headers.authorization;
+  const token = resolveAccessTokenFromRequest(req);
 
-  if (!header?.startsWith("Bearer ")) {
+  if (!token) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
 
-  const token = header.slice(7);
-
   try {
-    const payload = jwt.verify(token, ACCESS_TOKEN_SECRET);
-
-    if (payload.type !== "access") {
-      res.status(401).json({ error: "Invalid token" });
-      return;
-    }
-
+    const payload = verifyAccessToken(token);
     req.user = payload;
     next();
   } catch {
     res.status(401).json({ error: "Invalid token" });
   }
+}
+
+export function requireAuthWithAccessTokenQuery(queryParamName = "accessToken") {
+  return (req, res, next) => {
+    const token = resolveAccessTokenFromRequest(req, queryParamName);
+
+    if (!token) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    try {
+      const payload = verifyAccessToken(token);
+      req.user = payload;
+      next();
+    } catch {
+      res.status(401).json({ error: "Invalid token" });
+    }
+  };
 }
 
 export function requireRole(roles) {
@@ -86,6 +133,18 @@ export function requireRole(roles) {
 
 export function requireAdminAuth(req, res, next) {
   return requireAuth(req, res, () => {
+    if (!req.user || !["ADMIN", "STAFF"].includes(req.user.role)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+
+    req.admin = req.user;
+    next();
+  });
+}
+
+export function requireAdminEventStreamAuth(req, res, next) {
+  return requireAuthWithAccessTokenQuery("accessToken")(req, res, () => {
     if (!req.user || !["ADMIN", "STAFF"].includes(req.user.role)) {
       res.status(403).json({ error: "Forbidden" });
       return;

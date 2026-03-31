@@ -1,77 +1,17 @@
-# DuelVault 🃏
+# DuelVault
 
 DuelVault es una plataforma ecommerce + CRM orientada a la venta de cartas y productos de Yu-Gi-Oh!. El proyecto combina una tienda pública para clientes, un backend con reglas de negocio y un panel administrativo para operar catálogo, inventario, home, órdenes y contenido custom.
 
-## Descripción del proyecto 📝
-# DuelVault 🃏
-
-## Descripción del proyecto 📝
+## Descripción del proyecto
 
 El sistema resuelve dos necesidades en una sola base de código:
-## Tabla de contenido 📚
-
-- [Descripción del proyecto](#descripción-del-proyecto-📝)
-- [Quick Start](#quick-start-🚀)
-- [Arquitectura](#arquitectura-🏗️)
-- [Tech Stack](#tech-stack-🛠️)
-- [Estructura del proyecto](#estructura-del-proyecto)
-- [Deployment Guide](#deployment-guide-🚀)
-- [Diagramas del stack](#diagramas-del-stack-📊)
-- [Próxima actualización: Redis](#notas-sobre-la-próxima-actualización-redis)
-
-## Quick Start 🚀
-
-Rápido para desarrolladores — levantar localmente el storefront, admin y backend:
-
-```bash
-npm install
-npm run dev
-```
-
-URLs típicas al levantar el stack:
-
-- Storefront: http://127.0.0.1:5173
-- Admin: http://127.0.0.1:5178
-- API: http://127.0.0.1:3001
-## Arquitectura 🏗️
-
-## Diagramas del stack 📊
-
-Diagrama simple de la arquitectura actual (alto nivel):
-
-```mermaid
-flowchart LR
-	SF["Storefront\n(Vite / React)"] -->|API requests| API["Backend API\n(Express, Vercel)"]
-	Admin["Admin\n(frontend-admin)"] -->|API requests| API
-	API -->|ORM: Prisma| DB["Supabase / Postgres"]
-	API -->|webhooks| MP["Mercado Pago"]
-	CDN["Vercel CDN"] --> SF
-	CDN --> Admin
-```
-![Arquitectura actual](docs/diagrams/arch-current.svg)
-
-![Arquitectura propuesta con Redis](docs/diagrams/arch-redis.svg)
-
-Diagrama objetivo con Redis (próxima actualización):
-
-```mermaid
-flowchart LR
-	SF["Storefront\n(Vite / React)"] -->|API requests / cache| API["Backend API\n(Express)"]
-	Admin -->|API requests| API
-	API -->|reads/writes| DB["Supabase / Postgres"]
-	API -->|cache reads/writes| Redis["Redis\n(Cache / Session)"]
-	API -->|enqueue| Jobs["Background Workers"]
-	Jobs -->|expire orders / rebuild cache| Redis
-	MP["Mercado Pago"] -->|webhooks| API
-	CDN --> SF
-```
 
 - Ecommerce: catálogo público, detalle de producto, carrito, pedidos y storefront responsive.
 - CRM / operación interna: panel admin con autenticación, gestión de inventario, merchandising, órdenes y publicaciones custom.
 
 La separación entre frontend público y backend permite exponer una experiencia rápida al usuario final sin publicar secretos ni lógica sensible. El panel admin consume la misma API, pero con permisos y tokens de sesión.
 
-## Arquitectura 🏗️
+## Arquitectura
 
 Arquitectura recomendada para producción:
 
@@ -87,7 +27,7 @@ Flujo general:
 3. El backend Express centraliza validaciones, permisos, stock, estados de órdenes y persistencia.
 4. Prisma actúa como capa de acceso a datos y mantiene el esquema sobre Supabase Postgres.
 
-## Tech Stack 🛠️
+## Tech Stack
 
 - React
 - Node.js
@@ -107,7 +47,7 @@ Flujo general:
 - /scripts: utilidades de arranque coordinado y soporte de desarrollo.
 - /entities: definiciones del dominio heredadas del catálogo.
 
-## Getting Started local 🚀
+## Getting Started local
 
 La forma recomendada de correr el proyecto es desde la raíz para levantar tienda, backend y admin de manera coordinada.
 
@@ -275,7 +215,7 @@ Qué hace cada variable:
 - VITE_ENABLE_ANALYTICS: activa banderas de analítica del frontend.
 - VITE_STOREFRONT_URL: URL del storefront usada por el admin para redirigir al login público.
 
-## Deployment Guide 🚀
+## Deployment Guide
 
 ## Frontend en Vercel
 
@@ -457,36 +397,6 @@ Esta base quedó evolucionada en cuatro frentes: storefront, panel admin, backen
 
 - Separación formal entre storefront/API y admin según memoria de repo.
 	Por qué: el admin se despliega como proyecto Vercel independiente y la tienda/API como proyecto raíz; esto evita mezclar tiempos de build y configuración.
-
-> Diagrama: versión simplificada arriba en la sección principal "Diagramas del stack".
-
-## Notas sobre la próxima actualización: Redis
-
-- Objetivos:
-	- Añadir caching de respuestas pesadas (catálogo, listas de cards) para reducir latencia y coste de consultas.
-	- Usar Redis como session store para sesiones admin (si se decide migrar a server-render o SSR en futuro).
-	- Delegar expiración de órdenes y tareas programadas a workers (BullMQ / Bee-Queue) con Redis como broker.
-
-- Cambios necesarios:
-	- Añadir cliente Redis en `backend/src/lib/redis.js` y wrapper con TTLs por clave.
-	- Introducir capa de cache en puntos calientes: `getPublicCardFilters`, `listPublicCards` y endpoints de catálogo.
-	- Modificar `expirePendingOrders` para encolar tareas idempotentes y evitar bloqueos largos en transacciones.
-	- Añadir despliegue de worker (proc. separado) o serverless que consuma colas (Vercel + worker provider / render background worker).
-
-- Riesgos y mitigaciones:
-	- Invalidez de cache → usar keys versionadas por `catalogVersion` y TTLs conservadores.
-	- Consistencia stock/pedido → mantener invalidación de cache inmediata tras `updateOrderStatusWithEffects`.
-
-## Próxima actualización (plan rápido)
-
-1. Añadir dependencia `ioredis` y archivo `backend/src/lib/redis.js` (cliente con reconnect/backoff).
-2. Implementar helpers `cacheGet(key)`, `cacheSet(key, value, ttl)`, `cacheDel(key)` y una estrategia de versionado de keys.
-3. Cachear resultados de `listPublicCards` y `getPublicCardFilters` con invalidación en `updateOrderStatusWithEffects` y cambios de `card`.
-4. Desplegar worker (BullMQ) para `expirePendingOrders` y tareas asíncronas.
-
----
-
-Si querés, hago el commit con este README actualizado y genero el push al remoto ahora.
 
 - URLs productivas actualmente utilizadas:
 	- Storefront/API: https://duelvault-store-api.vercel.app

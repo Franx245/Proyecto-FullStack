@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from "react";
+import { memo, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { buildRemoteCardImageUrl, extractCardIdFromImageUrl, getCardImage } from "@/lib/cardImage";
 
@@ -31,10 +31,6 @@ function CardImageBase({
   const preferredSrc = sources?.src || fallbackSrc || "";
   const [currentSrc, setCurrentSrc] = useState(preferredSrc);
 
-  useEffect(() => {
-    setCurrentSrc(preferredSrc);
-  }, [preferredSrc]);
-
   if (!sources && !fallbackSrc) {
     return (
       <div className="flex h-full w-full items-center justify-center">
@@ -46,6 +42,7 @@ function CardImageBase({
   return (
     <img
       src={currentSrc}
+      srcSet={sources?.srcset || undefined}
       sizes={sizes}
       width={sources?.width}
       height={sources?.height}

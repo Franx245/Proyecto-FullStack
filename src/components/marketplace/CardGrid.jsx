@@ -60,7 +60,7 @@ export default function CardGrid({
 
         <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4" data-critical="catalog-grid">
           {cards.map((card, index) => (
-            <CardItem key={card?.version_id ?? Math.random()} card={card} priorityImage={index < 4} />
+            <CardItem key={card?.version_id ?? card?.id ?? card?.ygoproId ?? `card-${index}`} card={card} priorityImage={index < 4} />
           ))}
 
         {(isLoading || isLoadingMore) && skeletons}

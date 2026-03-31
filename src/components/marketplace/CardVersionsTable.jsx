@@ -4,7 +4,6 @@ import { ShoppingCart, ShieldCheck } from "lucide-react";
 import { useCart } from "@/lib/cartStore";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "sonner";
-import { useNavigate } from "react-router-dom";
 
 import RarityBadge from "./RarityBadge";
 import QuantitySelector from "./QuantitySelector";
@@ -56,12 +55,11 @@ function StockBadge({ stock }) {
 }
 
 /**
- * @param {{ versions?: CardVersion[], isLoading?: boolean }} props
+ * @param {{ versions?: CardVersion[], isLoading?: boolean, onOpenDetail?: (version: CardVersion) => void, onOpenCart?: () => void }} props
  */
-export default function CardVersionsTable({ versions = [], isLoading }) {
+export default function CardVersionsTable({ versions = [], isLoading, onOpenDetail, onOpenCart }) {
   const { addItem, setIsOpen } = useCart();
   const isMobile = useIsMobile();
-  const navigate = useNavigate();
 
   const handleAdd = useCallback(
     /** @param {CardVersion} version @param {number} qty */
@@ -96,18 +94,31 @@ export default function CardVersionsTable({ versions = [], isLoading }) {
         return;
       }
 
-      navigate(`/card/${detailId}`);
+      if (typeof onOpenDetail === "function") {
+        onOpenDetail(version);
+        return;
+      }
+
+      if (typeof window !== "undefined") {
+        window.location.assign(`/card/${detailId}`);
+      }
     },
-    [navigate]
+    [onOpenDetail]
   );
 
   const handleOpenCart = useCallback(
     /** @param {React.MouseEvent<HTMLButtonElement>} event */
     (event) => {
       event.stopPropagation();
+
+      if (typeof onOpenCart === "function") {
+        onOpenCart();
+        return;
+      }
+
       setIsOpen(true);
     },
-    [setIsOpen]
+    [onOpenCart, setIsOpen]
   );
 
   return (

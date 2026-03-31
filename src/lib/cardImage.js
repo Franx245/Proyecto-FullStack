@@ -6,12 +6,14 @@ const CARD_IMAGE_VARIANTS = {
     intrinsicWidth: 168,
     intrinsicHeight: 244,
     remotePath: "cards_small",
+    srcsetWidths: [160, 240, 320, 480],
   },
   detail: {
     width: 600,
     intrinsicWidth: 421,
     intrinsicHeight: 614,
     remotePath: "cards",
+    srcsetWidths: [300, 420, 600, 800],
   },
 };
 
@@ -55,20 +57,40 @@ export function getCardImage(id, variant = "thumb") {
   if (!cloudName) {
     return {
       src: remoteUrl,
+      srcset: "",
       width: selectedVariant.intrinsicWidth,
       height: selectedVariant.intrinsicHeight,
       rawSrc: remoteUrl,
     };
   }
 
-  const transformations = [`w_${selectedVariant.width}`, "q_auto", "f_auto", "dpr_auto"].join(",");
+  const baseTransforms = "q_auto:eco,f_auto";
+  const transformations = `w_${selectedVariant.width},${baseTransforms},dpr_auto`;
+
+  const srcset = selectedVariant.srcsetWidths
+    .map((w) => `https://res.cloudinary.com/${cloudName}/image/fetch/w_${w},${baseTransforms}/${remoteUrl} ${w}w`)
+    .join(", ");
 
   return {
     src: `https://res.cloudinary.com/${cloudName}/image/fetch/${transformations}/${remoteUrl}`,
+    srcset,
     width: selectedVariant.intrinsicWidth,
     height: selectedVariant.intrinsicHeight,
     rawSrc: remoteUrl,
   };
+}
+
+/**
+ * Wrap any remote image URL through Cloudinary fetch for auto-format/quality/resize.
+ * @param {string | null | undefined} url
+ * @param {{ width?: number }} [opts]
+ */
+export function cloudinaryFetchUrl(url, opts = {}) {
+  if (!url) return "";
+  const cloudName = String(ENV.CLOUDINARY_CLOUD_NAME || "").trim();
+  if (!cloudName) return url;
+  const transforms = [opts.width && `w_${opts.width}`, "q_auto:eco", "f_auto"].filter(Boolean).join(",");
+  return `https://res.cloudinary.com/${cloudName}/image/fetch/${transforms}/${url}`;
 }
 
 /** @param {string | null | undefined} url */

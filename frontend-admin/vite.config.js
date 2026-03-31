@@ -1,29 +1,5 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-function normalizeModuleId(moduleId) {
-  return typeof moduleId === "string" ? moduleId.replace(/\\/g, "/") : "";
-}
-
-function createModulePreloadMarkup(bundle, moduleIds) {
-  return Object.values(bundle)
-    .filter(
-      (file) =>
-        file.type === "chunk" &&
-        moduleIds.some((moduleId) => normalizeModuleId(file.facadeModuleId).endsWith(moduleId))
-    )
-    .map((file) => `<link rel="modulepreload" crossorigin href="/${file.fileName}">`)
-    .join("");
-}
-
-function createModulePreloadFiles(bundle, moduleIds) {
-  return Object.values(bundle)
-    .filter(
-      (file) =>
-        file.type === "chunk" &&
-        moduleIds.some((moduleId) => normalizeModuleId(file.facadeModuleId).endsWith(moduleId))
-    )
-    .map((file) => `/${file.fileName}`);
-}
 
 function createCleanupServiceWorkerSource(cachePrefixes) {
   return `const CACHE_PREFIXES = ${JSON.stringify(cachePrefixes)};
@@ -50,12 +26,6 @@ self.addEventListener("activate", (event) => {
 }
 
 function adminPreloadAndSw() {
-  const modulePreloadModules = [
-    "src/views/InventoryView.jsx",
-    "src/views/OrdersView.jsx",
-    "src/views/WhatsappSettingsView.jsx",
-  ];
-
   return {
     name: "admin-preload-and-sw",
     apply: "build",
@@ -73,13 +43,15 @@ function adminPreloadAndSw() {
       }
 
       const stylesheetHref = `/${stylesheetAsset.fileName}`;
-      const modulePreloadMarkup = createModulePreloadMarkup(bundle, modulePreloadModules);
 
       htmlAsset.source = String(htmlAsset.source).replace(
         `<link rel="stylesheet" crossorigin href="${stylesheetHref}">`,
         `<link rel="preload" as="style" crossorigin href="${stylesheetHref}" onload="this.onload=null;this.rel='stylesheet'" data-full-stylesheet><noscript><link rel="stylesheet" crossorigin href="${stylesheetHref}"></noscript>`
       );
-      htmlAsset.source = String(htmlAsset.source).replace("</head>", `${modulePreloadMarkup}</head>`);
+      htmlAsset.source = String(htmlAsset.source).replace(
+        /\s*<link rel="modulepreload" crossorigin href="\/assets\/InventoryView-[^"]+\.js">/g,
+        ""
+      );
       bundle["sw.js"] = {
         type: "asset",
         fileName: "sw.js",

@@ -1,6 +1,5 @@
 import { Suspense, lazy, useEffect } from "react";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
-import { Toaster } from "sonner";
 import {
   buildCardsQueryKey,
   queryClientInstance,
@@ -25,19 +24,22 @@ import { useCardsRealtime } from "@/hooks/useCardsRealtime";
 
 import MarketplaceLayout from "@/components/marketplace/MarketplaceLayout";
 import PageNotFound from "@/lib/PageNotFound";
-import Singles from "@/pages/Singles";
 
-const loadHome = () => import("@/pages/Home");
-const loadCardDetail = () => import("@/pages/CardDetail");
-const loadCartPage = () => import("@/pages/Cart");
-const loadContact = () => import("@/pages/Contact");
-const loadCustomCatalog = () => import("@/pages/CustomCatalog");
-const loadCustomProductDetail = () => import("@/pages/CustomProductDetail");
-const loadPrivacy = () => import("@/pages/Privacy");
-const loadOrders = () => import("@/pages/Orders");
-const loadAuthPage = () => import("@/pages/Auth");
-const loadAccount = () => import("@/pages/Account");
+const loadSingles = () => import("@/legacy-pages/Singles");
+const loadHome = () => import("@/legacy-pages/Home");
+const loadCardDetail = () => import("@/legacy-pages/CardDetail");
+const loadCartPage = () => import("@/legacy-pages/Cart");
+const loadContact = () => import("@/legacy-pages/Contact");
+const loadCustomCatalog = () => import("@/legacy-pages/CustomCatalog");
+const loadCustomProductDetail = () => import("@/legacy-pages/CustomProductDetail");
+const loadPrivacy = () => import("@/legacy-pages/Privacy");
+const loadOrders = () => import("@/legacy-pages/Orders");
+const loadOrderPayment = () => import("@/legacy-pages/OrderPayment");
+const loadCheckoutResult = () => import("@/legacy-pages/CheckoutResult");
+const loadAuthPage = () => import("@/legacy-pages/Auth");
+const loadAccount = () => import("@/legacy-pages/Account");
 
+const Singles = lazy(loadSingles);
 const Home = lazy(loadHome);
 const CardDetail = lazy(loadCardDetail);
 const CartPage = lazy(loadCartPage);
@@ -46,8 +48,11 @@ const CustomCatalog = lazy(loadCustomCatalog);
 const CustomProductDetail = lazy(loadCustomProductDetail);
 const Privacy = lazy(loadPrivacy);
 const Orders = lazy(loadOrders);
+const OrderPayment = lazy(loadOrderPayment);
+const CheckoutResult = lazy(loadCheckoutResult);
 const AuthPage = lazy(loadAuthPage);
 const Account = lazy(loadAccount);
+const LazyToaster = lazy(() => import("sonner").then((m) => ({ default: m.Toaster })));
 
 /** @param {() => void} callback */
 function scheduleIdleTask(callback) {
@@ -69,7 +74,7 @@ const INITIAL_CATALOG_SERVER_FILTERS = Object.freeze({
   cardTypes: [],
   conditions: [],
   sets: [],
-  priceRange: null,
+  priceRange: undefined,
 });
 
 function DataLayerEffects() {
@@ -78,10 +83,13 @@ function DataLayerEffects() {
   useEffect(() => {
     const cancelIdlePreload = scheduleIdleTask(() => {
       void Promise.allSettled([
+        loadSingles(),
         loadHome(),
         loadCardDetail(),
         loadCartPage(),
         loadOrders(),
+        loadOrderPayment(),
+        loadCheckoutResult(),
         loadAuthPage(),
         loadAccount(),
       ]);
@@ -136,8 +144,19 @@ function DataLayerEffects() {
 
 function RouteLoadingFallback() {
   return (
-    <div className="mx-auto flex min-h-[36vh] w-full max-w-[1400px] items-center justify-center px-4 py-10 text-sm text-muted-foreground">
-      Preparando vista...
+    <div className="mx-auto w-full max-w-[1400px] px-4 py-10 animate-pulse">
+      <div className="h-6 w-48 rounded bg-secondary mb-6" />
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="overflow-hidden rounded-[1.35rem] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.015))]">
+            <div className="aspect-[3/4] bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(15,23,42,0.4))]" />
+            <div className="space-y-3 p-4">
+              <div className="h-4 w-4/5 rounded bg-secondary" />
+              <div className="h-4 w-3/5 rounded bg-secondary" />
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -150,18 +169,20 @@ function App() {
         <DataLayerEffects />
         <AuthProvider>
           <CartProvider>
-            <Toaster
-              position="top-right"
-              richColors
-              closeButton
-              toastOptions={{
-                style: {
-                  background: "rgb(15 23 42)",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  color: "rgb(226 232 240)",
-                },
-              }}
-            />
+            <Suspense fallback={null}>
+              <LazyToaster
+                position="top-right"
+                richColors
+                closeButton
+                toastOptions={{
+                  style: {
+                    background: "rgb(15 23 42)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    color: "rgb(226 232 240)",
+                  },
+                }}
+              />
+            </Suspense>
             <Router>
               <Suspense fallback={<RouteLoadingFallback />}>
                 <Routes>
@@ -183,6 +204,10 @@ function App() {
                   {/* Cart & Orders */}
                   <Route path="/cart" element={<CartPage />} />
                   <Route path="/orders" element={<Orders />} />
+                  <Route path="/checkout/pay/:orderId" element={<OrderPayment />} />
+                  <Route path="/checkout/success" element={<CheckoutResult />} />
+                  <Route path="/checkout/failure" element={<CheckoutResult />} />
+                  <Route path="/checkout/pending" element={<CheckoutResult />} />
                   <Route path="/auth" element={<AuthPage />} />
                   <Route path="/account" element={<Account />} />
 

@@ -1,89 +1,12 @@
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import { Search, Users } from "lucide-react";
 import { ConfirmActionDialog, EmptyState, PaginationControls, StatCard, currency, userRoleLabel } from "./shared";
 
-const USERS_VIEW_STATE_KEY = "duelvault_admin_users_view_state_v1";
-
-function canUseStorage() {
-  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
-}
-
-function readUsersViewState() {
-  if (!canUseStorage()) {
-    return {};
-  }
-
-  try {
-    return JSON.parse(window.localStorage.getItem(USERS_VIEW_STATE_KEY) || "{}") || {};
-  } catch {
-    return {};
-  }
-}
-
-export default function UsersView({ users, canEditRoles, updatingUserId, onRoleChange }) {
-  const [search, setSearch] = useState(() => readUsersViewState().search || "");
-  const [roleFilter, setRoleFilter] = useState(() => readUsersViewState().roleFilter || "all");
-  const [page, setPage] = useState(() => {
-    const storedPage = Number(readUsersViewState().page);
-    return Number.isFinite(storedPage) && storedPage > 0 ? storedPage : 1;
-  });
+export default function UsersView({ users, summary, pagination, filters, canEditRoles, updatingUserId, onRoleChange, onFiltersChange, onPageChange }) {
   const [confirmState, setConfirmState] = useState(null);
-  const deferredSearch = useDeferredValue(search);
-  const pageSize = 8;
-
-  useEffect(() => {
-    if (!canUseStorage()) {
-      return;
-    }
-
-    window.localStorage.setItem(
-      USERS_VIEW_STATE_KEY,
-      JSON.stringify({
-        search,
-        roleFilter,
-        page,
-      })
-    );
-  }, [page, roleFilter, search]);
-
-  const filteredUsers = useMemo(() => {
-    const needle = deferredSearch.trim().toLowerCase();
-    return users.filter((user) => {
-      const roleMatches = roleFilter === "all" || user.role === roleFilter;
-      const haystack = [
-        user.full_name || "",
-        user.username || "",
-        user.email || "",
-        user.phone || "",
-        user.role || "",
-      ]
-        .join(" ")
-        .toLowerCase();
-
-      return roleMatches && (!needle || haystack.includes(needle));
-    });
-  }, [deferredSearch, roleFilter, users]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));
-  const paginatedUsers = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return filteredUsers.slice(start, start + pageSize);
-  }, [filteredUsers, page]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [search, roleFilter]);
-
-  useEffect(() => {
-    setPage((currentPage) => Math.min(currentPage, totalPages));
-  }, [totalPages]);
-
-  const customerCount = users.filter((user) => user.role === "USER").length;
-  const staffCount = users.filter((user) => user.role === "STAFF").length;
-  const adminCount = users.filter((user) => user.role === "ADMIN").length;
   const isRoleMutationPending = Boolean(updatingUserId);
 
-  if (!users.length) {
+  if ((summary?.filteredTotal || 0) === 0) {
     return <EmptyState icon={Users} title="Sin usuarios cargados" description="Los registros y actividades de la tienda pública aparecerán acá." />;
   }
 
@@ -104,25 +27,25 @@ export default function UsersView({ users, canEditRoles, updatingUserId, onRoleC
         </div>
 
         <div className="mt-4 grid gap-3 md:grid-cols-4">
-          <StatCard title="Usuarios" value={users.length} />
-          <StatCard title="Clientes" value={customerCount} />
-          <StatCard title="Equipo" value={staffCount} />
-          <StatCard title="Admins" value={adminCount} />
+          <StatCard title="Usuarios" value={summary?.totalUsers || 0} />
+          <StatCard title="Clientes" value={summary?.customerCount || 0} />
+          <StatCard title="Equipo" value={summary?.staffCount || 0} />
+          <StatCard title="Admins" value={summary?.adminCount || 0} />
         </div>
 
         <div className="mt-4 grid gap-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4 lg:grid-cols-[minmax(0,1fr)_240px]">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
             <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              value={filters.search}
+              onChange={(event) => onFiltersChange({ search: event.target.value })}
               placeholder="Buscar por nombre, email, usuario o teléfono"
               className="h-11 w-full rounded-2xl border border-white/10 bg-slate-950/70 pl-10 pr-4 text-sm outline-none transition focus:border-amber-400"
             />
           </div>
           <select
-            value={roleFilter}
-            onChange={(event) => setRoleFilter(event.target.value)}
+            value={filters.role}
+            onChange={(event) => onFiltersChange({ role: event.target.value })}
             className="h-11 min-w-0 rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition focus:border-amber-400"
           >
             <option value="all">Todos los roles</option>
@@ -133,11 +56,11 @@ export default function UsersView({ users, canEditRoles, updatingUserId, onRoleC
         </div>
       </div>
 
-      {filteredUsers.length === 0 ? (
+      {users.length === 0 ? (
         <EmptyState icon={Users} title="Sin coincidencias" description="Ajustá la búsqueda o el filtro de rol para encontrar usuarios." />
       ) : (
         <div className="space-y-4">
-          {paginatedUsers.map((user) => (
+          {users.map((user) => (
             <div key={user.id} className="glass admin-list-card admin-content-auto rounded-3xl border border-white/10 p-5">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
@@ -225,7 +148,7 @@ export default function UsersView({ users, canEditRoles, updatingUserId, onRoleC
           ))}
 
           <div className="glass overflow-hidden rounded-3xl border border-white/10">
-            <PaginationControls page={page} totalPages={totalPages} onPageChange={setPage} />
+            <PaginationControls page={pagination?.page || 1} totalPages={pagination?.totalPages || 1} onPageChange={onPageChange} />
           </div>
         </div>
       )}

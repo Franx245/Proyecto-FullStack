@@ -1,12 +1,10 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Boxes,
   Clock3,
   PackageSearch,
   ReceiptText,
   Search,
   ShieldAlert,
-  Truck,
   X,
 } from "lucide-react";
 import {
@@ -27,13 +25,18 @@ function canUseStorage() {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
 }
 
-function readDashboardViewState() {
+function readDashboardViewState(adminId) {
   if (!canUseStorage()) {
     return {};
   }
 
   try {
-    return JSON.parse(window.localStorage.getItem(DASHBOARD_VIEW_STATE_KEY) || "{}") || {};
+    const parsed = JSON.parse(window.localStorage.getItem(DASHBOARD_VIEW_STATE_KEY) || "{}") || {};
+    if (adminId && parsed._adminId && parsed._adminId !== adminId) {
+      try { window.localStorage.removeItem(DASHBOARD_VIEW_STATE_KEY); } catch {}
+      return {};
+    }
+    return parsed;
   } catch {
     return {};
   }
@@ -63,6 +66,8 @@ const DATE_RANGE_OPTIONS = [
 const STATUS_OPTIONS = [
   { value: "all", label: "Todos los estados" },
   { value: "pending_payment", label: "Pendiente de pago" },
+  { value: "failed", label: "Pago rechazado" },
+  { value: "expired", label: "Pago expirado" },
   { value: "paid", label: "Pagado" },
   { value: "shipped", label: "Enviado" },
   { value: "completed", label: "Completado" },
@@ -439,11 +444,11 @@ function OrderDrawer({
   );
 }
 
-export default function DashboardView({
+export default memo(function DashboardView({
   dashboard,
-  orders,
-  users,
-  cards,
+  orders = [],
+  users = [],
+  cards = [],
   admin,
   canCancelOrders,
   updatingOrderId,
@@ -453,7 +458,7 @@ export default function DashboardView({
   onStatusChange,
 }) {
   const dashboardRootRef = useRef(null);
-  const persistedState = readDashboardViewState();
+  const persistedState = readDashboardViewState(admin?.id);
   const [globalSearch, setGlobalSearch] = useState(() => persistedState.globalSearch || "");
   const [dateRange, setDateRange] = useState(() => persistedState.dateRange || "30d");
   const [statusFilter, setStatusFilter] = useState(() => persistedState.statusFilter || "all");
@@ -474,6 +479,7 @@ export default function DashboardView({
     window.localStorage.setItem(
       DASHBOARD_VIEW_STATE_KEY,
       JSON.stringify({
+        _adminId: admin?.id || null,
         globalSearch,
         dateRange,
         statusFilter,
@@ -489,12 +495,26 @@ export default function DashboardView({
     return cancel;
   }, []);
 
+  const orderSource = useMemo(() => (
+    orders.length ? orders : (dashboard?.recentOrders || [])
+  ), [dashboard?.recentOrders, orders]);
+
+  const userSource = useMemo(() => (
+    users.length ? users : (dashboard?.recentUsers || [])
+  ), [dashboard?.recentUsers, users]);
+
+  const cardSource = useMemo(() => (
+    cards.length ? cards : (dashboard?.topSellingCards || [])
+  ), [cards, dashboard?.topSellingCards]);
+
+  const hasOperationalDatasets = orders.length > 0 || users.length > 0 || cards.length > 0;
+
   const cutoffDate = useMemo(() => getCutoffDate(dateRange), [dateRange]);
 
   const customerOptions = useMemo(() => {
     const seen = new Map();
 
-    for (const user of users) {
+    for (const user of userSource) {
       const value = getCustomerFilterValue(user);
       if (!seen.has(value)) {
         seen.set(value, {
@@ -504,7 +524,7 @@ export default function DashboardView({
       }
     }
 
-    for (const order of orders) {
+    for (const order of orderSource) {
       const value = getCustomerFilterValue(order);
       if (!seen.has(value)) {
         seen.set(value, {
@@ -515,12 +535,12 @@ export default function DashboardView({
     }
 
     return Array.from(seen.values()).sort((a, b) => a.label.localeCompare(b.label, "es"));
-  }, [orders, users]);
+  }, [orderSource, userSource]);
 
   const filteredOrders = useMemo(() => {
     const needle = normalizeText(deferredSearch);
 
-    return orders.filter((order) => {
+    return orderSource.filter((order) => {
       const createdAt = order.created_at ? new Date(order.created_at) : null;
       const dateMatches = !cutoffDate || (createdAt && createdAt >= cutoffDate);
       const statusMatches = statusFilter === "all" || order.status === statusFilter;
@@ -528,26 +548,54 @@ export default function DashboardView({
       const searchMatches = matchesGlobalSearch({ needle, order });
       return dateMatches && statusMatches && userMatches && searchMatches;
     });
-  }, [cutoffDate, deferredSearch, orders, statusFilter, userFilter]);
+  }, [cutoffDate, deferredSearch, orderSource, statusFilter, userFilter]);
 
   const filteredUsers = useMemo(() => {
     const needle = normalizeText(deferredSearch);
 
-    return users.filter((user) => {
+    return userSource.filter((user) => {
       const createdAt = user.created_at ? new Date(user.created_at) : null;
       const dateMatches = !cutoffDate || (createdAt && createdAt >= cutoffDate);
       const userMatches = userFilter === "all" || getCustomerFilterValue(user) === userFilter;
       const searchMatches = matchesGlobalSearch({ needle, user });
       return dateMatches && userMatches && searchMatches;
     });
-  }, [cutoffDate, deferredSearch, userFilter, users]);
+  }, [cutoffDate, deferredSearch, userFilter, userSource]);
 
   const filteredCards = useMemo(() => {
     const needle = normalizeText(deferredSearch);
-    return cards.filter((card) => matchesGlobalSearch({ needle, card }));
-  }, [cards, deferredSearch]);
+    return cardSource.filter((card) => matchesGlobalSearch({ needle, card }));
+  }, [cardSource, deferredSearch]);
 
   const metrics = useMemo(() => {
+    const pendingPaymentCount = filteredOrders.filter((order) => order.status === "pending_payment").length;
+
+    const globalPendingCount = Number(dashboard?.metrics?.pendingPaymentCount || 0);
+
+    if (!hasOperationalDatasets) {
+      const ordersToday = filteredOrders.filter((order) => {
+        const createdAt = order.created_at ? new Date(order.created_at) : null;
+        if (!createdAt) {
+          return false;
+        }
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        return createdAt >= today;
+      }).length;
+
+      return {
+        revenue: Number(dashboard?.metrics?.totalRevenue || 0),
+        ordersToday,
+        activeUsers: Number(dashboard?.metrics?.totalCustomers || filteredUsers.length || 0),
+        pendingPaymentCount: globalPendingCount,
+        visibleOrders: filteredOrders.length,
+        visibleUsers: filteredUsers.length,
+        visibleCards: filteredCards.length,
+        avgTicket: Number(dashboard?.metrics?.avgOrderValue || 0),
+      };
+    }
+
     const countedOrders = filteredOrders.filter((order) => order.counts_for_dashboard && order.status !== "cancelled");
     const revenue = countedOrders.reduce((accumulator, order) => accumulator + Number(order.total || 0), 0);
     const today = new Date();
@@ -557,19 +605,18 @@ export default function DashboardView({
       return createdAt && createdAt >= today;
     }).length;
     const activeUsers = new Set(filteredOrders.map((order) => getCustomerFilterValue(order))).size;
-    const pendingPaymentCount = filteredOrders.filter((order) => order.status === "pending_payment").length;
 
     return {
       revenue,
       ordersToday,
       activeUsers,
-      pendingPaymentCount,
+      pendingPaymentCount: Math.max(globalPendingCount, pendingPaymentCount),
       visibleOrders: filteredOrders.length,
       visibleUsers: filteredUsers.length,
       visibleCards: filteredCards.length,
       avgTicket: countedOrders.length ? revenue / countedOrders.length : 0,
     };
-  }, [filteredCards.length, filteredOrders, filteredUsers.length]);
+  }, [dashboard?.metrics?.avgOrderValue, dashboard?.metrics?.pendingPaymentCount, dashboard?.metrics?.totalCustomers, dashboard?.metrics?.totalRevenue, filteredCards.length, filteredOrders, filteredUsers.length, hasOperationalDatasets]);
 
   const recentOrders = useMemo(
     () => [...filteredOrders].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 8),
@@ -592,7 +639,18 @@ export default function DashboardView({
   );
 
   const topSellingProducts = useMemo(() => {
-    const cardsById = new Map(cards.map((card) => [card.id, card]));
+    if (!orders.length) {
+      return (dashboard?.topSellingCards || []).slice(0, 6).map((product) => ({
+        id: product.id,
+        name: product.name || `Card ${product.id}`,
+        image: product.image,
+        rarity: product.rarity || product.card_type || "Carta",
+        quantity: Number(product.quantity_sold || product.quantity || 0),
+        revenue: Number(product.revenue || product.total_revenue || 0),
+      }));
+    }
+
+    const cardsById = new Map(cardSource.map((card) => [card.id, card]));
     const aggregate = new Map();
 
     for (const order of filteredOrders) {
@@ -616,7 +674,7 @@ export default function DashboardView({
     return Array.from(aggregate.values())
       .sort((a, b) => b.quantity - a.quantity || b.revenue - a.revenue)
       .slice(0, 6);
-  }, [cards, filteredOrders]);
+  }, [cardSource, dashboard?.topSellingCards, filteredOrders, orders.length]);
 
   const recentActivity = useMemo(() => {
     const orderActivity = filteredOrders.slice(0, 10).map((order) => ({
@@ -624,7 +682,7 @@ export default function DashboardView({
       title: `Pedido #${order.id}`,
       description: `${order.customer_name || order.customer_email || "Cliente"} · ${orderStatusLabel(order.status)}`,
       createdAt: order.created_at,
-      tone: order.status === "pending_payment" ? "warn" : order.status === "cancelled" ? "danger" : "default",
+      tone: order.status === "pending_payment" ? "warn" : ["cancelled", "failed", "expired"].includes(order.status) ? "danger" : "default",
       icon: ReceiptText,
     }));
 
@@ -642,16 +700,20 @@ export default function DashboardView({
       .slice(0, 10);
   }, [filteredOrders, filteredUsers]);
 
-  const selectedOrder = useMemo(
-    () => orders.find((order) => order.id === selectedOrderId) || null,
-    [orders, selectedOrderId]
-  );
+  const selectedOrderRef = useRef(null);
+  const selectedOrder = useMemo(() => {
+    const found = orderSource.find((order) => order.id === selectedOrderId) || null;
+    if (found) {
+      selectedOrderRef.current = found;
+    }
+    return found || (selectedOrderId ? selectedOrderRef.current : null);
+  }, [orderSource, selectedOrderId]);
 
   useEffect(() => {
-    if (selectedOrderId && !orders.some((order) => order.id === selectedOrderId)) {
-      setSelectedOrderId(null);
+    if (!selectedOrderId) {
+      selectedOrderRef.current = null;
     }
-  }, [orders, selectedOrderId]);
+  }, [selectedOrderId]);
 
   const visibleAlerts = {
     low_stock: lowStockCards,
@@ -691,8 +753,11 @@ export default function DashboardView({
 
               <div className="xl:col-span-8 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                 <div className="relative min-w-0 md:col-span-2 xl:col-span-1">
+                  <label htmlFor="dashboard-global-search" className="sr-only">Buscar en el dashboard</label>
                   <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
                   <input
+                    id="dashboard-global-search"
+                    aria-label="Buscar pedidos, usuarios o productos"
                     value={globalSearch}
                     onChange={(event) => setGlobalSearch(event.target.value)}
                     placeholder="Buscar pedidos, usuarios o productos"
@@ -700,7 +765,10 @@ export default function DashboardView({
                   />
                 </div>
 
+                <label htmlFor="dashboard-date-range" className="sr-only">Rango temporal</label>
                 <select
+                  id="dashboard-date-range"
+                  aria-label="Filtrar por rango temporal"
                   value={dateRange}
                   onChange={(event) => setDateRange(event.target.value)}
                   className="h-12 rounded-xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400"
@@ -710,7 +778,10 @@ export default function DashboardView({
                   ))}
                 </select>
 
+                <label htmlFor="dashboard-status-filter" className="sr-only">Estado del pedido</label>
                 <select
+                  id="dashboard-status-filter"
+                  aria-label="Filtrar por estado del pedido"
                   value={statusFilter}
                   onChange={(event) => setStatusFilter(event.target.value)}
                   className="h-12 rounded-xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400"
@@ -720,7 +791,10 @@ export default function DashboardView({
                   ))}
                 </select>
 
+                <label htmlFor="dashboard-user-filter" className="sr-only">Cliente o usuario</label>
                 <select
+                  id="dashboard-user-filter"
+                  aria-label="Filtrar por cliente o usuario"
                   value={userFilter}
                   onChange={(event) => setUserFilter(event.target.value)}
                   className="h-12 rounded-xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400"
@@ -747,7 +821,10 @@ export default function DashboardView({
               value={metrics.pendingPaymentCount}
               helper="Cobros por resolver"
               tone={metrics.pendingPaymentCount ? "danger" : "default"}
-              onClick={() => setStatusFilter("pending_payment")}
+              onClick={() => {
+                onNavigateSectionIntent?.("orders");
+                onNavigateSection("orders", { status: "pending_payment" });
+              }}
             />
             <KpiCard
               label="Pedidos hoy"
@@ -995,4 +1072,4 @@ export default function DashboardView({
       />
     </>
   );
-}
+});

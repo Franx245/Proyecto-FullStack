@@ -6,7 +6,7 @@ import {
   EyeOff,
   History,
   LoaderCircle,
-  PackageSearch,
+  PlusCircle,
   RefreshCcw,
   Search,
   SlidersHorizontal,
@@ -32,8 +32,8 @@ const DEFAULT_FILTERS = {
 };
 
 const STOCK_STATUS_OPTIONS = [
-  { value: "all", label: "Todo el stock" },
-  { value: "out_of_stock", label: "Agotado" },
+  { value: "all", label: "Todo el estado" },
+  { value: "out_of_stock", label: "Sin stock" },
   { value: "low_stock", label: "Stock bajo" },
   { value: "available", label: "Disponible" },
 ];
@@ -66,15 +66,21 @@ function normalizeCatalogOptions(values, fallback) {
   return [...new Set((values || []).map((value) => formatCatalogLabel(value, fallback)).filter(Boolean))];
 }
 
+function isLowStockCard(card) {
+  const stock = Number(card?.stock || 0);
+  const threshold = Number(card?.low_stock_threshold || 0);
+  return stock > 0 && threshold > 0 && stock <= threshold;
+}
+
 function getStatusMeta(card) {
   if ((card.stock || 0) <= 0) {
     return {
-      label: "Agotada",
+      label: "Sin stock",
       className: "border-rose-500/20 bg-rose-500/10 text-rose-200",
     };
   }
 
-  if ((card.stock || 0) <= (card.low_stock_threshold || 0)) {
+  if (isLowStockCard(card)) {
     return {
       label: "Stock bajo",
       className: "border-amber-400/20 bg-amber-400/10 text-amber-100",
@@ -144,11 +150,15 @@ function ToggleCell({ checked, disabled, onChange, activeLabel, inactiveLabel })
 
 const InventoryRow = memo(function InventoryRow({
   card,
+  mode,
   canEditInventory,
   isSelected,
   isDeletingCards,
+  selectionEnabled,
+  isAddingToInventory,
   onSelectedChange,
   onOpen,
+  onRequestAddToInventory,
   onRequestDelete,
   onSave,
 }) {
@@ -228,9 +238,10 @@ const InventoryRow = memo(function InventoryRow({
       className="grid h-[78px] grid-cols-[48px_290px_120px_108px_96px_96px_124px_108px_108px_132px_132px] border-b border-white/5 text-sm text-slate-300 transition duration-150 hover:bg-white/[0.04]"
       onClick={() => onOpen(card)}
     >
-      <div className="sticky left-0 z-20 flex items-center justify-center border-r border-white/5 bg-[#090d1f] px-2">
+      <div className="flex items-center justify-center border-r border-white/5 bg-[#090d1f] px-2">
         <input
           type="checkbox"
+          disabled={!selectionEnabled}
           checked={isSelected}
           onChange={(event) => {
             event.stopPropagation();
@@ -242,9 +253,9 @@ const InventoryRow = memo(function InventoryRow({
       <button
         type="button"
         onClick={() => onOpen(card)}
-        className="sticky left-[48px] z-10 flex min-w-0 items-center gap-3 border-r border-white/5 bg-[#090d1f] px-4 text-left"
+        className="flex min-w-0 items-center gap-3 border-r border-white/5 bg-[#090d1f] px-4 text-left"
       >
-        <img {...getAdminCardImageProps(card.image)} alt={card.name} className="h-12 w-9 rounded-lg object-cover" />
+        <img {...getAdminCardImageProps(card.image, { variant: "thumb" })} alt={card.name} className="h-12 w-9 rounded-lg object-cover" />
         <div className="min-w-0">
           <p className="truncate font-semibold text-white">{card.name}</p>
           <p className="truncate text-xs text-slate-500">{formatCatalogLabel(card.card_type, "Carta")}</p>
@@ -328,6 +339,20 @@ const InventoryRow = memo(function InventoryRow({
           {saveState.status === "error" ? <span className="truncate text-rose-300">{saveState.message}</span> : null}
         </div>
         <div className="flex items-center gap-1">
+          {mode === "all" ? (
+            <button
+              type="button"
+              disabled={!canEditInventory || isAddingToInventory}
+              onClick={(event) => {
+                event.stopPropagation();
+                onRequestAddToInventory(card);
+              }}
+              className="rounded-xl border border-emerald-400/20 p-2 text-emerald-200 transition duration-200 hover:bg-emerald-400/10 disabled:opacity-50"
+              title="Agregar stock"
+            >
+              {isAddingToInventory ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <PlusCircle className="h-4 w-4" />}
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={(event) => {
@@ -421,7 +446,7 @@ function InventoryDrawer({ card, onClose, onSave, onRequestDelete, canEditInvent
 
         <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5 sm:px-6">
           <div className="flex items-start gap-4 rounded-3xl border border-white/10 bg-white/[0.03] p-4">
-            <img {...getAdminCardImageProps(detailCard.image)} alt={detailCard.name} className="h-28 w-20 rounded-xl object-cover" />
+            <img {...getAdminCardImageProps(detailCard.image, { variant: "detail" })} alt={detailCard.name} className="h-28 w-20 rounded-xl object-cover" />
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className={cn("inline-flex rounded-full border px-3 py-1 text-xs font-semibold", statusMeta.className)}>{statusMeta.label}</span>
@@ -542,10 +567,62 @@ function InventoryDrawer({ card, onClose, onSave, onRequestDelete, canEditInvent
   );
 }
 
-export default function InventoryView({
+function AddInventoryDialog({ card, quantity, pending, onQuantityChange, onCancel, onConfirm }) {
+  if (!card) {
+    return null;
+  }
+
+  return (
+    <>
+      <button type="button" onClick={pending ? undefined : onCancel} className="fixed inset-0 z-40 bg-slate-950/70 backdrop-blur-sm" />
+      <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
+        <div className="glass w-full max-w-md rounded-[30px] border border-white/10 p-6 shadow-2xl">
+          <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Alta de inventario</p>
+          <h3 className="mt-2 text-xl font-black text-white">{card.name}</h3>
+          <p className="mt-3 text-sm leading-6 text-slate-300">Sumá stock sin cargar el catálogo completo. Si la carta estaba oculta, vuelve a quedar visible en tienda al ingresar stock.</p>
+
+          <div className="mt-5 space-y-2">
+            <label htmlFor="inventory-add-quantity" className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Cantidad</label>
+            <input
+              id="inventory-add-quantity"
+              type="number"
+              min="1"
+              value={quantity}
+              onChange={(event) => onQuantityChange(event.target.value)}
+              className="h-12 w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400"
+            />
+          </div>
+
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={pending}
+              className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/[0.06] disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={pending}
+              className="rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-bold text-slate-950 transition hover:bg-emerald-400 disabled:opacity-50"
+            >
+              {pending ? "Agregando..." : "Agregar al inventario"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+export default memo(function InventoryView({
+  mode,
   cardsPage,
   page,
   filters,
+  onModeChange,
   onFiltersChange,
   onPageChange,
   onSyncCatalog,
@@ -553,9 +630,12 @@ export default function InventoryView({
   syncMutation,
   catalogSyncToken,
   isInventoryRefreshing,
+  isLoadingResults,
   onSave,
+  onAddToInventory,
   onBulkUpdate,
   onDeleteCards,
+  addingInventoryCardId,
   isBulkSaving,
   isDeletingCards,
   canEditInventory,
@@ -565,16 +645,21 @@ export default function InventoryView({
   const [selectionMode, setSelectionMode] = useState("manual");
   const [bulkDraft, setBulkDraft] = useState({ price: "", stock: "", visibility: "visible" });
   const [activeCardId, setActiveCardId] = useState(null);
+  const [addInventoryState, setAddInventoryState] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(620);
   const viewportRef = useRef(null);
   const recoveryAttemptRef = useRef(new Set());
   const deferredSearch = useDeferredValue(searchInput);
+  const selectionEnabled = mode === "stock";
 
-  const cards = cardsPage?.cards || [];
+  const cards = useMemo(() => cardsPage?.cards || [], [cardsPage?.cards]);
   const total = cardsPage?.total || 0;
   const totalPages = cardsPage?.totalPages || 1;
+  const searchRequired = mode === "all";
+  const showSearchFirstState = searchRequired && !(filters.search || "").trim();
+  const stockStatusOptions = STOCK_STATUS_OPTIONS;
   const rarityOptions = useMemo(() => normalizeCatalogOptions(cardsPage?.filters?.rarities || [], "Sin especificar"), [cardsPage?.filters?.rarities]);
   const cardTypeOptions = useMemo(() => normalizeCatalogOptions(cardsPage?.filters?.cardTypes || [], "Carta"), [cardsPage?.filters?.cardTypes]);
   const activeCard = useMemo(() => cards.find((card) => card.id === activeCardId) || null, [activeCardId, cards]);
@@ -601,7 +686,7 @@ export default function InventoryView({
     setSelectionMode("manual");
     setSelectedIds(new Set());
     setActiveCardId(null);
-  }, [filters.search, filters.rarity, filters.cardType, filters.stockStatus, filters.visibility]);
+  }, [filters.search, filters.rarity, filters.cardType, filters.stockStatus, filters.visibility, mode]);
 
   useEffect(() => {
     if (selectionMode !== "all-filtered") {
@@ -612,22 +697,8 @@ export default function InventoryView({
   }, [cards, selectionMode]);
 
   const allVisibleSelected = cards.length > 0 && cards.every((card) => selectedIds.has(card.id));
-  const allFilteredSelected = selectionMode === "all-filtered" && total > 0;
+  const allFilteredSelected = selectionEnabled && selectionMode === "all-filtered" && total > 0;
   const selectedCount = allFilteredSelected ? total : selectedIds.size;
-  const inventoryMetrics = useMemo(() => {
-    const visibleOnPage = cards.filter((card) => card.is_visible).length;
-    const featuredOnPage = cards.filter((card) => card.is_featured).length;
-    const lowStockOnPage = cards.filter((card) => Number(card.stock || 0) > 0 && Number(card.stock || 0) <= Number(card.low_stock_threshold || 0)).length;
-    const outOfStockOnPage = cards.filter((card) => Number(card.stock || 0) <= 0).length;
-
-    return {
-      visibleOnPage,
-      featuredOnPage,
-      lowStockOnPage,
-      outOfStockOnPage,
-    };
-  }, [cards]);
-
   const totalHeight = cards.length * ROW_HEIGHT;
   const startIndex = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
   const endIndex = Math.min(cards.length, Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + OVERSCAN);
@@ -716,13 +787,13 @@ export default function InventoryView({
     if (allFilteredSelected) {
       return {
         ids: Array.from(selectedIds),
-        filters,
+        filters: { ...filters, mode },
         select_all_matching: true,
       };
     }
 
     return { ids: Array.from(selectedIds) };
-  }, [allFilteredSelected, filters, selectedIds]);
+  }, [allFilteredSelected, filters, mode, selectedIds]);
 
   const handleBulkApply = useCallback(async (kind) => {
     if (!selectedCount) {
@@ -784,8 +855,18 @@ export default function InventoryView({
     onFiltersChange(DEFAULT_FILTERS);
   };
 
+  const handleConfirmAddToInventory = useCallback(async () => {
+    if (!addInventoryState?.card?.id) {
+      return;
+    }
+
+    const quantity = Math.max(1, Math.floor(numberField(addInventoryState.quantity, 1)));
+    await onAddToInventory(addInventoryState.card.id, quantity, addInventoryState.card.updated_at);
+    setAddInventoryState(null);
+  }, [addInventoryState, onAddToInventory]);
+
   useEffect(() => {
-    if (typeof onRefresh !== "function" || isInventoryRefreshing || syncMutation?.isPending) {
+    if (mode !== "stock" || typeof onRefresh !== "function" || isInventoryRefreshing || syncMutation?.isPending) {
       return;
     }
 
@@ -808,21 +889,49 @@ export default function InventoryView({
 
     recoveryAttemptRef.current.add(recoveryKey);
     void onRefresh();
-  }, [filters.cardType, filters.rarity, filters.search, filters.stockStatus, filters.visibility, hasActiveFilters, isInventoryRefreshing, onRefresh, page, syncMutation?.isPending, total]);
+  }, [filters.cardType, filters.rarity, filters.search, filters.stockStatus, filters.visibility, hasActiveFilters, isInventoryRefreshing, mode, onRefresh, page, syncMutation?.isPending, total]);
 
   return (
     <>
-      <div className="space-y-4">
+      <div className="space-y-4 overflow-x-hidden">
         <div className="glass sticky top-3 z-20 rounded-[30px] border border-white/10 px-4 py-4 shadow-[0_18px_50px_rgba(0,0,0,0.25)] backdrop-blur-xl sm:px-6">
           <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_minmax(320px,auto)] 2xl:items-start">
             <div className="min-w-0">
+              <div className="mb-4 flex flex-wrap items-center gap-2">
+                <div className="inline-flex rounded-2xl border border-white/10 bg-slate-950/40 p-1">
+                  <button
+                    type="button"
+                    onClick={() => onModeChange("stock")}
+                    className={cn(
+                      "rounded-xl px-4 py-2 text-sm font-semibold transition duration-200",
+                      mode === "stock" ? "bg-emerald-400/15 text-emerald-100" : "text-slate-400 hover:text-slate-200"
+                    )}
+                  >
+                    Inventario actual
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onModeChange("all")}
+                    className={cn(
+                      "rounded-xl px-4 py-2 text-sm font-semibold transition duration-200",
+                      mode === "all" ? "bg-amber-400/15 text-amber-100" : "text-slate-400 hover:text-slate-200"
+                    )}
+                  >
+                    Todo el catálogo
+                  </button>
+                </div>
+                <span className="rounded-full border border-white/10 px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                  {mode === "stock" ? "Inventario real con cache 5 min" : "Búsqueda paginada 14k"}
+                </span>
+              </div>
+
               <div className="grid gap-3 xl:grid-cols-2 2xl:grid-cols-[minmax(0,1.2fr)_repeat(4,minmax(170px,1fr))]">
                 <div className="relative min-w-0 xl:col-span-2 2xl:col-span-1">
                   <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
                   <input
                     value={searchInput}
                     onChange={(event) => setSearchInput(event.target.value)}
-                    placeholder="Buscar por nombre, rareza o tipo"
+                    placeholder={mode === "all" ? "Buscar entre las 14k cartas por nombre, rareza, set o tipo" : "Buscar dentro del inventario actual por nombre, rareza o tipo"}
                     className="h-12 w-full rounded-2xl border border-white/10 bg-slate-950/70 pl-11 pr-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400"
                   />
                 </div>
@@ -836,7 +945,7 @@ export default function InventoryView({
                   {cardTypeOptions.map((cardType) => <option key={cardType} value={cardType}>{cardType}</option>)}
                 </select>
                 <select value={filters.stockStatus} onChange={(event) => handleFilterSelect("stockStatus", event.target.value)} className="h-12 rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400">
-                  {STOCK_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  {stockStatusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select>
                 <select value={filters.visibility} onChange={(event) => handleFilterSelect("visibility", event.target.value)} className="h-12 rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition duration-200 focus:border-amber-400">
                   {VISIBILITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
@@ -844,39 +953,13 @@ export default function InventoryView({
               </div>
 
               <div className="mt-4 flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.18em] text-slate-500">
+                <span className="rounded-full border border-white/10 px-3 py-2">{mode === "stock" ? "Modo inventario actual" : "Modo catálogo total"}</span>
                 <span className="rounded-full border border-white/10 px-3 py-2">{total} resultados</span>
-                <span className="rounded-full border border-white/10 px-3 py-2">Página {page} / {totalPages}</span>
+                <span className="rounded-full border border-white/10 px-3 py-2">Página {page} / {Math.max(totalPages, 1)}</span>
                 {isInventoryRefreshing ? <span className="rounded-full border border-sky-400/20 bg-sky-400/10 px-3 py-2 text-sky-300">Actualizando</span> : null}
                 {catalogSyncToken ? <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-emerald-300">Catálogo sincronizado</span> : null}
               </div>
 
-              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Visibles</p>
-                  <p className="mt-2 text-xl font-black text-white">{inventoryMetrics.visibleOnPage}</p>
-                  <p className="text-xs text-slate-500">en esta página</p>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Destacadas</p>
-                  <p className="mt-2 text-xl font-black text-white">{inventoryMetrics.featuredOnPage}</p>
-                  <p className="text-xs text-slate-500">listas para portada</p>
-                </div>
-                <div className="rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.2em] text-amber-100/80">Stock bajo</p>
-                  <p className="mt-2 text-xl font-black text-white">{inventoryMetrics.lowStockOnPage}</p>
-                  <p className="text-xs text-amber-100/70">vigilar reposición</p>
-                </div>
-                <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.2em] text-rose-100/80">Agotadas</p>
-                  <p className="mt-2 text-xl font-black text-white">{inventoryMetrics.outOfStockOnPage}</p>
-                  <p className="text-xs text-rose-100/70">sin venta inmediata</p>
-                </div>
-                <div className="rounded-2xl border border-sky-400/20 bg-sky-400/10 px-4 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.2em] text-sky-100/80">Selección</p>
-                  <p className="mt-2 text-xl font-black text-white">{selectedCount}</p>
-                  <p className="text-xs text-sky-100/70">{allFilteredSelected ? "todo el filtro" : "selección manual"}</p>
-                </div>
-              </div>
             </div>
 
             <div className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-1 2xl:justify-items-stretch">
@@ -888,22 +971,30 @@ export default function InventoryView({
               >
                 Limpiar filtros
               </button>
-              <button
-                type="button"
-                onClick={() => handleSelectVisible(!allVisibleSelected)}
-                disabled={!cards.length}
-                className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-200 transition duration-200 hover:bg-white/[0.06]"
-              >
-                {allVisibleSelected ? "Quitar visibles" : "Seleccionar visibles"}
-              </button>
-              <button
-                type="button"
-                onClick={handleSelectAllMatching}
-                disabled={!total}
-                className="rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-sm font-semibold text-amber-200 transition duration-200 hover:bg-amber-400/15 disabled:opacity-50"
-              >
-                {allFilteredSelected ? "Quitar selección global" : `Seleccionar todo el filtro (${total})`}
-              </button>
+              {selectionEnabled ? (
+                <button
+                  type="button"
+                  onClick={() => handleSelectVisible(!allVisibleSelected)}
+                  disabled={!cards.length}
+                  className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-200 transition duration-200 hover:bg-white/[0.06]"
+                >
+                  {allVisibleSelected ? "Quitar visibles" : "Seleccionar visibles"}
+                </button>
+              ) : (
+                <div className="rounded-2xl border border-white/10 px-4 py-3 text-sm text-slate-400">
+                  {showSearchFirstState ? "Escribí una búsqueda para consultar el catálogo total." : "La búsqueda global no carga el catálogo completo en el navegador."}
+                </div>
+              )}
+              {selectionEnabled ? (
+                <button
+                  type="button"
+                  onClick={handleSelectAllMatching}
+                  disabled={!total}
+                  className="rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-sm font-semibold text-amber-200 transition duration-200 hover:bg-amber-400/15 disabled:opacity-50"
+                >
+                  {allFilteredSelected ? "Quitar selección global" : `Seleccionar todo el filtro (${total})`}
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={onSyncCatalog}
@@ -918,12 +1009,24 @@ export default function InventoryView({
         </div>
 
         <div className="glass overflow-hidden rounded-[30px] border border-white/10">
-          {!cards.length ? (
+          {isLoadingResults && !cards.length ? (
+            <div className="p-6 sm:p-8">
+              <div className="animate-pulse rounded-3xl border border-white/10 bg-white/[0.03] p-6 text-sm text-slate-400">Buscando cartas en el catálogo completo...</div>
+            </div>
+          ) : showSearchFirstState ? (
+            <div className="p-6 sm:p-8">
+              <EmptyState
+                icon={Search}
+                title="Buscá antes de cargar resultados"
+                description="El modo catálogo total consulta las 14k cartas de forma paginada. Empezá por nombre, tipo, rareza o set para evitar cargar todo el catálogo en el frontend."
+              />
+            </div>
+          ) : !cards.length ? (
             <div className="p-6 sm:p-8">
               <EmptyState
                 icon={Boxes}
                 title="No hay cartas para este filtro"
-                description={hasActiveFilters ? "Quitá o ajustá filtros para volver a ver resultados sin perder el panel de control." : "Sincronizá el catálogo o revisá la configuración de alcance para cargar cartas."}
+                description={hasActiveFilters ? "Quitá o ajustá filtros para volver a ver resultados sin perder el panel de control." : mode === "all" ? "Probá con otra búsqueda para encontrar una carta del catálogo completo." : "Sincronizá el catálogo o revisá la configuración de alcance para cargar cartas."}
               />
               <div className="mt-4 flex flex-wrap gap-3">
                 {hasActiveFilters ? (
@@ -935,14 +1038,16 @@ export default function InventoryView({
                     Quitar filtros
                   </button>
                 ) : null}
-                <button
-                  type="button"
-                  onClick={() => onRefresh?.()}
-                  disabled={isInventoryRefreshing}
-                  className="rounded-2xl border border-sky-400/20 bg-sky-400/10 px-4 py-3 text-sm font-semibold text-sky-200 transition duration-200 hover:bg-sky-400/15 disabled:opacity-60"
-                >
-                  {isInventoryRefreshing ? "Recargando..." : "Recargar inventario"}
-                </button>
+                {mode === "stock" ? (
+                  <button
+                    type="button"
+                    onClick={() => onRefresh?.()}
+                    disabled={isInventoryRefreshing}
+                    className="rounded-2xl border border-sky-400/20 bg-sky-400/10 px-4 py-3 text-sm font-semibold text-sky-200 transition duration-200 hover:bg-sky-400/15 disabled:opacity-60"
+                  >
+                    {isInventoryRefreshing ? "Recargando..." : "Recargar inventario"}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={onSyncCatalog}
@@ -956,13 +1061,14 @@ export default function InventoryView({
             </div>
           ) : (
             <>
-              <div ref={viewportRef} onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)} className="max-h-[calc(100vh-19rem)] overflow-auto">
+              <div className="max-w-full overflow-hidden">
+                <div ref={viewportRef} onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)} className="max-h-[calc(100vh-19rem)] max-w-full overflow-x-auto overflow-y-auto" style={{ overscrollBehavior: "contain", WebkitOverflowScrolling: "touch" }}>
                 <div className="min-w-[1360px]">
                   <div className="sticky top-0 z-30 grid grid-cols-[48px_290px_120px_108px_96px_96px_124px_108px_108px_132px_132px] border-b border-white/10 bg-[#0b1022]/95 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 backdrop-blur-xl">
-                    <div className="sticky left-0 z-30 flex items-center justify-center border-r border-white/5 bg-[#0b1022]/95 px-2 py-3">
-                      <input type="checkbox" checked={allVisibleSelected} onChange={(event) => handleSelectVisible(event.target.checked)} />
+                    <div className="flex items-center justify-center border-r border-white/5 bg-[#0b1022]/95 px-2 py-3">
+                      <input type="checkbox" disabled={!selectionEnabled} checked={selectionEnabled && allVisibleSelected} onChange={(event) => handleSelectVisible(event.target.checked)} />
                     </div>
-                    <div className="sticky left-[48px] z-20 border-r border-white/5 bg-[#0b1022]/95 px-4 py-3">Carta</div>
+                    <div className="border-r border-white/5 bg-[#0b1022]/95 px-4 py-3">Carta</div>
                     <div className="px-4 py-3">Rareza</div>
                     <div className="px-3 py-3">Precio</div>
                     <div className="px-3 py-3">Stock</div>
@@ -982,11 +1088,15 @@ export default function InventoryView({
                       >
                         <InventoryRow
                           card={card}
+                          mode={mode}
                           canEditInventory={canEditInventory}
-                          isSelected={allFilteredSelected || selectedIds.has(card.id)}
+                          isSelected={selectionEnabled && (allFilteredSelected || selectedIds.has(card.id))}
                           isDeletingCards={isDeletingCards}
+                          selectionEnabled={selectionEnabled}
+                          isAddingToInventory={addingInventoryCardId === card.id}
                           onSelectedChange={handleSelectedChange}
                           onOpen={(nextCard) => setActiveCardId(nextCard.id)}
+                          onRequestAddToInventory={(nextCard) => setAddInventoryState({ card: nextCard, quantity: "1" })}
                           onRequestDelete={(nextCard) => setConfirmState({ type: "single-delete", card: nextCard })}
                           onSave={handleSaveCard}
                         />
@@ -995,6 +1105,7 @@ export default function InventoryView({
                   </div>
                 </div>
               </div>
+              </div>
 
               <PaginationControls page={page} totalPages={totalPages} onPageChange={onPageChange} />
             </>
@@ -1002,7 +1113,7 @@ export default function InventoryView({
         </div>
       </div>
 
-      {selectedCount ? (
+      {selectionEnabled && selectedCount ? (
         <div className="fixed bottom-5 left-1/2 z-40 w-[min(100%-24px,980px)] -translate-x-1/2 rounded-[28px] border border-white/10 bg-[#090d1f]/96 px-4 py-4 shadow-[0_22px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:px-5">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div className="text-sm text-slate-200">
@@ -1051,6 +1162,21 @@ export default function InventoryView({
         isDeletingCards={isDeletingCards}
       />
 
+      <AddInventoryDialog
+        card={addInventoryState?.card || null}
+        quantity={addInventoryState?.quantity || "1"}
+        pending={Boolean(addingInventoryCardId)}
+        onQuantityChange={(value) => setAddInventoryState((current) => (current ? { ...current, quantity: value } : current))}
+        onCancel={() => {
+          if (!addingInventoryCardId) {
+            setAddInventoryState(null);
+          }
+        }}
+        onConfirm={() => {
+          void handleConfirmAddToInventory();
+        }}
+      />
+
       <ConfirmActionDialog
         open={Boolean(confirmState)}
         title={confirmState?.type === "bulk-delete" ? `Eliminar ${selectedCount} cartas` : `Eliminar ${confirmState?.card?.name || "carta"}`}
@@ -1078,4 +1204,4 @@ export default function InventoryView({
       />
     </>
   );
-}
+});

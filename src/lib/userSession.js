@@ -1,5 +1,13 @@
 const SESSION_KEY = "duelvault_user_session";
 
+function getSafeStorage() {
+  if (typeof window === "undefined" || typeof window.localStorage === "undefined") {
+    return null;
+  }
+
+  return window.localStorage;
+}
+
 function decodeBase64Url(value) {
   if (typeof value !== "string" || !value) {
     return "";
@@ -63,7 +71,12 @@ export function isJwtExpired(token) {
 /** @returns {StoredUserSession | null} */
 export function getStoredUserSession() {
   try {
-    const raw = localStorage.getItem(SESSION_KEY);
+    const storage = getSafeStorage();
+    if (!storage) {
+      return null;
+    }
+
+    const raw = storage.getItem(SESSION_KEY);
     return raw ? /** @type {StoredUserSession} */ (JSON.parse(raw)) : null;
   } catch {
     return null;
@@ -72,11 +85,21 @@ export function getStoredUserSession() {
 
 /** @param {StoredUserSession} session */
 export function setStoredUserSession(session) {
-  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  const storage = getSafeStorage();
+  if (!storage) {
+    return;
+  }
+
+  storage.setItem(SESSION_KEY, JSON.stringify(session));
 }
 
 export function clearStoredUserSession() {
-  localStorage.removeItem(SESSION_KEY);
+  const storage = getSafeStorage();
+  if (!storage) {
+    return;
+  }
+
+  storage.removeItem(SESSION_KEY);
 }
 
 export function getUsableStoredUserSession() {

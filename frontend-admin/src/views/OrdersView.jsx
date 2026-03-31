@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { ReceiptText, Search } from "lucide-react";
 import {
   ActionStatusButton,
@@ -10,80 +10,30 @@ import {
   cn,
   currency,
   getAdminCardImageProps,
-  matchesOrderSearch,
   orderStatusLabel,
 } from "./shared";
 
-const ORDERS_VIEW_STATE_KEY = "duelvault_admin_orders_view_state_v1";
+function getTransitionOptions(status, canCancelOrders) {
+  const transitions = {
+    pending_payment: ["pending_payment", "paid", "failed", "expired", ...(canCancelOrders ? ["cancelled"] : [])],
+    failed: ["failed", "pending_payment", ...(canCancelOrders ? ["cancelled"] : [])],
+    expired: ["expired", "pending_payment", ...(canCancelOrders ? ["cancelled"] : [])],
+    paid: ["paid", "shipped", ...(canCancelOrders ? ["cancelled"] : [])],
+    shipped: ["shipped", "completed", ...(canCancelOrders ? ["cancelled"] : [])],
+    completed: ["completed"],
+    cancelled: ["cancelled"],
+  };
 
-function canUseStorage() {
-  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+  return transitions[status] || [status];
 }
 
-function readOrdersViewState() {
-  if (!canUseStorage()) {
-    return {};
-  }
-
-  try {
-    return JSON.parse(window.localStorage.getItem(ORDERS_VIEW_STATE_KEY) || "{}") || {};
-  } catch {
-    return {};
-  }
-}
-
-export default function OrdersView({ orders, onStatusChange, onDeleteOrder, onClearOrders, onExportOrders, onShippingSave, updatingOrderId, completedOrderActionKey, savingShippingOrderId, completedShippingOrderId, deletingOrderId, isClearingOrders, isExportingOrders, canCancelOrders, canDeleteOrders }) {
-  const [search, setSearch] = useState(() => readOrdersViewState().search || "");
-  const [statusFilter, setStatusFilter] = useState(() => readOrdersViewState().statusFilter || "all");
-  const [page, setPage] = useState(() => {
-    const storedPage = Number(readOrdersViewState().page);
-    return Number.isFinite(storedPage) && storedPage > 0 ? storedPage : 1;
-  });
+export default memo(function OrdersView({ orders, summary, pagination, filters, onFiltersChange, onPageChange, onStatusChange, onDeleteOrder, onClearOrders, onExportOrders, onShippingSave, updatingOrderId, completedOrderActionKey, savingShippingOrderId, completedShippingOrderId, deletingOrderId, isClearingOrders, isExportingOrders, canCancelOrders, canDeleteOrders }) {
   const [shippingDrafts, setShippingDrafts] = useState({});
   const [confirmState, setConfirmState] = useState(null);
-  const deferredSearch = useDeferredValue(search);
-  const pageSize = 10;
 
-  useEffect(() => {
-    if (!canUseStorage()) {
-      return;
-    }
-
-    window.localStorage.setItem(
-      ORDERS_VIEW_STATE_KEY,
-      JSON.stringify({
-        search,
-        statusFilter,
-        page,
-      })
-    );
-  }, [page, search, statusFilter]);
-
-  const allowedStatuses = canCancelOrders
-    ? ["pending_payment", "paid", "shipped", "completed", "cancelled"]
-    : ["pending_payment", "paid", "shipped", "completed"];
-
-  const filteredOrders = useMemo(() => {
-    const needle = deferredSearch.trim().toLowerCase();
-    return orders.filter((order) => {
-      const statusMatches = statusFilter === "all" || order.status === statusFilter;
-      return statusMatches && matchesOrderSearch(order, needle);
-    });
-  }, [deferredSearch, orders, statusFilter]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / pageSize));
-  const paginatedOrders = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return filteredOrders.slice(start, start + pageSize);
-  }, [filteredOrders, page]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [search, statusFilter]);
-
-  useEffect(() => {
-    setPage((currentPage) => Math.min(currentPage, totalPages));
-  }, [totalPages]);
+  const filterStatuses = canCancelOrders
+    ? ["pending_payment", "failed", "expired", "paid", "shipped", "completed", "cancelled"]
+    : ["pending_payment", "failed", "expired", "paid", "shipped", "completed"];
 
   useEffect(() => {
     if (!confirmState) {
@@ -139,8 +89,6 @@ export default function OrdersView({ orders, onStatusChange, onDeleteOrder, onCl
     }));
   };
 
-  const pendingCount = orders.filter((order) => order.status === "pending_payment").length;
-  const countedCount = orders.filter((order) => order.counts_for_dashboard).length;
   const isActionCompleted = (orderId, status) => completedOrderActionKey === `${orderId}:${status}`;
   const isShippingSaved = (orderId) => completedShippingOrderId === orderId;
   const isOrderStatusMutating = Boolean(updatingOrderId);
@@ -152,7 +100,7 @@ export default function OrdersView({ orders, onStatusChange, onDeleteOrder, onCl
         ? updatingOrderId === confirmState.orderId
         : false;
 
-  if (orders.length === 0) {
+  if ((summary?.filteredTotal || 0) === 0) {
     return <EmptyState icon={ReceiptText} title="No hay pedidos cargados" description="Los pedidos confirmados desde la tienda aparecerán aquí con su estado actual." />;
   }
 
@@ -186,41 +134,41 @@ export default function OrdersView({ orders, onStatusChange, onDeleteOrder, onCl
         </div>
 
         <div className="mt-4 grid gap-3 md:grid-cols-4">
-          <StatCard title="Pedidos totales" value={orders.length} />
-          <StatCard title="Pendientes" value={pendingCount} tone={pendingCount ? "warn" : "default"} />
-          <StatCard title="Contabilizados" value={countedCount} />
-          <StatCard title="Resultados" value={filteredOrders.length} />
+          <StatCard title="Pedidos totales" value={summary?.totalOrders || 0} />
+          <StatCard title="Pendientes" value={summary?.pendingCount || 0} tone={(summary?.pendingCount || 0) ? "warn" : "default"} />
+          <StatCard title="Contabilizados" value={summary?.countedCount || 0} />
+          <StatCard title="Resultados" value={summary?.filteredTotal || 0} />
         </div>
 
         <div className="mt-4 grid gap-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4 lg:grid-cols-[minmax(0,1fr)_240px]">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
             <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              value={filters.search}
+              onChange={(event) => onFiltersChange({ search: event.target.value })}
               placeholder="Buscar por pedido, cliente, email o carta"
               className="h-11 w-full rounded-2xl border border-white/10 bg-slate-950/70 pl-10 pr-4 text-sm outline-none transition focus:border-amber-400"
             />
           </div>
           <select
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value)}
+            value={filters.status}
+            onChange={(event) => onFiltersChange({ status: event.target.value })}
             className="h-11 min-w-0 rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition focus:border-amber-400"
           >
             <option value="all">Todos los estados</option>
-            {allowedStatuses.map((status) => (
+            {filterStatuses.map((status) => (
               <option key={status} value={status}>{orderStatusLabel(status)}</option>
             ))}
           </select>
         </div>
       </div>
 
-      {filteredOrders.length === 0 ? (
+      {orders.length === 0 ? (
         <EmptyState icon={ReceiptText} title="Sin coincidencias" description="Ajustá la búsqueda o el filtro de estado para encontrar el pedido." />
       ) : (
         <div className="space-y-4">
           <div className="space-y-4 lg:hidden">
-            {paginatedOrders.map((order) => (
+            {orders.map((order) => (
               <div key={order.id} className="glass admin-list-card admin-content-auto rounded-3xl border border-white/10 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -246,6 +194,14 @@ export default function OrdersView({ orders, onStatusChange, onDeleteOrder, onCl
                   <p>{order.shipping_label || "Envío"} · {order.shipping_zone}</p>
                   {order.tracking_code ? <p className="mt-1 text-slate-300">Tracking: {order.tracking_code}</p> : null}
                   {order.shipping_address ? <p className="mt-1 text-slate-400">{order.shipping_address}</p> : null}
+                </div>
+
+                <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/30 px-3 py-3 text-xs text-slate-300">
+                  <p>Pago: {order.payment_status || "sin novedad"}</p>
+                  {order.payment_id ? <p className="mt-1 text-slate-400">payment_id: {order.payment_id}</p> : null}
+                  {order.preference_id ? <p className="mt-1 text-slate-400">preference_id: {order.preference_id}</p> : null}
+                  {order.total_ars ? <p className="mt-1 text-slate-400">Total MP: {currency(order.total_ars)} {order.currency || "ARS"}</p> : null}
+                  {order.expires_at ? <p className="mt-1 text-slate-400">Expira: {new Date(order.expires_at).toLocaleString("es-AR")}</p> : null}
                 </div>
 
                 {order.is_shipping_order ? (
@@ -287,7 +243,7 @@ export default function OrdersView({ orders, onStatusChange, onDeleteOrder, onCl
                       onChange={(event) => onStatusChange(order.id, event.target.value)}
                       className="h-11 w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm font-semibold text-white outline-none transition focus:border-amber-400 disabled:opacity-60"
                     >
-                      {allowedStatuses.map((status) => (
+                      {getTransitionOptions(order.status, canCancelOrders).map((status) => (
                         <option key={status} value={status}>{orderStatusLabel(status)}</option>
                       ))}
                     </select>
@@ -365,7 +321,7 @@ export default function OrdersView({ orders, onStatusChange, onDeleteOrder, onCl
           </div>
 
           <div className="hidden space-y-4 lg:block">
-            {paginatedOrders.map((order) => (
+            {orders.map((order) => (
               <details key={order.id} className="glass admin-list-card admin-content-auto rounded-3xl border border-white/10 p-5">
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-4">
                   <div>
@@ -392,6 +348,14 @@ export default function OrdersView({ orders, onStatusChange, onDeleteOrder, onCl
                     <p>{order.shipping_label || "Envío"} · {order.shipping_zone}</p>
                     {order.tracking_code ? <p className="mt-1 text-slate-300">Tracking: {order.tracking_code}</p> : null}
                     {order.shipping_address ? <p className="mt-1 text-slate-400">{order.shipping_address}</p> : null}
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-slate-950/30 px-4 py-3 text-sm text-slate-300">
+                    <p>Pago: {order.payment_status || "sin novedad"}</p>
+                    {order.payment_id ? <p className="mt-1 text-slate-400">payment_id: {order.payment_id}</p> : null}
+                    {order.preference_id ? <p className="mt-1 text-slate-400">preference_id: {order.preference_id}</p> : null}
+                    {order.total_ars ? <p className="mt-1 text-slate-400">Total MP: {currency(order.total_ars)} {order.currency || "ARS"}</p> : null}
+                    {order.expires_at ? <p className="mt-1 text-slate-400">Expira: {new Date(order.expires_at).toLocaleString("es-AR")}</p> : null}
                   </div>
 
                   {order.is_shipping_order ? (
@@ -439,7 +403,7 @@ export default function OrdersView({ orders, onStatusChange, onDeleteOrder, onCl
                       onChange={(event) => onStatusChange(order.id, event.target.value)}
                       className="h-11 rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm font-semibold text-white outline-none transition focus:border-amber-400 disabled:opacity-60"
                     >
-                      {allowedStatuses.map((status) => (
+                      {getTransitionOptions(order.status, canCancelOrders).map((status) => (
                         <option key={status} value={status}>{orderStatusLabel(status)}</option>
                       ))}
                     </select>
@@ -515,7 +479,7 @@ export default function OrdersView({ orders, onStatusChange, onDeleteOrder, onCl
           </div>
 
           <div className="glass overflow-hidden rounded-3xl border border-white/10">
-            <PaginationControls page={page} totalPages={totalPages} onPageChange={setPage} />
+            <PaginationControls page={pagination?.page || 1} totalPages={pagination?.totalPages || 1} onPageChange={onPageChange} />
           </div>
         </div>
       )}
@@ -558,4 +522,4 @@ export default function OrdersView({ orders, onStatusChange, onDeleteOrder, onCl
       />
     </div>
   );
-}
+});

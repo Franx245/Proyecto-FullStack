@@ -1,11 +1,21 @@
 import { QueryClient, dehydrate, hydrate } from "@tanstack/react-query";
+import { getStoredSession } from "./api";
 
-const QUERY_CACHE_KEY = "duelvault_admin_query_cache_v4";
+const QUERY_CACHE_KEY = "duelvault_admin_query_cache_v5";
 const QUERY_CACHE_MAX_AGE = 1000 * 60 * 60 * 12;
+const PERSISTABLE_QUERY_PREFIXES = ["dashboard", "inventory-cards", "orders", "users"];
 let flushPersistedCache = null;
 
 function canUseStorage() {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+}
+
+function getStoredAdminId() {
+  try {
+    return getStoredSession()?.admin?.id || null;
+  } catch {
+    return null;
+  }
 }
 
 function shouldRetryQuery(failureCount, error) {
@@ -14,6 +24,10 @@ function shouldRetryQuery(failureCount, error) {
   }
 
   if (error?.status === 409 || error?.code === "CONFLICT") {
+    return false;
+  }
+
+  if (error?.status === 408 || error?.code === "TIMEOUT") {
     return false;
   }
 
@@ -46,6 +60,12 @@ function restorePersistedCache(queryClient) {
       return;
     }
 
+    const currentAdminId = getStoredAdminId();
+    if (persisted.adminId && currentAdminId && persisted.adminId !== currentAdminId) {
+      window.localStorage.removeItem(QUERY_CACHE_KEY);
+      return;
+    }
+
     hydrate(queryClient, persisted.clientState);
   } catch {
     window.localStorage.removeItem(QUERY_CACHE_KEY);
@@ -64,14 +84,27 @@ function persistQueryCache(queryClient) {
 
     try {
       const clientState = dehydrate(queryClient, {
-        shouldDehydrateQuery: (query) => query.state.status === "success",
+        shouldDehydrateQuery: (query) => {
+          if (query.state.status !== "success") {
+            return false;
+          }
+
+          const prefix = query.queryKey?.[0];
+          return typeof prefix === "string" && PERSISTABLE_QUERY_PREFIXES.includes(prefix);
+        },
         shouldDehydrateMutation: () => false,
       });
+
+      if (!clientState.queries?.length && !clientState.mutations?.length) {
+        window.localStorage.removeItem(QUERY_CACHE_KEY);
+        return;
+      }
 
       window.localStorage.setItem(
         QUERY_CACHE_KEY,
         JSON.stringify({
           timestamp: Date.now(),
+          adminId: getStoredAdminId(),
           clientState,
         })
       );
@@ -87,7 +120,7 @@ function persistQueryCache(queryClient) {
       return;
     }
 
-    timeoutId = window.setTimeout(flush, 180);
+    timeoutId = window.setTimeout(flush, 2000);
   };
 
   const unsubscribeQueryCache = queryClient.getQueryCache().subscribe(scheduleFlush);
@@ -130,7 +163,6 @@ export function createAdminQueryClient() {
         gcTime: QUERY_CACHE_MAX_AGE,
         refetchOnWindowFocus: false,
         refetchOnReconnect: true,
-        refetchOnMount: false,
         retry: shouldRetryQuery,
         retryDelay: (attempt) => Math.min(1000 * attempt, 2500),
       },

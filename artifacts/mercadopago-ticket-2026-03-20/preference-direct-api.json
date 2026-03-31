@@ -1,0 +1,106 @@
+{
+  "additional_info": "",
+  "auto_return": "approved",
+  "back_urls": {
+    "failure": "https://duelvault-store-api.vercel.app/checkout/failure?manual=1",
+    "pending": "https://duelvault-store-api.vercel.app/checkout/pending?manual=1",
+    "success": "https://duelvault-store-api.vercel.app/checkout/success?manual=1"
+  },
+  "binary_mode": false,
+  "client_id": "3991009768505159",
+  "collector_id": 3280065165,
+  "coupon_code": null,
+  "coupon_labels": null,
+  "date_created": "2026-03-20T09:56:39.172-04:00",
+  "date_of_expiration": null,
+  "expiration_date_from": "2026-03-20T13:56:35.914+00:00",
+  "expiration_date_to": "2026-03-20T14:26:35.914+00:00",
+  "expires": true,
+  "external_reference": "manual-test-1774014995914",
+  "id": "3280065165-5549d5c6-91af-4000-9cb9-c65f5fa87542",
+  "init_point": "https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=3280065165-5549d5c6-91af-4000-9cb9-c65f5fa87542",
+  "internal_metadata": null,
+  "items": [
+    {
+      "id": "card-2",
+      "category_id": "others",
+      "currency_id": "ARS",
+      "description": "Carta coleccionable Yu-Gi-Oh",
+      "title": "Dark Magician",
+      "quantity": 1,
+      "unit_price": 10060.65
+    }
+  ],
+  "marketplace": "NONE",
+  "marketplace_fee": 0,
+  "metadata": {
+    "checkout_mode": "sandbox",
+    "source": "manual-mp-api-test"
+  },
+  "notification_url": "https://duelvault-store-api.vercel.app/api/checkout/webhook?source_news=webhooks",
+  "operation_type": "regular_payment",
+  "payer": {
+    "phone": {
+      "area_code": "",
+      "number": ""
+    },
+    "address": {
+      "zip_code": "",
+      "street_name": "",
+      "street_number": null
+    },
+    "email": "test_user_938439403543093719@testuser.com",
+    "identification": {
+      "number": "",
+      "type": ""
+    },
+    "name": "",
+    "surname": "",
+    "date_created": null,
+    "last_purchase": null
+  },
+  "payment_methods": {
+    "default_card_id": null,
+    "default_payment_method_id": null,
+    "excluded_payment_methods": [
+      {
+        "id": ""
+      }
+    ],
+    "excluded_payment_types": [
+      {
+        "id": ""
+      }
+    ],
+    "installments": null,
+    "default_installments": null
+  },
+  "processing_modes": null,
+  "product_id": null,
+  "preference_expired": false,
+  "redirect_urls": {
+    "failure": "",
+    "pending": "",
+    "success": ""
+  },
+  "sandbox_init_point": "https://sandbox.mercadopago.com.ar/checkout/v1/redirect?pref_id=3280065165-5549d5c6-91af-4000-9cb9-c65f5fa87542",
+  "site_id": "MLA",
+  "shipments": {
+    "default_shipping_method": null,
+    "receiver_address": {
+      "zip_code": "",
+      "street_name": "",
+      "street_number": null,
+      "floor": "",
+      "apartment": "",
+      "city_name": null,
+      "state_name": null,
+      "country_name": null,
+      "neighborhood": null
+    }
+  },
+  "statement_descriptor": "DUELVAULT",
+  "total_amount": null,
+  "last_updated": null,
+  "financing_group": ""
+}
