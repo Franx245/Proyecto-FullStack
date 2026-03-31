@@ -6316,25 +6316,26 @@ app.put("/api/admin/cards/bulk", requireAdminAuth, requireAdminRole([UserRole.AD
     if (responsePayload.updatedCardIds.length) {
       invalidatePublicCatalogCaches();
 
-      /* ── Realtime: notify bulk stock/price changes with full card snapshots ── */
+      /* ── Realtime: one consolidated event per bulk update (avoids event storm) ── */
       const cardsMap = new Map(responsePayload.updatedCards.map((c) => [c.id, c]));
+      const bulkCards = responsePayload.updatedCardIds.map((id) => ({
+        cardId: id,
+        card: cardsMap.get(id) || null,
+      }));
+
       if (parsed.data.stock !== undefined) {
-        for (const cardId of responsePayload.updatedCardIds) {
-          publishEvent("stock-update", {
-            cardId,
-            reason: "admin_bulk_update",
-            card: cardsMap.get(cardId) || null,
-          });
-        }
+        publishEvent("stock-update", {
+          bulk: true,
+          reason: "admin_bulk_update",
+          cards: bulkCards,
+        });
       }
       if (parsed.data.price !== undefined) {
-        for (const cardId of responsePayload.updatedCardIds) {
-          publishEvent("price-change", {
-            cardId,
-            reason: "admin_bulk_update",
-            card: cardsMap.get(cardId) || null,
-          });
-        }
+        publishEvent("price-change", {
+          bulk: true,
+          reason: "admin_bulk_update",
+          cards: bulkCards,
+        });
       }
     }
     try {

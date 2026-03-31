@@ -58,8 +58,8 @@ function ensureEventListeners() {
   if (listenersInitialized) return;
   listenersInitialized = true;
 
-  // Public: stock + order status updates
-  addEventBusListener(["stock-update", "order-update", "catalog-synced"], (data) => {
+  // Public: stock, price, and catalog updates
+  addEventBusListener(["stock-update", "price-change", "catalog-synced"], (data) => {
     broadcast(publicClients, data);
   });
 

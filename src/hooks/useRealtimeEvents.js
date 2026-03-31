@@ -68,76 +68,102 @@ export function useRealtimeEvents(mode = "public") {
       /* ── stock-update ── */
       es.addEventListener("stock-update", (e) => {
         const { data } = JSON.parse(e.data);
-        const cardId = data?.cardId;
-        if (!cardId) return;
 
-        const card = data.card; // Full card snapshot (present on admin edits)
+        // Normalize: bulk events carry an array of {cardId, card}
+        const entries = data?.bulk
+          ? (data.cards || [])
+          : data?.cardId ? [{ cardId: data.cardId, card: data.card }] : [];
 
-        if (card) {
-          // Surgical: patch cards list pages
-          queryClient.setQueriesData({ queryKey: ["cards"] }, (old) =>
-            patchCardsPage(old, cardId, card),
-          );
+        if (!entries.length) return;
 
-          // Surgical: patch card detail
-          queryClient.setQueriesData({ queryKey: ["card-detail", cardId] }, (old) =>
-            patchCardDetail(old, card),
-          );
-          queryClient.setQueriesData({ queryKey: ["card-detail", String(cardId)] }, (old) =>
-            patchCardDetail(old, card),
-          );
+        const hasSnapshots = entries.some((en) => en.card);
 
-          // Surgical: patch featured cards
+        if (hasSnapshots) {
+          // Surgical: one setQueriesData pass per cache key (handles all cards)
+          queryClient.setQueriesData({ queryKey: ["cards"] }, (old) => {
+            let result = old;
+            for (const { cardId, card } of entries) {
+              if (card) result = patchCardsPage(result, cardId, card);
+            }
+            return result;
+          });
+
           queryClient.setQueriesData({ queryKey: ["featured-cards"] }, (old) => {
             if (!Array.isArray(old)) return old;
             let changed = false;
             const next = old.map((c) => {
-              if (Number(c.id) !== Number(cardId)) return c;
+              const match = entries.find((en) => en.card && Number(en.cardId) === Number(c.id));
+              if (!match) return c;
               changed = true;
-              return { ...c, ...card };
+              return { ...c, ...match.card };
             });
             return changed ? next : old;
           });
 
-          // Patch cart item stock
-          patchItemsByCardId(Number(cardId), { stock: card.stock, price: card.price });
+          for (const { cardId, card } of entries) {
+            if (!card) continue;
+            queryClient.setQueriesData({ queryKey: ["card-detail", cardId] }, (old) =>
+              patchCardDetail(old, card),
+            );
+            queryClient.setQueriesData({ queryKey: ["card-detail", String(cardId)] }, (old) =>
+              patchCardDetail(old, card),
+            );
+            patchItemsByCardId(Number(cardId), { stock: card.stock, price: card.price });
+          }
         } else {
           // Fallback: selective invalidation (checkout/expiry — no snapshot)
-          queryClient.invalidateQueries({ queryKey: ["card-detail", cardId] });
-          queryClient.invalidateQueries({ queryKey: ["card-detail", String(cardId)] });
           queryClient.invalidateQueries({ queryKey: ["cards"] });
+          for (const { cardId } of entries) {
+            queryClient.invalidateQueries({ queryKey: ["card-detail", cardId] });
+            queryClient.invalidateQueries({ queryKey: ["card-detail", String(cardId)] });
+          }
         }
       });
 
       /* ── price-change ── */
       es.addEventListener("price-change", (e) => {
         const { data } = JSON.parse(e.data);
-        const cardId = data?.cardId;
-        const card = data?.card;
 
-        if (card && cardId) {
-          queryClient.setQueriesData({ queryKey: ["cards"] }, (old) =>
-            patchCardsPage(old, cardId, card),
-          );
-          queryClient.setQueriesData({ queryKey: ["card-detail", cardId] }, (old) =>
-            patchCardDetail(old, card),
-          );
-          queryClient.setQueriesData({ queryKey: ["card-detail", String(cardId)] }, (old) =>
-            patchCardDetail(old, card),
-          );
+        const entries = data?.bulk
+          ? (data.cards || [])
+          : data?.cardId ? [{ cardId: data.cardId, card: data.card }] : [];
+
+        if (!entries.length) return;
+
+        const hasSnapshots = entries.some((en) => en.card);
+
+        if (hasSnapshots) {
+          queryClient.setQueriesData({ queryKey: ["cards"] }, (old) => {
+            let result = old;
+            for (const { cardId, card } of entries) {
+              if (card) result = patchCardsPage(result, cardId, card);
+            }
+            return result;
+          });
+
           queryClient.setQueriesData({ queryKey: ["featured-cards"] }, (old) => {
             if (!Array.isArray(old)) return old;
             let changed = false;
             const next = old.map((c) => {
-              if (Number(c.id) !== Number(cardId)) return c;
+              const match = entries.find((en) => en.card && Number(en.cardId) === Number(c.id));
+              if (!match) return c;
               changed = true;
-              return { ...c, ...card };
+              return { ...c, ...match.card };
             });
             return changed ? next : old;
           });
-          patchItemsByCardId(Number(cardId), { price: card.price });
+
+          for (const { cardId, card } of entries) {
+            if (!card) continue;
+            queryClient.setQueriesData({ queryKey: ["card-detail", cardId] }, (old) =>
+              patchCardDetail(old, card),
+            );
+            queryClient.setQueriesData({ queryKey: ["card-detail", String(cardId)] }, (old) =>
+              patchCardDetail(old, card),
+            );
+            patchItemsByCardId(Number(cardId), { price: card.price });
+          }
         } else {
-          // Bulk price change without per-card snapshot — invalidate
           queryClient.invalidateQueries({ queryKey: ["cards"] });
         }
       });

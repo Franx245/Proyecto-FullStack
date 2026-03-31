@@ -75,60 +75,64 @@ export function useAdminRealtimeEvents(session, onSessionChange) {
 
       es.addEventListener("stock-update", (e) => {
         const { data } = JSON.parse(e.data);
-        const cardId = data?.cardId;
-        const card = data?.card;
 
-        if (card && cardId) {
-          // Surgical: patch all admin card list queries
-          queryClient.setQueriesData({ queryKey: ["cards"] }, (old) =>
-            patchAdminCardsPage(old, cardId, card),
-          );
-          queryClient.setQueriesData({ queryKey: ["home-cards"] }, (old) =>
-            patchAdminCardsPage(old, cardId, card),
-          );
-          queryClient.setQueriesData({ queryKey: ["inventory-cards"] }, (old) =>
-            patchAdminCardsPage(old, cardId, card),
-          );
-          queryClient.setQueriesData({ queryKey: ["admin-card-search"] }, (old) =>
-            patchAdminCardsPage(old, cardId, card),
-          );
+        const entries = data?.bulk
+          ? (data.cards || [])
+          : data?.cardId ? [{ cardId: data.cardId, card: data.card }] : [];
 
-          if (card.is_low_stock || card.is_out_of_stock) {
+        if (!entries.length) return;
+
+        const hasSnapshots = entries.some((en) => en.card);
+        const ADMIN_CARD_KEYS = ["cards", "home-cards", "inventory-cards", "admin-card-search"];
+
+        if (hasSnapshots) {
+          for (const key of ADMIN_CARD_KEYS) {
+            queryClient.setQueriesData({ queryKey: [key] }, (old) => {
+              let result = old;
+              for (const { cardId, card } of entries) {
+                if (card) result = patchAdminCardsPage(result, cardId, card);
+              }
+              return result;
+            });
+          }
+
+          if (entries.some((en) => en.card?.is_low_stock || en.card?.is_out_of_stock)) {
             queryClient.invalidateQueries({ queryKey: ["dashboard"] });
           }
         } else {
-          // Fallback: checkout/expiry — no snapshot
-          queryClient.invalidateQueries({ queryKey: ["cards"] });
-          queryClient.invalidateQueries({ queryKey: ["home-cards"] });
-          queryClient.invalidateQueries({ queryKey: ["inventory-cards"] });
-          queryClient.invalidateQueries({ queryKey: ["admin-card-search"] });
+          for (const key of ADMIN_CARD_KEYS) {
+            queryClient.invalidateQueries({ queryKey: [key] });
+          }
           queryClient.invalidateQueries({ queryKey: ["dashboard"] });
         }
       });
 
       es.addEventListener("price-change", (e) => {
         const { data } = JSON.parse(e.data);
-        const cardId = data?.cardId;
-        const card = data?.card;
 
-        if (card && cardId) {
-          queryClient.setQueriesData({ queryKey: ["cards"] }, (old) =>
-            patchAdminCardsPage(old, cardId, card),
-          );
-          queryClient.setQueriesData({ queryKey: ["home-cards"] }, (old) =>
-            patchAdminCardsPage(old, cardId, card),
-          );
-          queryClient.setQueriesData({ queryKey: ["inventory-cards"] }, (old) =>
-            patchAdminCardsPage(old, cardId, card),
-          );
-          queryClient.setQueriesData({ queryKey: ["admin-card-search"] }, (old) =>
-            patchAdminCardsPage(old, cardId, card),
-          );
+        const entries = data?.bulk
+          ? (data.cards || [])
+          : data?.cardId ? [{ cardId: data.cardId, card: data.card }] : [];
+
+        if (!entries.length) return;
+
+        const hasSnapshots = entries.some((en) => en.card);
+        const ADMIN_CARD_KEYS = ["cards", "home-cards", "inventory-cards", "admin-card-search"];
+
+        if (hasSnapshots) {
+          for (const key of ADMIN_CARD_KEYS) {
+            queryClient.setQueriesData({ queryKey: [key] }, (old) => {
+              let result = old;
+              for (const { cardId, card } of entries) {
+                if (card) result = patchAdminCardsPage(result, cardId, card);
+              }
+              return result;
+            });
+          }
         } else {
-          queryClient.invalidateQueries({ queryKey: ["cards"] });
-          queryClient.invalidateQueries({ queryKey: ["home-cards"] });
-          queryClient.invalidateQueries({ queryKey: ["inventory-cards"] });
-          queryClient.invalidateQueries({ queryKey: ["admin-card-search"] });
+          for (const key of ADMIN_CARD_KEYS) {
+            queryClient.invalidateQueries({ queryKey: [key] });
+          }
         }
       });
 

@@ -142,11 +142,13 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       const item = prev[idx];
       const nextStock = typeof patch.stock === "number" ? patch.stock : item.stock;
       const nextPrice = typeof patch.price === "number" ? patch.price : item.price;
-      const nextQty = clampQuantity(item.quantity, nextStock);
 
-      if (nextQty <= 0) {
+      // Remove item if stock drops to 0
+      if (typeof nextStock === "number" && nextStock <= 0) {
         return prev.filter((i) => i.version_id !== versionId);
       }
+
+      const nextQty = clampQuantity(item.quantity, nextStock);
 
       if (nextStock === item.stock && nextPrice === item.price && nextQty === item.quantity) {
         return prev;
