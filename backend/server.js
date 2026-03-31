@@ -1,5 +1,6 @@
 import "./src/lib/load-env.js";
 import bcrypt from "bcryptjs";
+import compression from "compression";
 import cors from "cors";
 import ExcelJS from "exceljs";
 import express from "express";
@@ -25,9 +26,14 @@ import {
 import { getUsdToArsRate } from "./src/lib/dollar.js";
 import { createMercadoPagoDirectPayment } from "./src/lib/mercadopagoPayments.js";
 import { createRateLimitMiddleware, getRequestIp, validateBody } from "./src/lib/requestGuards.js";
-/* ── Realtime (no-ops in serverless) ── */
+/* ── Realtime ── */
 import { publishEvent } from "./src/lib/events.js";
-import { publicSSEHandler, adminSSEHandler } from "./src/lib/sse.js";
+import { publicSSEHandler, adminSSEHandler, getSSEClientCount } from "./src/lib/sse.js";
+/* ── Redis TCP + BullMQ ── */
+import { isRedisTcpConfigured, pingRedisTcp, shutdownRedisTcp } from "./src/lib/redis-tcp.js";
+import { startWorker, shutdownWorker } from "./src/lib/jobs/worker.js";
+import { enqueueJob, shutdownQueue } from "./src/lib/jobs/queue.js";
+import { stopEventBus } from "./src/lib/events.js";
 /* ── Cron job handlers ── */
 import { handleRecomputePrices } from "./src/lib/jobs/recompute-prices.js";
 import { handleComputeCardRankings } from "./src/lib/jobs/compute-card-rankings.js";
@@ -220,6 +226,7 @@ app.use(cors({
   credentials: true,
 }));
 app.set("trust proxy", 1);
+app.use(compression());
 app.use(express.json({ limit: "256kb" }));
 app.use((req, res, next) => {
   const requestId = String(req.headers["x-request-id"] || `srv_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`);
@@ -3871,13 +3878,22 @@ app.get("/api/health", async (_req, res) => {
     // Redis is non-critical — don't affect status code
   }
 
+  let redisTcpOk = false;
+  try {
+    redisTcpOk = await pingRedisTcp();
+  } catch {
+    // non-critical
+  }
+
   res.status(statusCode).json({
     ok: dbOk,
     database: { ok: dbOk },
     redis: {
       cache: redisCache,
       cache_backend: getRedisBackendName(),
+      tcp: { ok: redisTcpOk, configured: isRedisTcpConfigured() },
     },
+    sse: getSSEClientCount(),
   });
 });
 
@@ -4690,18 +4706,13 @@ app.post("/api/checkout", requireAuth, checkoutRateLimit, async (req, res) => {
     await finalizeIdempotentMutation(idempotency, 201, responsePayload);
     res.status(201).json(responsePayload);
 
-    /* ── Realtime: notify new order + async stock update (fire-and-forget) ── */
-    try {
-      await invalidateOrderRelatedCache(normalizedItems);
-      publishEvent("new-order", {
-        orderId: result.order.id,
-        total: result.order.total,
-        itemCount: normalizedItems.length,
-      });
-      // scheduleStockUpdate removed — stock is atomic in DB, cache invalidation above
-    } catch (postResponseError) {
-      console.error("[checkout] post-response side-effects failed", postResponseError);
-    }
+    /* ── Async post-checkout: cache invalidation + realtime event ── */
+    enqueueJob("process-order-post-checkout", {
+      orderId: result.order.id,
+      items: normalizedItems,
+    }).catch((postResponseError) => {
+      console.error("[checkout] failed to enqueue post-checkout job", postResponseError);
+    });
     return;
   } catch (error) {
     await releaseIdempotentMutation(idempotency);
@@ -5204,8 +5215,15 @@ app.post(MERCADOPAGO_WEBHOOK_PATHS, async (req, res) => {
 app.get("/api/internal/orders/expire-pending", async (req, res) => {
   try {
     assertCronAuthorized(req);
+
+    if (isRedisTcpConfigured()) {
+      const job = await enqueueJob("expire-pending-orders", { source: "cron" });
+      res.json({ enqueued: true, jobId: job?.id ?? "inline" });
+      return;
+    }
+
     const expired = await expirePendingOrders({
-      source: "vercel_cron",
+      source: "cron",
       requestId: req.requestContext?.requestId || null,
     });
 
@@ -7591,14 +7609,36 @@ if (isDirectExecution) {
 
     const redisCache = await probeRedisConnection();
     console.log(`[infra] cache backend=${redisCache.backend} ready=${redisCache.ok}`);
+
+    /* ── Redis TCP + BullMQ worker ── */
+    if (isRedisTcpConfigured()) {
+      const tcpOk = await pingRedisTcp();
+      console.log(`[infra] redis-tcp ready=${tcpOk}`);
+
+      if (tcpOk) {
+        startWorker();
+      }
+    } else {
+      console.log("[infra] redis-tcp not configured — workers will run inline");
+    }
   });
 
   /* ── Graceful shutdown ── */
   const shutdown = async (signal) => {
     console.log(`[shutdown] ${signal} received — cleaning up...`);
+
     server.close(() => {
       console.log("[shutdown] HTTP server closed");
     });
+
+    await Promise.allSettled([
+      shutdownWorker(),
+      shutdownQueue(),
+      stopEventBus(),
+      shutdownRedisTcp(),
+    ]);
+
+    console.log("[shutdown] all resources released");
     process.exit(0);
   };
 
