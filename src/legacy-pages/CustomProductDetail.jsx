@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { fetchCustomProductDetail } from "@/api/store";
 import { cloudinaryFetchUrl } from "@/lib/cardImage";
 
+/** @param {number} value */
 function currency(value) {
   return new Intl.NumberFormat("es-AR", {
     style: "currency",
@@ -50,7 +51,7 @@ export default function CustomProductDetail() {
 
           {images.length > 1 ? (
             <div className="grid grid-cols-4 gap-3 md:grid-cols-6">
-              {images.map((image, index) => (
+              {images.map((/** @type {*} */ image, /** @type {number} */ index) => (
                 <button
                   key={image.id}
                   onClick={() => setActiveIndex(index)}

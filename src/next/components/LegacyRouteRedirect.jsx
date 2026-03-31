@@ -4,6 +4,7 @@ import { useEffect } from "react";
 
 import { getLegacyStorefrontUrl } from "@/next/storefront-links";
 
+/** @param {{ path: string, label?: string }} props */
 export default function LegacyRouteRedirect({ path, label = "ruta legacy" }) {
   useEffect(() => {
     window.location.replace(getLegacyStorefrontUrl(path));

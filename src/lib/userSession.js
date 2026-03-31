@@ -8,6 +8,7 @@ function getSafeStorage() {
   return window.localStorage;
 }
 
+/** @param {string} value */
 function decodeBase64Url(value) {
   if (typeof value !== "string" || !value) {
     return "";
@@ -24,6 +25,7 @@ function decodeBase64Url(value) {
   }
 }
 
+/** @param {string} token */
 function readJwtPayload(token) {
   if (typeof token !== "string") {
     return null;
@@ -41,6 +43,7 @@ function readJwtPayload(token) {
   }
 }
 
+/** @param {string} token */
 export function isJwtExpired(token) {
   const payload = readJwtPayload(token);
   if (!payload || typeof payload.exp !== "number") {

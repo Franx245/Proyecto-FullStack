@@ -42,7 +42,8 @@ export const metadata = {
   robots: { index: true, follow: true },
 };
 
-export default function RootLayout({ children }) {
+/** @param {{ children: import('react').ReactNode }} props */
+export default function RootLayout(/** @type {{ children: import('react').ReactNode }} */ { children }) {
   return (
     <html lang="es">
       <body className={`${bodyFont.variable} ${displayFont.variable}`}>

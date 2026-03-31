@@ -23,6 +23,7 @@ const STATS = [
   { value: "98%", label: "satisfacción" },
 ];
 
+/** @param {{ initialFeaturedCards?: *[], initialLatestArrivalCards?: *[] }} props */
 export default function HomePage({ initialFeaturedCards = [], initialLatestArrivalCards = [] }) {
   const prefetchCatalog = useCatalogPrefetch();
 
@@ -106,7 +107,7 @@ export default function HomePage({ initialFeaturedCards = [], initialLatestArriv
                   <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.22),transparent_30%),linear-gradient(160deg,rgba(74,222,128,0.14),transparent_36%,rgba(255,255,255,0.02)_70%)]" />
                   <div className="relative rounded-[1.5rem] border border-white/10 bg-slate-950/82 p-3">
                     <div className="relative h-[360px] w-[255px] md:h-[470px] md:w-[332px]">
-                      <NextCardImage fallbackSrc={heroCardImage} alt="Blue-Eyes White Dragon" priority={true} fill={true} className="rounded-[1.15rem] object-cover" />
+                      <NextCardImage fallbackSrc={/** @type {*} */ (heroCardImage)} alt="Blue-Eyes White Dragon" priority={true} fill={true} className="rounded-[1.15rem] object-cover" />
                     </div>
                     <div className="mt-3 flex items-center justify-between gap-4 px-1 pb-1 pt-2">
                       <div>
@@ -140,7 +141,7 @@ export default function HomePage({ initialFeaturedCards = [], initialLatestArriv
           </div>
         </motion.section>
 
-        <NextFeaturedCards title="Cartas destacadas" queryKey={["featured-cards"]} queryFn={() => fetchFeaturedCards(5)} initialData={initialFeaturedCards} />
+        <NextFeaturedCards title="Cartas destacadas" queryKey={["featured-cards"]} queryFn={() => fetchFeaturedCards(5)} initialData={/** @type {*} */ (initialFeaturedCards)} />
 
         <section className="mx-auto max-w-[1400px] px-4">
           <div className="mb-6 flex flex-col gap-3 rounded-[2rem] border border-white/10 bg-white/[0.03] px-6 py-5 backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between">
@@ -153,7 +154,7 @@ export default function HomePage({ initialFeaturedCards = [], initialLatestArriv
             </Link>
           </div>
 
-          <NextFeaturedCards title="Últimos ingresos" queryKey={["latest-arrivals"]} queryFn={() => fetchLatestArrivalCards(5)} showHeader={false} initialData={initialLatestArrivalCards} />
+          <NextFeaturedCards title="Últimos ingresos" queryKey={["latest-arrivals"]} queryFn={() => fetchLatestArrivalCards(5)} showHeader={false} initialData={/** @type {*} */ (initialLatestArrivalCards)} />
 
           <div className="mt-8 flex justify-center">
             <Link href="/singles" onMouseEnter={handleCatalogIntent} onFocus={handleCatalogIntent} className="rounded-2xl bg-gradient-to-r from-emerald-400 via-lime-300 to-emerald-500 px-7 py-4 text-sm font-bold text-slate-950 shadow-[0_0_30px_rgba(74,222,128,0.22)] transition duration-300 hover:-translate-y-0.5 hover:shadow-[0_0_42px_rgba(74,222,128,0.35)]">

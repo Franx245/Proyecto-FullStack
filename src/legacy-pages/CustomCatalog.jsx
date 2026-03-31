@@ -62,7 +62,7 @@ export default function CustomCatalog() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {children.map((child) => (
+            {children.map((/** @type {*} */ child) => (
               <CustomCategoryCard key={child.id} category={child} basePath={basePath} />
             ))}
           </div>
@@ -77,7 +77,7 @@ export default function CustomCatalog() {
 
         {products.length ? (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {products.map((product) => (
+            {products.map((/** @type {*} */ product) => (
               <CustomProductCard key={product.id} product={product} />
             ))}
           </div>

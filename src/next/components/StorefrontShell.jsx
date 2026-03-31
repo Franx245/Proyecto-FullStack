@@ -344,7 +344,7 @@ export default function StorefrontShell({ children }) {
               <div className="hidden items-center gap-2 md:flex">
                 <Link href="/account" onMouseEnter={() => router.prefetch("/account")} onFocus={() => router.prefetch("/account")} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-slate-200 transition duration-300 hover:border-emerald-400/20 hover:bg-white/[0.06] hover:text-white">
                   <UserAvatar
-                    src={user?.avatar_url}
+                    src={user?.avatar_url || undefined}
                     alt={displayName}
                     name={displayName}
                     className="h-7 w-7 rounded-full object-cover"

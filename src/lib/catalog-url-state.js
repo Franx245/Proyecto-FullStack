@@ -1,10 +1,11 @@
-const DEFAULT_FILTERS = Object.freeze({
+/** @type {{ rarities: string[], cardTypes: string[], conditions: string[], sets: string[], priceRange: { label: string, min: number, max: number | null } | null }} */
+const DEFAULT_FILTERS = /** @type {*} */ (Object.freeze({
   rarities: [],
   cardTypes: [],
   conditions: [],
   sets: [],
   priceRange: null,
-});
+}));
 
 const PRICE_RANGES = Object.freeze([
   { label: "Under $5", min: 0, max: 5 },
@@ -18,19 +19,26 @@ const CATALOG_SCROLL_PREFIX = "duelvault_catalog_scroll:";
 const CATALOG_STATE_PREFIX = "duelvault_catalog_state:";
 const CATALOG_STATE_MAX_AGE = 1000 * 60 * 60 * 24 * 7;
 
+/** @param {"localStorage" | "sessionStorage"} storageName */
 function getSafeStorage(storageName) {
   if (typeof window === "undefined") {
     return null;
   }
 
+  /** @type {Storage | undefined} */
   const storage = window[storageName];
   return storage && typeof storage.getItem === "function" ? storage : null;
 }
 
+/** @param {*} value */
 function hasSearchParamMethods(value) {
   return Boolean(value && typeof value.get === "function" && typeof value.getAll === "function");
 }
 
+/**
+ * @param {*} source
+ * @param {string} key
+ */
 function collectRawValues(source, key) {
   if (!source) {
     return [];
@@ -55,6 +63,7 @@ function collectRawValues(source, key) {
   return value == null ? [] : [value];
 }
 
+/** @param {string[]} values */
 function normalizeUniqueValues(values) {
   return [...new Set(
     values
@@ -64,10 +73,14 @@ function normalizeUniqueValues(values) {
   )].sort((left, right) => left.localeCompare(right));
 }
 
+/**
+ * @param {*} source
+ * @param {string[]} keys
+ */
 function getSingleValue(source, keys) {
   for (const key of keys) {
     const rawValues = collectRawValues(source, key);
-    const firstValue = rawValues.find((value) => String(value).trim() !== "");
+    const firstValue = rawValues.find((/** @type {*} */ value) => String(value).trim() !== "");
 
     if (firstValue != null) {
       return String(firstValue).trim();
@@ -77,6 +90,10 @@ function getSingleValue(source, keys) {
   return "";
 }
 
+/**
+ * @param {*} source
+ * @param {string[]} keys
+ */
 function getMultiValue(source, keys) {
   const values = [];
 
@@ -87,15 +104,21 @@ function getMultiValue(source, keys) {
   return normalizeUniqueValues(values);
 }
 
+/** @param {string} value */
 function parsePage(value) {
   const parsedValue = Number.parseInt(String(value || "1"), 10);
   return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : 1;
 }
 
+/**
+ * @param {number | null} minPrice
+ * @param {number | null} maxPrice
+ */
 function findPriceRange(minPrice, maxPrice) {
   return PRICE_RANGES.find((range) => range.min === minPrice && (range.max ?? null) === (maxPrice ?? null)) ?? null;
 }
 
+/** @param {*} source */
 export function parseCatalogSearchParams(source) {
   const minPriceValue = getSingleValue(source, ["minPrice"]);
   const maxPriceValue = getSingleValue(source, ["maxPrice"]);
@@ -142,12 +165,17 @@ export function buildCatalogSearchParams({ search = "", page = 1, filters = DEFA
   return params;
 }
 
+/**
+ * @param {string} pathname
+ * @param {*} state
+ */
 export function buildCatalogHref(pathname, state) {
   const params = buildCatalogSearchParams(state);
   const query = params.toString();
   return query ? `${pathname}?${query}` : pathname;
 }
 
+/** @param {*} state */
 export function hasActiveCatalogState(state) {
   if (!state || typeof state !== "object") {
     return false;
@@ -164,6 +192,10 @@ export function hasActiveCatalogState(state) {
   );
 }
 
+/**
+ * @param {string} pathname
+ * @param {*} state
+ */
 export function persistCatalogState(pathname, state) {
   const storage = getSafeStorage("localStorage");
   if (!storage || !pathname) {
@@ -178,6 +210,7 @@ export function persistCatalogState(pathname, state) {
   } catch {}
 }
 
+/** @param {string} pathname */
 export function readCatalogState(pathname) {
   const storage = getSafeStorage("localStorage");
   if (!storage || !pathname) {
@@ -210,6 +243,7 @@ export function readCatalogState(pathname) {
   }
 }
 
+/** @param {string} href */
 export function persistLastCatalogHref(href) {
   const storage = getSafeStorage("localStorage");
   if (!storage || !href) {
@@ -234,6 +268,10 @@ export function readLastCatalogHref(fallbackHref = "/singles") {
   }
 }
 
+/**
+ * @param {string} href
+ * @param {number} scrollY
+ */
 export function persistCatalogScroll(href, scrollY) {
   const storage = getSafeStorage("sessionStorage");
   if (!storage || !href) {
@@ -248,6 +286,7 @@ export function persistCatalogScroll(href, scrollY) {
   } catch {}
 }
 
+/** @param {string} href */
 export function readCatalogScroll(href) {
   const storage = getSafeStorage("sessionStorage");
   if (!storage || !href) {

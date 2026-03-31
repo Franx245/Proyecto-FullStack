@@ -16,6 +16,7 @@ import { getOrderProgress, getShippingOption, orderStatusLabel } from "@/lib/shi
 const NON_RETRYABLE_PAYMENT_STATUSES = new Set(["approved", "pending", "in_process", "authorized", "in_mediation"]);
 const PENDING_PAYMENT_FEEDBACK_KEY = "duelvault_pending_payment_feedback";
 
+/** @param {*} order */
 function hasProcessingPaymentAttempt(order) {
   return Boolean(String(order?.payment_id || "").trim());
 }
@@ -33,6 +34,7 @@ function readPendingPaymentFeedback() {
   }
 }
 
+/** @param {*} payload */
 function writePendingPaymentFeedback(payload) {
   if (typeof window === "undefined") {
     return;
@@ -46,6 +48,7 @@ function writePendingPaymentFeedback(payload) {
   window.sessionStorage.setItem(PENDING_PAYMENT_FEEDBACK_KEY, JSON.stringify(payload));
 }
 
+/** @param {*} order */
 function isWebhookConfirmationPending(order) {
   if (!order) {
     return false;
@@ -56,8 +59,9 @@ function isWebhookConfirmationPending(order) {
     && NON_RETRYABLE_PAYMENT_STATUSES.has(String(order.payment_status || "").toLowerCase());
 }
 
+/** @param {*} order */
 function buildWhatsAppMessage(order) {
-  const lines = order.items.map((item) => `${item.quantity}x ${item.card?.name}${item.card?.set_code ? ` (${item.card.set_code})` : ""}`);
+  const lines = order.items.map((/** @type {*} */ item) => `${item.quantity}x ${item.card?.name}${item.card?.set_code ? ` (${item.card.set_code})` : ""}`);
 
   return encodeURIComponent(
     `Hola, quisiera consultar sobre mi pedido #${order.id}:\n\n` +
@@ -66,6 +70,7 @@ function buildWhatsAppMessage(order) {
   );
 }
 
+/** @param {*} order */
 function canRetryDirectPayment(order) {
   if (!order) {
     return false;
@@ -87,10 +92,12 @@ function canRetryDirectPayment(order) {
   return new Date(order.expires_at).getTime() > Date.now();
 }
 
+/** @param {string} value */
 function normalizeWhatsappNumber(value) {
   return typeof value === "string" ? value.replace(/[^\d]/g, "") : "";
 }
 
+/** @param {*} item */
 function getOrderItemDetailPath(item) {
   const detailId = item?.card?.detail_id ?? item?.card?.version_id;
   return detailId ? `/card/${detailId}` : null;
@@ -169,7 +176,7 @@ export default function OrdersPage() {
           };
 
       toast.info(copy.title, { description: copy.description, duration: 5000 });
-      setPendingPaymentFeedback((current) => (current ? { ...current, approvalNoticeShown: true } : current));
+      setPendingPaymentFeedback((/** @type {*} */ current) => (current ? { ...current, approvalNoticeShown: true } : current));
       return;
     }
 
@@ -191,6 +198,7 @@ export default function OrdersPage() {
     }
   }, [orders, pendingPaymentFeedback]);
 
+  /** @type {Record<string, string>} */
   const statusClasses = {
     pending_payment: "bg-slate-500/15 text-slate-200 border-slate-400/20",
     failed: "bg-rose-500/15 text-rose-300 border-rose-400/20",
@@ -201,8 +209,9 @@ export default function OrdersPage() {
     cancelled: "bg-rose-500/15 text-rose-300 border-rose-400/20",
   };
 
+  /** @param {*} order */
   function handleCopy(order) {
-    const lines = order.items.map((item) => `${item.quantity}x ${item.card?.name} - $${(item.price * item.quantity).toFixed(2)}`);
+    const lines = order.items.map((/** @type {*} */ item) => `${item.quantity}x ${item.card?.name} - $${(item.price * item.quantity).toFixed(2)}`);
 
     const text =
       `Pedido #${order.id}\n` +
@@ -216,6 +225,7 @@ export default function OrdersPage() {
     toast.success("Pedido copiado al portapapeles");
   }
 
+  /** @param {*} order */
   function handleWhatsApp(order) {
     if (!supportWhatsappNumber) {
       toast.error("WhatsApp de soporte no configurado");
@@ -225,11 +235,13 @@ export default function OrdersPage() {
     window.open(`https://wa.me/${supportWhatsappNumber}?text=${buildWhatsAppMessage(order)}`, "_blank");
   }
 
+  /** @param {*} order */
   function handlePayOrder(order) {
-    setPayingOrderId(String(order.id));
+    setPayingOrderId(/** @type {*} */ (String(order.id)));
     router.push(`/checkout/pay/${order.id}`);
   }
 
+  /** @param {*} item */
   function handleOpenOrderItem(item) {
     const detailPath = getOrderItemDetailPath(item);
     if (detailPath) {
@@ -324,7 +336,7 @@ export default function OrdersPage() {
                   </div>
 
                   <div className="mb-4 space-y-2">
-                    {order.items.map((item) => (
+                    {order.items.map((/** @type {*} */ item) => (
                       <div
                         key={item.id}
                         onClick={() => handleOpenOrderItem(item)}

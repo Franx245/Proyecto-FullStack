@@ -14,6 +14,11 @@ export function shouldFallbackToServer(filters = DEFAULT_FILTERS) {
   return filters.rarities.length > 2 || filters.cardTypes.length > 2 || filters.conditions.length > 2;
 }
 
+/**
+ * @param {*} filters
+ * @param {*} primaryFilter
+ * @param {boolean} useServerFallback
+ */
 export function buildServerSideFilters(filters = DEFAULT_FILTERS, primaryFilter, useServerFallback) {
   if (useServerFallback) {
     return {
@@ -34,6 +39,11 @@ export function buildServerSideFilters(filters = DEFAULT_FILTERS, primaryFilter,
   };
 }
 
+/**
+ * @param {*} filters
+ * @param {*} primaryFilter
+ * @param {boolean} useServerFallback
+ */
 export function hasClientSideRefinements(filters = DEFAULT_FILTERS, primaryFilter, useServerFallback) {
   if (useServerFallback) return false;
 
@@ -46,6 +56,10 @@ export function hasClientSideRefinements(filters = DEFAULT_FILTERS, primaryFilte
   );
 }
 
+/**
+ * @param {*} filters
+ * @param {boolean} useServerFallback
+ */
 export function buildServerFiltersKey(filters, useServerFallback) {
   if (!useServerFallback) {
     return "";
@@ -65,6 +79,7 @@ export function buildServerFiltersKey(filters, useServerFallback) {
   });
 }
 
+/** @param {{ page?: number, pageSize?: number, search?: string, category?: string, filters?: * }} [options] */
 export function buildCatalogQueryPlan({ page = 1, pageSize, search = "", category, filters = DEFAULT_FILTERS } = {}) {
   const primaryFilter = pickPrimaryCatalogFilter(filters);
   const useServerFallback = shouldFallbackToServer(filters);

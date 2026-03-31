@@ -3,10 +3,12 @@ const MERCADOPAGO_SANDBOX_HOSTS = new Set([
 ]);
 const MERCADOPAGO_SDK_URL = "https://sdk.mercadopago.com/js/v2";
 
+/** @type {Promise<*> | null} */
 let mercadoPagoSdkPromise = null;
 
 export const MERCADOPAGO_SANDBOX_HINT = "Si Mercado Pago entra en challenge o muestra ERR_TOO_MANY_REDIRECTS, probalo en una ventana privada de Chrome o Edge, con cookies habilitadas y sin bloqueos de Brave Shields.";
 
+/** @param {string} value */
 export function isMercadoPagoSandboxUrl(value) {
   try {
     const url = new URL(String(value || ""));
@@ -16,6 +18,7 @@ export function isMercadoPagoSandboxUrl(value) {
   }
 }
 
+/** @param {string} initPoint */
 export function openMercadoPagoCheckout(initPoint) {
   if (!isMercadoPagoSandboxUrl(initPoint)) {
     window.location.assign(initPoint);
@@ -37,15 +40,15 @@ export async function loadMercadoPagoSdk() {
     throw new Error("Mercado Pago SDK is only available in the browser");
   }
 
-  if (typeof window.MercadoPago === "function") {
-    return window.MercadoPago;
+  if (typeof /** @type {*} */ (window).MercadoPago === "function") {
+    return /** @type {*} */ (window).MercadoPago;
   }
 
   if (!mercadoPagoSdkPromise) {
     mercadoPagoSdkPromise = new Promise((resolve, reject) => {
       const existingScript = document.querySelector(`script[src="${MERCADOPAGO_SDK_URL}"]`);
       if (existingScript) {
-        existingScript.addEventListener("load", () => resolve(window.MercadoPago), { once: true });
+        existingScript.addEventListener("load", () => resolve(/** @type {*} */ (window).MercadoPago), { once: true });
         existingScript.addEventListener("error", () => reject(new Error("Mercado Pago SDK failed to load")), { once: true });
         return;
       }
@@ -54,12 +57,12 @@ export async function loadMercadoPagoSdk() {
       script.src = MERCADOPAGO_SDK_URL;
       script.async = true;
       script.onload = () => {
-        if (typeof window.MercadoPago !== "function") {
+        if (typeof /** @type {*} */ (window).MercadoPago !== "function") {
           reject(new Error("Mercado Pago SDK is unavailable after loading"));
           return;
         }
 
-        resolve(window.MercadoPago);
+        resolve(/** @type {*} */ (window).MercadoPago);
       };
       script.onerror = () => {
         mercadoPagoSdkPromise = null;
@@ -72,6 +75,7 @@ export async function loadMercadoPagoSdk() {
   return mercadoPagoSdkPromise;
 }
 
+/** @param {string} publicKey */
 export async function createMercadoPagoBrowserClient(publicKey) {
   const MercadoPago = await loadMercadoPagoSdk();
   return new MercadoPago(publicKey, { locale: "es-AR" });

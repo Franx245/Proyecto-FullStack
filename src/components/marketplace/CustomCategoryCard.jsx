@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { cloudinaryFetchUrl } from "@/lib/cardImage";
 
+/** @param {{ category: *, basePath?: string }} props */
 export default function CustomCategoryCard({ category, basePath = "/custom" }) {
   const targetPath = `${basePath}/${category.slug}`.replace(/\/+/g, "/");
 

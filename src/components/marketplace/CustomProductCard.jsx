@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { cloudinaryFetchUrl } from "@/lib/cardImage";
 
+/** @param {number} value */
 function currency(value) {
   return new Intl.NumberFormat("es-AR", {
     style: "currency",
@@ -9,6 +10,7 @@ function currency(value) {
   }).format(value || 0);
 }
 
+/** @param {{ product: * }} props */
 export default function CustomProductCard({ product }) {
   return (
     <Link

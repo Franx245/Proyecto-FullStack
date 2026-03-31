@@ -9,6 +9,7 @@ import CardSkeleton from "@/components/marketplace/CardSkeleton";
 import { retainPreviousData } from "@/lib/query-client";
 import NextCardItem from "@/next/components/NextCardItem.jsx";
 
+/** @param {{ title?: string, queryKey?: string[], queryFn?: () => Promise<*>, showHeader?: boolean, initialData?: *[] }} props */
 export default function NextFeaturedCards({
   title = "Cartas destacadas",
   queryKey = ["featured-cards"],
@@ -52,7 +53,7 @@ export default function NextFeaturedCards({
         {shouldShowSkeleton
           ? Array.from({ length: 5 }).map((_, index) => <CardSkeleton key={index} />)
           : hasCards
-            ? cards.map((card, index) => (
+            ? cards.map((/** @type {*} */ card, /** @type {number} */ index) => (
                 <NextCardItem key={card.version_id} card={card} priorityImage={index === 0} />
               ))
             : (

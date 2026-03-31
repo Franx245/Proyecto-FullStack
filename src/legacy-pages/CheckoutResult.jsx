@@ -26,8 +26,8 @@ const RESULT_COPY = {
 export default function CheckoutResult() {
   const location = useLocation();
   const [searchParams] = useSearchParams();
-  const statusKey = location.pathname.split("/").pop();
-  const copy = RESULT_COPY[statusKey] || RESULT_COPY.pending;
+  const statusKey = location.pathname.split("/").pop() || "pending";
+  const copy = /** @type {Record<string, *>} */ (RESULT_COPY)[statusKey] || RESULT_COPY.pending;
   const Icon = copy.icon;
   const orderId = searchParams.get("orderId");
 

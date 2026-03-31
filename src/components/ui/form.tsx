@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
-import { Controller, FormProvider, useFormContext } from "react-hook-form";
+import { Controller, FormProvider, useFormContext, type ControllerProps, type FieldValues } from "react-hook-form";
 import { cn } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
 
@@ -38,7 +38,7 @@ const Form = FormProvider;
 /* FIELD CONTEXT */
 const FormFieldContext = React.createContext<{ name?: string }>({});
 
-const FormField = ({ name, ...props }: FormFieldProps) => (
+const FormField = <T extends FieldValues = FieldValues>({ name, ...props }: ControllerProps<T>) => (
   <FormFieldContext.Provider value={{ name }}>
     <Controller name={name} {...props} />
   </FormFieldContext.Provider>
@@ -156,12 +156,4 @@ export {
   FormDescription,
   FormMessage,
   FormField,
-};
-  FormField,
-  FormItem,
-  FormLabel,
-  FormControl,
-  FormDescription,
-  FormMessage,
-  useFormField,
 };

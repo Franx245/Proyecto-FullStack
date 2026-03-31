@@ -7,12 +7,14 @@ import CardDetailPage from "@/next/pages/CardDetailPage.jsx";
 
 export const revalidate = 600;
 
-const getCardDetail = cache(async (id) => fetchCardDetail(id));
+const getCardDetail = cache(async (/** @type {string} */ id) => fetchCardDetail(id));
 
+/** @param {string} rawId */
 function normalizeCardId(rawId) {
   return extractCardIdFromRouteSegment(rawId);
 }
 
+/** @param {{ params: { id: string } }} props */
 export async function generateMetadata({ params }) {
   const id = normalizeCardId(params.id);
   if (!id) {
@@ -56,6 +58,7 @@ export async function generateMetadata({ params }) {
   }
 }
 
+/** @param {{ params: { id: string } }} props */
 export default async function CardRoute({ params }) {
   const id = normalizeCardId(params.id);
 
@@ -83,7 +86,7 @@ export default async function CardRoute({ params }) {
         <CardDetailPage id={id} initialData={detail} />
       </>
     );
-  } catch (error) {
+  } catch (/** @type {*} */ error) {
     const status = Number(error?.status || 0);
     if (status === 400 || status === 404) {
       return <CardNotFoundState />;

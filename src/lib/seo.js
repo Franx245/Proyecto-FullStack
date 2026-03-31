@@ -1,3 +1,4 @@
+/** @param {string} value */
 function slugify(value) {
   return String(value || "")
     .normalize("NFD")
@@ -8,6 +9,7 @@ function slugify(value) {
     .replace(/(^-|-$)/g, "");
 }
 
+/** @param {string} segment */
 export function extractCardIdFromRouteSegment(segment) {
   const rawValue = String(segment || "").trim();
   if (/^\d+$/.test(rawValue)) {
@@ -18,6 +20,10 @@ export function extractCardIdFromRouteSegment(segment) {
   return match?.[1] || "";
 }
 
+/**
+ * @param {string} name
+ * @param {string | number} id
+ */
 export function buildCardSeoSlug(name, id) {
   const normalizedId = String(id || "").trim();
   if (!normalizedId) {
@@ -28,6 +34,7 @@ export function buildCardSeoSlug(name, id) {
   return `${baseSlug}-${normalizedId}`;
 }
 
+/** @param {*} cardOrId */
 export function buildCardPath(cardOrId, fallbackName = "") {
   if (cardOrId && typeof cardOrId === "object") {
     const id = cardOrId.version_id ?? cardOrId.card_id ?? cardOrId.id ?? cardOrId.ygopro_id;
@@ -54,6 +61,7 @@ export function resolveSiteUrl() {
   return `http://127.0.0.1:${Number(process.env.NEXT_STORE_PORT || 3002)}`;
 }
 
+/** @param {*} card */
 export function buildCardJsonLd(card) {
   if (!card) {
     return null;

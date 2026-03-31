@@ -26,8 +26,9 @@ export function getTrackedOrderIds() {
   return readIds();
 }
 
+/** @param {number} orderId */
 export function trackOrderId(orderId) {
-  const nextIds = [orderId, ...readIds().filter((id) => id !== orderId)];
+  const nextIds = [orderId, ...readIds().filter((/** @type {number} */ id) => id !== orderId)];
   const storage = getSafeStorage();
   if (!storage) {
     return;

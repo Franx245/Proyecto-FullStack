@@ -41,6 +41,7 @@ function DetailSkeleton() {
   );
 }
 
+/** @param {{ id: string, initialData: * }} props */
 export default function CardDetailPage({ id, initialData }) {
   const router = useRouter();
   const backHref = useMemo(() => readLastCatalogHref("/singles"), []);

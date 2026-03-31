@@ -300,7 +300,7 @@ export default function Orders() {
       `Fecha: ${new Date(order.created_at).toLocaleString("es-AR")}\n\n` +
       `${lines.join("\n")}\n\n` +
       `Estado: ${orderStatusLabel(order.status)}\n` +
-      `Envío: ${order.shipping_label || getShippingOption(order.shipping_zone).label}\n` +
+      `Envío: ${order.shipping_label || getShippingOption(order.shipping_zone || "").label}\n` +
       `Total: $${order.total.toFixed(2)}`;
 
     navigator.clipboard.writeText(text);

@@ -25,8 +25,9 @@ const RESULT_COPY = {
   },
 };
 
+/** @param {{ statusKey: string, orderId: string }} props */
 export default function CheckoutResultPage({ statusKey, orderId }) {
-  const copy = RESULT_COPY[statusKey] || RESULT_COPY.pending;
+  const copy = /** @type {Record<string, *>} */ (RESULT_COPY)[statusKey] || RESULT_COPY.pending;
   const Icon = copy.icon;
 
   return (

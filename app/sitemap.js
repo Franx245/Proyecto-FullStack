@@ -6,6 +6,10 @@ const MAX_SITEMAP_PAGES = 100;
 
 export const revalidate = 3600;
 
+/**
+ * @param {string} url
+ * @param {number} revalidate
+ */
 async function fetchJson(url, revalidate) {
   const response = await fetch(url, {
     next: { revalidate },
@@ -31,7 +35,9 @@ export default async function sitemap() {
     { url: `${BASE_URL}/terms`, changeFrequency: "yearly", priority: 0.2 },
   ];
 
+  /** @type {{ url: string, changeFrequency: string, priority: number, lastModified?: Date }[]} */
   let cardPages = [];
+  /** @type {{ url: string, changeFrequency: string, priority: number }[]} */
   let setPages = [];
 
   try {
@@ -63,7 +69,7 @@ export default async function sitemap() {
         lastModified: card.updated_at ? new Date(card.updated_at) : undefined,
       }));
 
-      setPages = sets.map((setName) => ({
+      setPages = sets.map((/** @type {string} */ setName) => ({
         url: `${BASE_URL}/singles?set=${encodeURIComponent(setName)}`,
         changeFrequency: "weekly",
         priority: 0.5,

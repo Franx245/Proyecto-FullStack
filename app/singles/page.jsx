@@ -13,7 +13,8 @@ export const metadata = {
   alternates: { canonical: "/singles" },
 };
 
-export default async function SinglesRoute({ searchParams }) {
+/** @param {{ searchParams: Record<string, string> }} props */
+export default async function SinglesRoute(/** @type {{ searchParams: Record<string, string> }} */ { searchParams }) {
   const catalogUrlState = parseCatalogSearchParams(searchParams);
   const initialData = await fetchCatalogCards({
     page: catalogUrlState.page,

@@ -16,6 +16,7 @@ function GridSkeletonCard() {
   );
 }
 
+/** @param {{ cards?: *[], isLoading?: boolean, isLoadingMore?: boolean }} props */
 export default function NextCardGrid({ cards = [], isLoading = false, isLoadingMore = false }) {
   const skeletons = useMemo(() => {
     const count = isLoading ? 8 : 4;

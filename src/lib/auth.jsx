@@ -47,8 +47,9 @@ import { clearTrackedOrderIds } from "@/lib/orderTracking";
  */
 
 /** @type {import("react").Context<AuthContextValue | null>} */
-const AuthContext = createContext(null);
+const AuthContext = createContext(/** @type {AuthContextValue | null} */ (null));
 
+/** @type {Promise<UserSession | null> | null} */
 let authBootstrapPromise = null;
 let authBootstrapToken = "";
 
@@ -57,6 +58,7 @@ function resetBootstrapCache() {
   authBootstrapToken = "";
 }
 
+/** @param {*} error */
 function isSessionExpiredError(error) {
   return Boolean(
     error &&
@@ -94,6 +96,7 @@ async function resolveBootstrappedSession() {
   return authBootstrapPromise;
 }
 
+/** @param {{ children: import("react").ReactNode }} props */
 export function AuthProvider({ children }) {
   const [session, setSessionState] = useState(/** @type {UserSession | null} */ (null));
   const [user, setUserState] = useState(/** @type {AuthUser | null} */ (null));
@@ -171,7 +174,7 @@ export function AuthProvider({ children }) {
     isBootstrapping,
     isAdmin: user?.role === "ADMIN",
     isStaff: user?.role === "STAFF",
-    async login(credentials) {
+    async login(/** @type {Record<string, unknown>} */ credentials) {
       const nextSession = await loginUser(credentials);
       authBootstrapToken = nextSession.accessToken;
       authBootstrapPromise = Promise.resolve(nextSession);
@@ -179,7 +182,7 @@ export function AuthProvider({ children }) {
       setUserState(nextSession.user);
       return nextSession;
     },
-    async register(payload) {
+    async register(/** @type {Record<string, unknown>} */ payload) {
       const nextSession = await registerUser(payload);
       authBootstrapToken = nextSession.accessToken;
       authBootstrapPromise = Promise.resolve(nextSession);
@@ -217,7 +220,7 @@ export function AuthProvider({ children }) {
       setSessionState(null);
       setUserState(null);
     },
-    setSession(nextSession) {
+    setSession(/** @type {UserSession | null} */ nextSession) {
       if (nextSession) {
         setStoredUserSession(nextSession);
         authBootstrapToken = nextSession.accessToken;

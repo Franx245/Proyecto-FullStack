@@ -32,8 +32,14 @@ import FiltersSidebar from "@/components/marketplace/FiltersSidebar";
 import MobileFilters from "@/components/marketplace/MobileFilters";
 import NextCardGrid from "@/next/components/NextCardGrid.jsx";
 
+/**
+ * @param {*[]} cards
+ * @param {*} filters
+ * @param {*} primaryFilter
+ * @param {boolean} useServerFallback
+ */
 function applyClientSideFilters(cards, filters, primaryFilter, useServerFallback) {
-  return cards.filter((card) => {
+  return cards.filter((/** @type {*} */ card) => {
     if (!useServerFallback && primaryFilter.kind !== "rarities" && filters.rarities.length > 0 && !filters.rarities.includes(card.rarity)) return false;
     if (!useServerFallback && primaryFilter.kind !== "cardTypes" && filters.cardTypes.length > 0 && !filters.cardTypes.includes(card.card_type)) return false;
     if (!useServerFallback && primaryFilter.kind !== "conditions" && filters.conditions.length > 0 && !filters.conditions.includes(card.condition)) return false;
@@ -48,6 +54,7 @@ function applyClientSideFilters(cards, filters, primaryFilter, useServerFallback
   });
 }
 
+/** @param {{ category?: string, initialData?: * }} props */
 export default function SinglesPage({ category, initialData }) {
   const queryClient = useQueryClient();
   const router = useRouter();
@@ -241,7 +248,7 @@ export default function SinglesPage({ category, initialData }) {
     });
   }, [queryClient, catalogData, page, totalPages, debouncedSearch, category, debouncedFilters]);
 
-  const navigateCatalog = useCallback((nextState, options = {}) => {
+  const navigateCatalog = useCallback((/** @type {*} */ nextState, /** @type {{ replace?: boolean }} */ options = {}) => {
     const nextHref = buildCatalogHref(pathname, nextState);
     const currentHref = buildCatalogHref(pathname, {
       search: searchQuery,
@@ -258,7 +265,7 @@ export default function SinglesPage({ category, initialData }) {
     });
   }, [router, pathname, searchQuery, page, filters]);
 
-  const handleFilterChange = useCallback((nextFilters) => {
+  const handleFilterChange = useCallback((/** @type {*} */ nextFilters) => {
     navigateCatalog({
       search: searchQuery,
       page: 1,

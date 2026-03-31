@@ -14,6 +14,7 @@ import { persistCatalogScroll, persistLastCatalogHref } from "@/lib/catalog-url-
 import { useCart } from "@/lib/cartStore";
 import { buildCardPath } from "@/lib/seo";
 
+/** @param {{ card: *, priorityImage?: boolean }} props */
 export default function NextCardItem({ card, priorityImage = false }) {
   const queryClient = useQueryClient();
   const router = useRouter();
@@ -37,7 +38,7 @@ export default function NextCardItem({ card, priorityImage = false }) {
   };
 
   const rarityKey = card?.rarity;
-  const rarityClass = rarityColors[rarityKey] || "text-muted-foreground";
+  const rarityClass = /** @type {Record<string,string>} */ (rarityColors)[rarityKey] || "text-muted-foreground";
   const catalogHref = useMemo(() => {
     const query = searchParams?.toString?.() || "";
     return query ? `${pathname}?${query}` : pathname;
@@ -88,7 +89,7 @@ export default function NextCardItem({ card, priorityImage = false }) {
     });
   }, [detailId, detailPath, persistCatalogContext, router]);
 
-  const handleQuickAddClick = useCallback((event) => {
+  const handleQuickAddClick = useCallback((/** @type {*} */ event) => {
     event.stopPropagation();
     handleAddToCart(1);
   }, [handleAddToCart]);

@@ -323,7 +323,7 @@ export default function OrderPayment() {
 
     void (async () => {
       try {
-        const mp = await createMercadoPagoBrowserClient(ENV.MP_PUBLIC_KEY);
+        const mp = await createMercadoPagoBrowserClient(/** @type {string} */ (ENV.MP_PUBLIC_KEY));
         if (cancelled) {
           return;
         }

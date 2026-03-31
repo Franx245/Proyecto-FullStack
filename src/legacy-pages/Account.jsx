@@ -77,6 +77,7 @@ export default function Account() {
   });
 
   const addressMutation = useMutation({
+    /** @param {{ addressId: string | null, payload: * }} args */
     mutationFn: ({ addressId, payload }) => (addressId ? updateMyAddress(addressId, payload) : createMyAddress(payload)),
     onSuccess: async () => {
       setAddressForm(emptyAddress());
@@ -132,7 +133,7 @@ export default function Account() {
         <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex items-center gap-4">
             <UserAvatar
-              src={user?.avatar_url}
+              src={user?.avatar_url || undefined}
               alt={user?.full_name || user?.username || "Usuario"}
               name={user?.full_name || user?.username || "Usuario"}
               className="h-16 w-16 rounded-3xl object-cover"
@@ -218,7 +219,7 @@ export default function Account() {
         <div className="rounded-[32px] border border-border bg-card/75 p-6">
           <h2 className="text-xl font-black">Direcciones guardadas</h2>
           <div className="mt-5 space-y-3">
-            {addresses.length === 0 ? <p className="text-sm text-muted-foreground">No guardaste direcciones todavía.</p> : addresses.map((address) => (
+            {addresses.length === 0 ? <p className="text-sm text-muted-foreground">No guardaste direcciones todavía.</p> : addresses.map((/** @type {*} */ address) => (
               <div key={address.id} className="rounded-3xl border border-border bg-background/50 p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>

@@ -5,11 +5,14 @@ export const SHIPPING_OPTIONS = {
   pickup: { cost: 0, label: "Retiro por showroom", eta: "Coordinar" },
 };
 
+/** @param {string} zone */
 export function getShippingOption(zone) {
-  return SHIPPING_OPTIONS[zone] || SHIPPING_OPTIONS.pickup;
+  return SHIPPING_OPTIONS[/** @type {keyof typeof SHIPPING_OPTIONS} */ (zone)] || SHIPPING_OPTIONS.pickup;
 }
 
+/** @param {string} status */
 export function orderStatusLabel(status) {
+  /** @type {Record<string, string>} */
   const labels = {
     pending_payment: "Pendiente de pago",
     failed: "Pago rechazado",
@@ -23,6 +26,7 @@ export function orderStatusLabel(status) {
   return labels[status] || status;
 }
 
+/** @param {string} status */
 export function getOrderProgress(status) {
   const steps = ["pending_payment", "paid", "shipped", "completed"];
   const currentIndex = steps.indexOf(status);

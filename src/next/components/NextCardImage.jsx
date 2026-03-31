@@ -6,6 +6,7 @@ import { Sparkles } from "lucide-react";
 
 import { buildRemoteCardImageUrl, extractCardIdFromImageUrl, getCardImage } from "@/lib/cardImage";
 
+/** @param {{ id?: string|number|null, name?: string, priority?: boolean, className?: string, fallbackSrc?: string|null, sizes?: string, variant?: "thumb"|"detail", alt?: string, fill?: boolean, width?: number, height?: number }} props */
 function NextCardImageBase({
   id,
   name,

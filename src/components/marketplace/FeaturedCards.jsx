@@ -10,7 +10,7 @@ import CardSkeleton from "./CardSkeleton";
 
 /** @returns {FeaturedCard[] | undefined} */
 function getFeaturedBootstrap() {
-  const cards = typeof window !== "undefined" ? window.__DUELVAULT_FEATURED_BOOTSTRAP__ : undefined;
+  const cards = typeof window !== "undefined" ? /** @type {*} */ (window).__DUELVAULT_FEATURED_BOOTSTRAP__ : undefined;
   return Array.isArray(cards) && cards.length > 0 ? cards : undefined;
 }
 

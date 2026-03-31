@@ -12,9 +12,10 @@ const CATEGORY_LABELS = {
   trap: "Trampas",
 };
 
-export async function generateMetadata({ params }) {
+/** @param {{ params: { category: string } }} props */
+export async function generateMetadata(/** @type {{ params: { category: string } }} */ { params }) {
   const slug = params.category;
-  const label = CATEGORY_LABELS[slug?.toLowerCase()] || slug || "Singles";
+  const label = /** @type {Record<string, string>} */ (CATEGORY_LABELS)[slug?.toLowerCase()] || slug || "Singles";
   return {
     title: `${label} — Catálogo`,
     description: `Cartas Yu-Gi-Oh! de tipo ${label}. Encontrá singles con stock real y condición verificada.`,
@@ -22,7 +23,8 @@ export async function generateMetadata({ params }) {
   };
 }
 
-export default async function SinglesCategoryRoute({ params, searchParams }) {
+/** @param {{ params: { category: string }, searchParams: Record<string, string> }} props */
+export default async function SinglesCategoryRoute(/** @type {{ params: { category: string }, searchParams: Record<string, string> }} */ { params, searchParams }) {
   const catalogUrlState = parseCatalogSearchParams(searchParams);
   const initialData = await fetchCatalogCards({
     page: catalogUrlState.page,

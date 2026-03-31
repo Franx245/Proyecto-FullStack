@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import CardImage from "@/components/marketplace/CardImage";
 import { useCart } from "@/lib/cartStore";
 
+/** @param {*} item */
 function getCartItemDetailPath(item) {
   const detailId = item?.detail_id ?? item?.version_id;
   return detailId ? `/card/${detailId}` : null;
@@ -14,6 +15,7 @@ function getCartItemDetailPath(item) {
 
 const useSafeCart = () => useCart();
 
+/** @param {{ item: *, onOpenDetail: Function }} props */
 function DrawerItem({ item, onOpenDetail }) {
   const cart = useSafeCart();
 
@@ -104,7 +106,7 @@ export default function NextCartDrawer() {
   const cart = useSafeCart();
   const router = useRouter();
 
-  const handleOpenDetail = (item) => {
+  const handleOpenDetail = (/** @type {*} */ item) => {
     const detailPath = getCartItemDetailPath(item);
     if (!detailPath) {
       return;

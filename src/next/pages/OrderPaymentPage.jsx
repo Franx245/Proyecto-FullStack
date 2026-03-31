@@ -325,7 +325,7 @@ export default function OrderPaymentPage({ orderId }) {
 
     void (async () => {
       try {
-        const mp = await createMercadoPagoBrowserClient(ENV.MP_PUBLIC_KEY);
+        const mp = await createMercadoPagoBrowserClient(/** @type {string} */ (ENV.MP_PUBLIC_KEY));
         if (cancelled) {
           return;
         }
@@ -450,7 +450,7 @@ export default function OrderPaymentPage({ orderId }) {
                     </div>
                     <div>
                       <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Estado</p>
-                      <p className="mt-1 font-semibold text-foreground">{orderStatusLabel(order.status)}</p>
+                      <p className="mt-1 font-semibold text-foreground">{orderStatusLabel(/** @type {string} */ (order.status))}</p>
                     </div>
                     <div>
                       <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Total a cobrar</p>

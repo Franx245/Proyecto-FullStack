@@ -290,7 +290,7 @@ export async function fetchCatalogCards(options = {}) {
   }
 
   const cards = response.data
-    .filter((card) => matchesCategory(card, options.category))
+    .filter((/** @type {*} */ card) => matchesCategory(card, options.category))
     .map(normalizeCatalogCard);
 
   return {

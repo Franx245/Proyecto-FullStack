@@ -10,17 +10,22 @@ import { toast } from "sonner";
 import { fetchStorefrontConfig, submitContactRequest } from "@/api/store";
 import { useCart } from "@/lib/cartStore";
 
+/**
+ * @param {Array<{quantity: number, name: string, price: number}>} items
+ * @param {number} totalPrice
+ */
 function buildWhatsAppCartMessage(items, totalPrice) {
   if (!items.length) {
     return encodeURIComponent("Hola, quisiera consultar sobre sus cartas.");
   }
 
-  const lines = items.map((item) => `• ${item.quantity}x ${item.name} - $${(item.price * item.quantity).toFixed(2)}`);
+  const lines = items.map((/** @type {*} */ item) => `• ${item.quantity}x ${item.name} - $${(item.price * item.quantity).toFixed(2)}`);
   return encodeURIComponent(
     `DuelVault - Consulta de carrito\n\n${lines.join("\n")}\n\nTotal: $${totalPrice.toFixed(2)}\n\n¿Podés confirmar disponibilidad?`
   );
 }
 
+/** @param {string} value */
 function formatPhoneDisplay(value) {
   const digits = String(value || "").replace(/[^\d]/g, "");
 
@@ -105,6 +110,7 @@ export default function ContactPage() {
 
   const canSubmit = form.name && form.email && form.subject && form.message;
 
+  /** @param {import('react').FormEvent} event */
   async function handleSubmit(event) {
     event.preventDefault();
     setSubmitFeedback({ type: "", message: "" });
@@ -246,7 +252,7 @@ export default function ContactPage() {
                       <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-300">{label}</label>
                       <div className="relative">
                         <Icon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                        <input type={type} placeholder={placeholder} value={form[key]} onChange={(event) => setForm((prev) => ({ ...prev, [key]: event.target.value }))} className="h-11 w-full rounded-2xl border border-slate-700/80 bg-slate-950/45 pl-10 pr-4 text-sm text-slate-100 placeholder:text-slate-500 focus:border-amber-300/35 focus:outline-none focus:ring-4 focus:ring-amber-300/10" />
+                        <input type={type} placeholder={placeholder} value={form[/** @type {keyof typeof form} */ (key)]} onChange={(event) => setForm((prev) => ({ ...prev, [key]: event.target.value }))} className="h-11 w-full rounded-2xl border border-slate-700/80 bg-slate-950/45 pl-10 pr-4 text-sm text-slate-100 placeholder:text-slate-500 focus:border-amber-300/35 focus:outline-none focus:ring-4 focus:ring-amber-300/10" />
                       </div>
                     </div>
                   ))}

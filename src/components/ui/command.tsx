@@ -4,7 +4,7 @@ import { Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 
-interface CommandProps extends React.HTMLAttributes<HTMLDivElement> {
+interface CommandProps extends React.ComponentPropsWithoutRef<typeof CommandPrimitive> {
   className?: string;
 }
 
@@ -12,23 +12,23 @@ interface CommandDialogProps extends React.ComponentProps<typeof Dialog> {
   children: React.ReactNode;
 }
 
-interface CommandInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+interface CommandInputProps extends React.ComponentPropsWithoutRef<typeof CommandPrimitive.Input> {
   className?: string;
 }
 
-interface CommandListProps extends React.HTMLAttributes<HTMLDivElement> {
+interface CommandListProps extends React.ComponentPropsWithoutRef<typeof CommandPrimitive.List> {
   className?: string;
 }
 
-interface CommandGroupProps extends React.HTMLAttributes<HTMLDivElement> {
+interface CommandGroupProps extends React.ComponentPropsWithoutRef<typeof CommandPrimitive.Group> {
   className?: string;
 }
 
-interface CommandItemProps extends React.HTMLAttributes<HTMLDivElement> {
+interface CommandItemProps extends React.ComponentPropsWithoutRef<typeof CommandPrimitive.Item> {
   className?: string;
 }
 
-interface CommandSeparatorProps extends React.HTMLAttributes<HTMLDivElement> {
+interface CommandSeparatorProps extends React.ComponentPropsWithoutRef<typeof CommandPrimitive.Separator> {
   className?: string;
 }
 
@@ -55,6 +55,7 @@ Command.displayName = "Command";
 const CommandDialog = ({ children, ...props }: CommandDialogProps) => {
   return (
     <Dialog {...props}>
+      {/* @ts-expect-error DialogContent is typed via JS forwardRef */}
       <DialogContent className="p-0 overflow-hidden">
         <Command className="[&_[cmdk-item]]:px-3 [&_[cmdk-item]]:py-2">
           {children}

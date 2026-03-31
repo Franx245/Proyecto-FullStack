@@ -21,6 +21,7 @@ function inputClassName() {
   return "h-11 w-full rounded-2xl border border-border bg-secondary/90 px-4 text-sm outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/20";
 }
 
+/** @param {string} value */
 function normalizeMode(value) {
   return TABS.some((item) => item.key === value) ? value : "login";
 }
@@ -55,6 +56,7 @@ function normalizeAbsoluteUrl(value) {
   return /^https?:\/\//i.test(normalizedValue) ? normalizedValue : "";
 }
 
+/** @param {string} value */
 function isLocalAdminUrl(value) {
   try {
     const parsed = new URL(value);
@@ -64,6 +66,7 @@ function isLocalAdminUrl(value) {
   }
 }
 
+/** @param {string} value */
 async function canReachAdminUrl(value) {
   if (!isLocalAdminUrl(value)) {
     return true;
@@ -94,7 +97,7 @@ export default function AuthPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = useMemo(() => normalizeRedirectPath(searchParams.get("redirect")), [searchParams]);
-  const modeFromQuery = useMemo(() => normalizeMode(searchParams.get("mode")), [searchParams]);
+  const modeFromQuery = useMemo(() => normalizeMode(searchParams.get("mode") || ""), [searchParams]);
   const [tab, setTab] = useState(modeFromQuery);
   const [busy, setBusy] = useState(false);
   const [loginForm, setLoginForm] = useState({ identifier: "user@test.com", password: "user123" });
@@ -128,7 +131,7 @@ export default function AuthPage() {
     return "https://duelvault-admin.vercel.app";
   }
 
-  const switchTab = (nextTab) => {
+  const switchTab = (/** @type {string} */ nextTab) => {
     setTab(nextTab);
     const nextParams = new URLSearchParams(searchParams.toString());
     nextParams.set("mode", nextTab);
