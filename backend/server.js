@@ -28,7 +28,10 @@ import { createRateLimitMiddleware, getRequestIp, validateBody } from "./src/lib
 /* ── Realtime (no-ops in serverless) ── */
 import { publishEvent } from "./src/lib/events.js";
 import { publicSSEHandler, adminSSEHandler } from "./src/lib/sse.js";
-import { scheduleStockUpdate } from "./src/lib/scheduler.js";
+/* ── Cron job handlers ── */
+import { handleRecomputePrices } from "./src/lib/jobs/recompute-prices.js";
+import { handleComputeCardRankings } from "./src/lib/jobs/compute-card-rankings.js";
+import { handleWarmPublicCache } from "./src/lib/jobs/warm-public-cache.js";
 import { getRedisBackendName, probeRedisConnection } from "./src/lib/redis.js";
 import { invalidateOrderRelatedCache } from "./src/lib/cache-invalidation.js";
 import { recordApiMetric, recordCatalogSearchMetric } from "./src/lib/metrics.js";
@@ -285,6 +288,9 @@ app.use([
   "/api/admin/orders",
   "/api/admin/export/orders",
   "/api/internal/orders/expire-pending",
+  "/api/internal/recompute-prices",
+  "/api/internal/compute-rankings",
+  "/api/internal/warm-cache",
 ], async (req, res, next) => {
   try {
     await ensureOrderSchemaReady();
@@ -2329,7 +2335,7 @@ async function applyOrderStatusPostCommitEffect(effect) {
   });
 
   if (effect.releasesReservation) {
-    await scheduleStockUpdate(effect.items, effect.orderId, "status-change");
+    // scheduleStockUpdate removed — stock is atomic in DB, cache invalidation above
   }
 }
 
@@ -4692,7 +4698,7 @@ app.post("/api/checkout", requireAuth, checkoutRateLimit, async (req, res) => {
         total: result.order.total,
         itemCount: normalizedItems.length,
       });
-      await scheduleStockUpdate(normalizedItems, result.order.id, "checkout");
+      // scheduleStockUpdate removed — stock is atomic in DB, cache invalidation above
     } catch (postResponseError) {
       console.error("[checkout] post-response side-effects failed", postResponseError);
     }
@@ -5212,6 +5218,51 @@ app.get("/api/internal/orders/expire-pending", async (req, res) => {
     res.status(error?.statusCode || 500).json({
       error: error?.message || "Failed to expire pending orders",
       code: error?.code || "EXPIRE_PENDING_ORDERS_FAILED",
+      requestId: req.requestContext?.requestId || null,
+    });
+  }
+});
+
+app.get("/api/internal/recompute-prices", async (req, res) => {
+  try {
+    assertCronAuthorized(req);
+    const result = await handleRecomputePrices();
+    res.json(result);
+  } catch (error) {
+    if (res.headersSent) return;
+    res.status(error?.statusCode || 500).json({
+      error: error?.message || "Failed to recompute prices",
+      code: error?.code || "RECOMPUTE_PRICES_FAILED",
+      requestId: req.requestContext?.requestId || null,
+    });
+  }
+});
+
+app.get("/api/internal/compute-rankings", async (req, res) => {
+  try {
+    assertCronAuthorized(req);
+    const result = await handleComputeCardRankings();
+    res.json(result);
+  } catch (error) {
+    if (res.headersSent) return;
+    res.status(error?.statusCode || 500).json({
+      error: error?.message || "Failed to compute rankings",
+      code: error?.code || "COMPUTE_RANKINGS_FAILED",
+      requestId: req.requestContext?.requestId || null,
+    });
+  }
+});
+
+app.get("/api/internal/warm-cache", async (req, res) => {
+  try {
+    assertCronAuthorized(req);
+    const result = await handleWarmPublicCache();
+    res.json(result);
+  } catch (error) {
+    if (res.headersSent) return;
+    res.status(error?.statusCode || 500).json({
+      error: error?.message || "Failed to warm cache",
+      code: error?.code || "WARM_CACHE_FAILED",
       requestId: req.requestContext?.requestId || null,
     });
   }

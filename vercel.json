@@ -12,6 +12,18 @@
     {
       "path": "/api/internal/orders/expire-pending",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/internal/recompute-prices",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/internal/compute-rankings",
+      "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/internal/warm-cache",
+      "schedule": "*/30 * * * *"
     }
   ],
   "headers": [

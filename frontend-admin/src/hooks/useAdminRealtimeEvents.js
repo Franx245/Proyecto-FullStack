@@ -33,6 +33,12 @@ export function useAdminRealtimeEvents(session, onSessionChange) {
     }
 
     try {
+      const probe = await fetch(url, { method: "HEAD" }).catch(() => null);
+      if (probe && probe.status === 501) {
+        disconnect();
+        return;
+      }
+
       const es = new EventSource(url);
       eventSourceRef.current = es;
 
