@@ -32,6 +32,7 @@ import { publicSSEHandler, adminSSEHandler, getSSEClientCount } from "./src/lib/
 /* ── Redis TCP + BullMQ ── */
 import { isRedisTcpConfigured, pingRedisTcp, shutdownRedisTcp } from "./src/lib/redis-tcp.js";
 import { enqueueJob, shutdownQueue } from "./src/lib/jobs/queue.js";
+import { startWorker, shutdownWorker } from "./src/lib/jobs/worker.js";
 import { stopEventBus } from "./src/lib/events.js";
 /* ── Cron job handlers ── */
 import { handleRecomputePrices } from "./src/lib/jobs/recompute-prices.js";
@@ -2341,7 +2342,13 @@ async function applyOrderStatusPostCommitEffect(effect) {
   });
 
   if (effect.releasesReservation) {
-    // scheduleStockUpdate removed — stock is atomic in DB, cache invalidation above
+    for (const item of effect.items) {
+      publishEvent("stock-update", {
+        cardId: item.cardId,
+        reason: effect.nextStatus === "EXPIRED" ? "order_expired" : "order_cancelled",
+        orderId: effect.orderId,
+      });
+    }
   }
 }
 
@@ -6308,6 +6315,24 @@ app.put("/api/admin/cards/bulk", requireAdminAuth, requireAdminRole([UserRole.AD
 
     if (responsePayload.updatedCardIds.length) {
       invalidatePublicCatalogCaches();
+
+      /* ── Realtime: notify bulk stock/price changes ── */
+      if (parsed.data.stock !== undefined) {
+        for (const cardId of responsePayload.updatedCardIds) {
+          publishEvent("stock-update", {
+            cardId,
+            reason: "admin_bulk_update",
+            stock: parsed.data.stock,
+            isLowStock: parsed.data.stock <= 3,
+          });
+        }
+      }
+      if (parsed.data.price !== undefined) {
+        publishEvent("price-change", {
+          updatedCount: responsePayload.updatedCardIds.length,
+          reason: "admin_bulk_update",
+        });
+      }
     }
     try {
       await recordActivity(req.user.id, "ADMIN_CARDS_BULK_UPDATED", req, {
@@ -6418,6 +6443,24 @@ app.put("/api/admin/cards/:id", requireAdminAuth, requireAdminRole([UserRole.ADM
     });
 
     invalidatePublicCatalogCaches();
+
+    /* ── Realtime: notify stock/price changes ── */
+    if (parsed.data.stock !== undefined) {
+      publishEvent("stock-update", {
+        cardId: id,
+        reason: "admin_update",
+        stock: parsed.data.stock,
+        isLowStock: parsed.data.stock <= 3,
+      });
+    }
+    if (parsed.data.price !== undefined) {
+      publishEvent("price-change", {
+        cardId: id,
+        reason: "admin_update",
+        price: parsed.data.price,
+      });
+    }
+
     try {
       await recordActivity(req.user.id, "ADMIN_CARD_UPDATED", req, {
         mutationId: mutationMeta.mutationId,
@@ -7636,6 +7679,10 @@ if (isDirectExecution) {
         try {
           const tcpOk = await pingRedisTcp();
           console.log(`[infra] redis-tcp ready=${tcpOk}`);
+
+          if (tcpOk) {
+            startWorker();
+          }
         } catch { /* non-critical */ }
       } else {
         console.log("[infra] redis-tcp not configured — jobs will run inline");
@@ -7652,6 +7699,7 @@ if (isDirectExecution) {
     });
 
     await Promise.allSettled([
+      shutdownWorker(),
       shutdownQueue(),
       stopEventBus(),
       shutdownRedisTcp(),

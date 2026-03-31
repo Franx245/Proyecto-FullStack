@@ -65,6 +65,14 @@ export async function expirePendingOrdersJob(data = {}) {
         previousStatus: "PENDING_PAYMENT",
         newStatus: "EXPIRED",
       });
+
+      for (const item of order.items) {
+        publishEvent("stock-update", {
+          cardId: item.cardId,
+          reason: "order_expired",
+          orderId: order.id,
+        });
+      }
     } catch (err) {
       console.error(`[order-jobs] failed to expire order ${order.id}:`, err.message);
     }
@@ -87,6 +95,14 @@ export async function processOrderPostCheckout(data) {
     orderId,
     itemCount: items.length,
   });
+
+  for (const item of items) {
+    publishEvent("stock-update", {
+      cardId: item.cardId,
+      reason: "checkout",
+      orderId,
+    });
+  }
 
   return { ok: true, orderId };
 }
