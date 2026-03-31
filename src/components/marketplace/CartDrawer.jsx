@@ -2,6 +2,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Minus, Plus, Trash2, ShoppingCart } from "lucide-react";
 import { useCart } from "@/lib/cartStore";
 import { useNavigate } from "react-router-dom";
+import { formatPrice } from "@/utils/currency";
 import CardImage from "./CardImage";
 
 /**
@@ -86,7 +87,7 @@ function CartItem({ item, onOpenDetail }) {
         <p className="text-xs text-muted-foreground">{item.rarity}</p>
 
         <p className="text-sm font-bold text-primary mt-1">
-          ${(item.price * item.quantity).toFixed(2)}
+          {formatPrice(item.price * item.quantity)}
         </p>
       </div>
 
@@ -209,7 +210,7 @@ export default function CartDrawer() {
                 <div className="flex justify-between">
                   <span>Total</span>
                   <span className="font-bold text-primary">
-                    ${cart.totalPrice.toFixed(2)}
+                    {formatPrice(cart.totalPrice)}
                   </span>
                 </div>
 

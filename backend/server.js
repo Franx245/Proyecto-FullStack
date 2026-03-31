@@ -23,7 +23,6 @@ import {
   PUBLIC_CARD_LIST_CACHE_PREFIX,
   PUBLIC_CARD_LIST_CACHE_TTL_SECONDS,
 } from "./src/lib/cache.js";
-import { getUsdToArsRate } from "./src/lib/dollar.js";
 import { createMercadoPagoDirectPayment } from "./src/lib/mercadopagoPayments.js";
 import { createRateLimitMiddleware, getRequestIp, validateBody } from "./src/lib/requestGuards.js";
 /* ── Realtime ── */
@@ -2489,8 +2488,8 @@ async function prepareOrderForPreference(req, { orderId, userId }) {
     });
   }
 
-  const exchangeRate = await getUsdToArsRate();
-  const totalArs = formatCurrency(existingOrder.total * exchangeRate);
+  const exchangeRate = 1;
+  const totalArs = formatCurrency(existingOrder.total);
   const expiresAt = buildCheckoutExpirationDate();
 
   const preparedOrderResult = await prisma.$transaction(async (tx) => {
@@ -2598,8 +2597,8 @@ async function prepareOrderForDirectPayment(req, { orderId, userId }) {
     });
   }
 
-  const exchangeRate = existingOrder.exchange_rate || await getUsdToArsRate();
-  const totalArs = formatCurrency(existingOrder.total_ars ?? (existingOrder.total * exchangeRate));
+  const exchangeRate = existingOrder.exchange_rate || 1;
+  const totalArs = formatCurrency(existingOrder.total_ars ?? existingOrder.total);
   const expiresAt = existingOrder.expires_at || buildCheckoutExpirationDate(existingOrder.createdAt?.getTime?.() || Date.now());
 
   const preparedOrderResult = await prisma.$transaction(async (tx) => {
@@ -4510,19 +4509,34 @@ app.delete("/api/auth/addresses/:id", requireAuth, async (req, res) => {
 
 app.get("/api/auth/orders", requireAuth, async (req, res) => {
   try {
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
+    const skip = (page - 1) * limit;
+    const userId = Number(req.user.sub);
+
     await expirePendingOrdersBestEffort({
       source: "auth_orders_list",
       requestId: req.requestContext?.requestId || null,
     });
 
-    const orders = await prisma.order.findMany({
-      where: { userId: Number(req.user.sub) },
-      include: { items: true, user: true, address: true },
-      orderBy: { createdAt: "desc" },
-    });
+    const [orders, total] = await Promise.all([
+      prisma.order.findMany({
+        where: { userId },
+        include: { items: true, user: true, address: true },
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: limit,
+      }),
+      prisma.order.count({ where: { userId } }),
+    ]);
 
     const cardsById = await getOrderCardsMap(orders, { adminThumbnail: true });
-    res.json({ orders: orders.map((order) => toOrderResponse(order, cardsById)) });
+    res.json({
+      orders: orders.map((order) => toOrderResponse(order, cardsById)),
+      page,
+      totalPages: Math.ceil(total / limit),
+      total,
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Failed to load your orders" });
@@ -4654,6 +4668,8 @@ app.post("/api/checkout", requireAuth, checkoutRateLimit, async (req, res) => {
           shippingCost: delivery.shipping.cost,
           total,
           currency: "ARS",
+          exchange_rate: 1,
+          total_ars: total,
           status: OrderStatus.PENDING_PAYMENT,
           expires_at: expiresAt,
           payment_status: null,

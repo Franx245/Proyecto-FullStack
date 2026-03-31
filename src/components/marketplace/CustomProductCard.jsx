@@ -1,14 +1,6 @@
 import { Link } from "react-router-dom";
 import { cloudinaryFetchUrl } from "@/lib/cardImage";
-
-/** @param {number} value */
-function currency(value) {
-  return new Intl.NumberFormat("es-AR", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2,
-  }).format(value || 0);
-}
+import { formatPrice } from "@/utils/currency";
 
 /** @param {{ product: * }} props */
 export default function CustomProductCard({ product }) {
@@ -32,7 +24,7 @@ export default function CustomProductCard({ product }) {
         </div>
 
         <div className="flex items-center justify-between gap-3">
-          <span className="text-xl font-black text-primary">{currency(product.price)}</span>
+          <span className="text-xl font-black text-primary">{formatPrice(product.price)}</span>
           <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Custom</span>
         </div>
       </div>

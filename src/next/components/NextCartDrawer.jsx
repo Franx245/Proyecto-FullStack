@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 
 import CardImage from "@/components/marketplace/CardImage";
 import { useCart } from "@/lib/cartStore";
+import { formatPrice } from "@/utils/currency";
 
 /** @param {*} item */
 function getCartItemDetailPath(item) {
@@ -55,7 +56,7 @@ function DrawerItem({ item, onOpenDetail }) {
       <div className="min-w-0 flex-1">
         <h4 className="truncate text-sm font-medium">{item.name}</h4>
         <p className="text-xs text-muted-foreground">{item.rarity}</p>
-        <p className="mt-1 text-sm font-bold text-primary">${(item.price * item.quantity).toFixed(2)}</p>
+        <p className="mt-1 text-sm font-bold text-primary">{formatPrice(item.price * item.quantity)}</p>
       </div>
 
       <div className="flex flex-col items-end justify-between">
@@ -156,7 +157,7 @@ export default function NextCartDrawer() {
               <div className="space-y-3 border-t border-border p-4">
                 <div className="flex justify-between">
                   <span>Total</span>
-                  <span className="font-bold text-primary">${cart.totalPrice.toFixed(2)}</span>
+                  <span className="font-bold text-primary">{formatPrice(cart.totalPrice)}</span>
                 </div>
 
                 <button

@@ -13,6 +13,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { persistCatalogScroll, persistLastCatalogHref } from "@/lib/catalog-url-state";
 import { useCart } from "@/lib/cartStore";
 import { buildCardPath } from "@/lib/seo";
+import { formatPrice } from "@/utils/currency";
 
 /** @param {{ card: *, priorityImage?: boolean, sizes?: string }} props */
 export default function NextCardItem({ card, priorityImage = false, sizes }) {
@@ -60,7 +61,7 @@ export default function NextCardItem({ card, priorityImage = false, sizes }) {
     addItem(card, qty);
 
     toast.success(`${card?.name ?? "Carta"} agregada`, {
-      description: `${qty}x · $${card?.price?.toFixed?.(2) ?? "0.00"}`,
+      description: `${qty}x · ${formatPrice(card?.price)}`,
     });
   }, [addItem, card]);
 
@@ -168,7 +169,7 @@ export default function NextCardItem({ card, priorityImage = false, sizes }) {
               Precio
             </span>
             <span className="block text-lg font-bold leading-none text-emerald-300 sm:mt-1 sm:text-xl xl:text-[1.34rem]" data-critical="catalog-price">
-              ${card?.price?.toFixed?.(2) ?? "0.00"}
+              {formatPrice(card?.price)}
             </span>
           </div>
         </div>

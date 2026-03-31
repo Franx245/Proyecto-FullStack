@@ -4,6 +4,7 @@ import { useCart } from "@/lib/cartStore";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
+import { formatPrice } from "@/utils/currency";
 import CardImage from "./CardImage";
 import QuantitySelector from "./QuantitySelector";
 
@@ -35,7 +36,7 @@ export default function CardItem({ card, priorityImage = false }) {
     addItem(card, qty);
 
     toast.success(`${card?.name ?? "Carta"} agregada`, {
-      description: `${qty}x · $${card?.price?.toFixed?.(2) ?? "0.00"}`,
+      description: `${qty}x · ${formatPrice(card?.price)}`,
     });
   }, [addItem, card]);
 
@@ -154,7 +155,7 @@ export default function CardItem({ card, priorityImage = false }) {
               Precio
             </span>
             <span className="block text-lg font-bold leading-none text-emerald-300 sm:mt-1 sm:text-xl xl:text-[1.34rem]" data-critical="catalog-price">
-              ${card?.price?.toFixed?.(2) ?? "0.00"}
+              {formatPrice(card?.price)}
             </span>
           </div>
         </div>

@@ -153,7 +153,7 @@ export default function OrderPaymentPage({ orderId }) {
 
   const ordersQuery = useQuery({
     queryKey: ["my-orders"],
-    queryFn: fetchMyOrders,
+    queryFn: () => fetchMyOrders({ page: 1, limit: 100 }),
     enabled: !isBootstrapping && isAuthenticated,
   });
 
@@ -367,8 +367,21 @@ export default function OrderPaymentPage({ orderId }) {
       }
     })();
 
+    // Safety timeout: if the Brick never fires onReady/onError after 15s, show error
+    const sdkTimeout = setTimeout(() => {
+      if (!cancelled) {
+        setSdkReady((prev) => {
+          if (!prev) {
+            setSdkError("El formulario de pago tardó demasiado en cargar. Recargá la página para reintentar.");
+          }
+          return prev;
+        });
+      }
+    }, 15_000);
+
     return () => {
       cancelled = true;
+      clearTimeout(sdkTimeout);
       setSdkReady(false);
       brickControllerRef.current = null;
       try {

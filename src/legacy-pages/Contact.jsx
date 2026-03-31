@@ -6,6 +6,7 @@ import { MessageCircle, Send, User, Mail, Tag, AlignLeft, CheckCircle, Phone, Qr
 import QRCode from 'qrcode';
 import { toast } from 'sonner';
 import { fetchStorefrontConfig, submitContactRequest } from '@/api/store';
+import { formatPrice } from '@/utils/currency';
 
 /**
  * @param {{ quantity: number, name: string, price: number }[]} items
@@ -13,9 +14,9 @@ import { fetchStorefrontConfig, submitContactRequest } from '@/api/store';
  */
 function buildWhatsAppCartMessage(items, totalPrice) {
   if (!items.length) return encodeURIComponent('¡Hola! Quisiera consultar sobre sus cartas.');
-  const lines = items.map((i) => `• ${i.quantity}x ${i.name} — $${(i.price * i.quantity).toFixed(2)}`);
+  const lines = items.map((i) => `• ${i.quantity}x ${i.name} — ${formatPrice(i.price * i.quantity)}`);
   return encodeURIComponent(
-    `🎴 *DuelVault – Consulta de carrito*\n\n${lines.join('\n')}\n\n*Total: $${totalPrice.toFixed(2)}*\n\n¿Podés confirmar disponibilidad?`
+    `🎴 *DuelVault – Consulta de carrito*\n\n${lines.join('\n')}\n\n*Total: ${formatPrice(totalPrice)}*\n\n¿Podés confirmar disponibilidad?`
   );
 }
 
@@ -230,7 +231,7 @@ export default function Contact() {
                 <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-amber-300/80">Carrito actual</p>
                   <p className="mt-2 text-sm text-slate-200">
-                    {items.length} ítem{items.length !== 1 ? 's' : ''} · ${totalPrice.toFixed(2)}
+                    {items.length} ítem{items.length !== 1 ? 's' : ''} · {formatPrice(totalPrice)}
                   </p>
                 </div>
               </div>

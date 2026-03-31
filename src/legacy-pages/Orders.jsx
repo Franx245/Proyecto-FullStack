@@ -18,6 +18,7 @@ import { getOrderProgress, getShippingOption, orderStatusLabel } from "@/lib/shi
 import { getTrackedOrderIds } from "@/lib/orderTracking";
 import { toast } from "sonner";
 import CardImage from "@/components/marketplace/CardImage";
+import { formatPrice } from "@/utils/currency";
 
 const NON_RETRYABLE_PAYMENT_STATUSES = new Set(["approved", "pending", "in_process", "authorized", "in_mediation"]);
 const PENDING_PAYMENT_FEEDBACK_KEY = "duelvault_pending_payment_feedback";
@@ -138,7 +139,7 @@ function buildWhatsAppMessage(order) {
 
   return encodeURIComponent(
     `¡Hola! Quisiera consultar sobre mi pedido #${order.id}:\n\n` +
-      `Total: $${order.total.toFixed(2)}\n\n` +
+      `Total: ${formatPrice(order.total)}\n\n` +
       `Artículos:\n${lines.join("\n")}`
   );
 }
@@ -290,9 +291,9 @@ export default function Orders() {
     const lines = order.items.map(
       /** @param {{ quantity: number, price: number, card: OrderItem }} i */
       (i) =>
-        `${i.quantity}x ${i.card?.name} — $${(
+        `${i.quantity}x ${i.card?.name} — ${formatPrice(
           i.price * i.quantity
-        ).toFixed(2)}`
+        )}`
     );
 
     const text =
@@ -301,7 +302,7 @@ export default function Orders() {
       `${lines.join("\n")}\n\n` +
       `Estado: ${orderStatusLabel(order.status)}\n` +
       `Envío: ${order.shipping_label || getShippingOption(order.shipping_zone || "").label}\n` +
-      `Total: $${order.total.toFixed(2)}`;
+      `Total: ${formatPrice(order.total)}`;
 
     navigator.clipboard.writeText(text);
     toast.success("Pedido copiado al portapapeles");
@@ -404,7 +405,7 @@ export default function Orders() {
                   </span>
 
                   <span className="text-lg font-black text-primary">
-                    ${order.total.toFixed(2)}
+                    {formatPrice(order.total)}
                   </span>
                 </div>
               </div>
@@ -415,7 +416,7 @@ export default function Orders() {
                     <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Seguimiento</p>
                     <p className="mt-1 text-sm font-semibold">{order.shipping_label || getShippingOption(order.shipping_zone).label}</p>
                     {order.tracking_code ? <p className="mt-2 text-sm text-primary">Tracking: {order.tracking_code}</p> : null}
-                    {order.total_ars ? <p className="mt-2 text-sm text-slate-400">Cobro Mercado Pago: ${order.total_ars.toFixed(2)} {order.currency || "ARS"}</p> : null}
+                    {order.total_ars ? <p className="mt-2 text-sm text-slate-400">Cobro Mercado Pago: {formatPrice(order.total_ars)} {order.currency || "ARS"}</p> : null}
                     {isPaymentPendingConfirmation ? (
                       <p className="mt-2 inline-flex items-center gap-2 text-sm text-amber-300">
                         <Clock3 className="h-4 w-4" />
@@ -495,7 +496,7 @@ export default function Orders() {
                     {/* Price */}
                     <div className="text-right shrink-0">
                       <p className="text-sm font-bold text-primary">
-                        ${item.subtotal.toFixed(2)}
+                        {formatPrice(item.subtotal)}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         x{item.quantity}
@@ -513,8 +514,8 @@ export default function Orders() {
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Montos</p>
-                  <p className="mt-1 text-muted-foreground">Subtotal: ${order.subtotal.toFixed(2)}</p>
-                  <p className="text-muted-foreground">Envío: ${order.shipping_cost.toFixed(2)}</p>
+                  <p className="mt-1 text-muted-foreground">Subtotal: {formatPrice(order.subtotal)}</p>
+                  <p className="text-muted-foreground">Envío: {formatPrice(order.shipping_cost)}</p>
                 </div>
               </div>
 

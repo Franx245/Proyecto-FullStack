@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { fetchMyOrders, fetchOrdersByIds, fetchStorefrontConfig } from "@/api/store";
 import CardImage from "@/components/marketplace/CardImage";
 import { useAuth } from "@/lib/auth";
+import { formatPrice } from "@/utils/currency";
 import { getTrackedOrderIds } from "@/lib/orderTracking";
 import { getOrderProgress, getShippingOption, orderStatusLabel } from "@/lib/shipping";
 
@@ -65,7 +66,7 @@ function buildWhatsAppMessage(order) {
 
   return encodeURIComponent(
     `Hola, quisiera consultar sobre mi pedido #${order.id}:\n\n` +
-      `Total: $${order.total.toFixed(2)}\n\n` +
+      `Total: ${formatPrice(order.total)}\n\n` +
       `Artículos:\n${lines.join("\n")}`
   );
 }
@@ -108,6 +109,7 @@ export default function OrdersPage() {
   const router = useRouter();
   const [payingOrderId, setPayingOrderId] = useState(null);
   const [pendingPaymentFeedback, setPendingPaymentFeedback] = useState(() => readPendingPaymentFeedback());
+  const [page, setPage] = useState(1);
   const trackedOrderIds = useMemo(() => (isAuthenticated ? getTrackedOrderIds() : []), [isAuthenticated]);
   const storefrontConfigQuery = useQuery({
     queryKey: ["storefront-config"],
@@ -122,12 +124,15 @@ export default function OrdersPage() {
     enabled: trackedOrderIds.length > 0,
   });
   const myOrdersQuery = useQuery({
-    queryKey: ["my-orders"],
-    queryFn: fetchMyOrders,
+    queryKey: ["my-orders", page],
+    queryFn: () => fetchMyOrders({ page, limit: 10 }),
     staleTime: 1000 * 30,
     refetchInterval: pendingPaymentFeedback ? 4000 : false,
     enabled: !isBootstrapping && isAuthenticated,
+    placeholderData: (prev) => prev,
   });
+
+  const totalPages = myOrdersQuery.data?.totalPages ?? 1;
 
   const orders = useMemo(() => {
     const merged = new Map();
@@ -211,7 +216,7 @@ export default function OrdersPage() {
 
   /** @param {*} order */
   function handleCopy(order) {
-    const lines = order.items.map((/** @type {*} */ item) => `${item.quantity}x ${item.card?.name} - $${(item.price * item.quantity).toFixed(2)}`);
+    const lines = order.items.map((/** @type {*} */ item) => `${item.quantity}x ${item.card?.name} - ${formatPrice(item.price * item.quantity)}`);
 
     const text =
       `Pedido #${order.id}\n` +
@@ -219,7 +224,7 @@ export default function OrdersPage() {
       `${lines.join("\n")}\n\n` +
       `Estado: ${orderStatusLabel(order.status)}\n` +
       `Envío: ${order.shipping_label || getShippingOption(order.shipping_zone).label}\n` +
-      `Total: $${order.total.toFixed(2)}`;
+      `Total: ${formatPrice(order.total)}`;
 
     navigator.clipboard.writeText(text);
     toast.success("Pedido copiado al portapapeles");
@@ -293,7 +298,7 @@ export default function OrdersPage() {
                         <CheckCircle className="h-3 w-3" />
                         {orderStatusLabel(order.status)}
                       </span>
-                      <span className="text-lg font-black text-primary">${order.total.toFixed(2)}</span>
+                      <span className="text-lg font-black text-primary">{formatPrice(order.total)}</span>
                     </div>
                   </div>
 
@@ -303,7 +308,7 @@ export default function OrdersPage() {
                         <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Seguimiento</p>
                         <p className="mt-1 text-sm font-semibold">{order.shipping_label || getShippingOption(order.shipping_zone).label}</p>
                         {order.tracking_code ? <p className="mt-2 text-sm text-primary">Tracking: {order.tracking_code}</p> : null}
-                        {order.total_ars ? <p className="mt-2 text-sm text-slate-400">Cobro Mercado Pago: ${order.total_ars.toFixed(2)} {order.currency || "ARS"}</p> : null}
+                        {order.total_ars ? <p className="mt-2 text-sm text-slate-400">Cobro Mercado Pago: {formatPrice(order.total_ars)} {order.currency || "ARS"}</p> : null}
                         {isPaymentPendingConfirmation ? (
                           <p className="mt-2 inline-flex items-center gap-2 text-sm text-amber-300">
                             <Clock3 className="h-4 w-4" />
@@ -367,7 +372,7 @@ export default function OrdersPage() {
                         </div>
 
                         <div className="shrink-0 text-right">
-                          <p className="text-sm font-bold text-primary">${item.subtotal.toFixed(2)}</p>
+                          <p className="text-sm font-bold text-primary">{formatPrice(item.subtotal)}</p>
                           <p className="text-xs text-muted-foreground">x{item.quantity}</p>
                         </div>
                       </div>
@@ -382,8 +387,8 @@ export default function OrdersPage() {
                     </div>
                     <div>
                       <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Montos</p>
-                      <p className="mt-1 text-muted-foreground">Subtotal: ${order.subtotal.toFixed(2)}</p>
-                      <p className="text-muted-foreground">Envío: ${order.shipping_cost.toFixed(2)}</p>
+                      <p className="mt-1 text-muted-foreground">Subtotal: {formatPrice(order.subtotal)}</p>
+                      <p className="text-muted-foreground">Envío: {formatPrice(order.shipping_cost)}</p>
                     </div>
                   </div>
 
@@ -408,6 +413,28 @@ export default function OrdersPage() {
                 </motion.div>
               );
             })}
+
+            {totalPages > 1 && (
+              <div className="mt-6 flex items-center justify-center gap-3">
+                <button
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="inline-flex h-9 items-center justify-center rounded-xl border border-border px-4 text-sm font-semibold transition hover:bg-secondary disabled:pointer-events-none disabled:opacity-40"
+                >
+                  Anterior
+                </button>
+                <span className="text-sm text-muted-foreground">
+                  Página {page} de {totalPages}
+                </span>
+                <button
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  className="inline-flex h-9 items-center justify-center rounded-xl border border-border px-4 text-sm font-semibold transition hover:bg-secondary disabled:pointer-events-none disabled:opacity-40"
+                >
+                  Siguiente
+                </button>
+              </div>
+            )}
           </div>
         )}
       </motion.div>

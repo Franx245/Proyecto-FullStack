@@ -24,6 +24,7 @@ import { useAuth } from "@/lib/auth";
 import { SHIPPING_OPTIONS, getShippingOption } from "@/lib/shipping";
 import { refreshCards } from "@/lib/query-client";
 import CardImage from "@/components/marketplace/CardImage";
+import { formatPrice } from "@/utils/currency";
 
 /**
  * @typedef {{
@@ -132,10 +133,10 @@ function CartRow({ item, onOpenDetail }) {
         </p>
 
         <p className="text-base font-bold text-primary mt-2">
-          ${(item.price * item.quantity).toFixed(2)}
+          {formatPrice(item.price * item.quantity)}
         </p>
         <p className="text-[11px] text-muted-foreground">
-          ${item.price.toFixed(2)} c/u
+          {formatPrice(item.price)} c/u
         </p>
       </div>
 
@@ -505,7 +506,7 @@ export default function CartPage() {
                       <div className="rounded-2xl border border-border bg-secondary/60 px-4 py-3 text-sm">
                         <p className="font-semibold">Costo estimado</p>
                         <p className="mt-1 text-muted-foreground">{shippingOption.label}</p>
-                        <p className="mt-2 text-lg font-black text-primary">${shippingOption.cost.toFixed(2)}</p>
+                        <p className="mt-2 text-lg font-black text-primary">{formatPrice(shippingOption.cost)}</p>
                       </div>
                     </div>
 
@@ -655,7 +656,7 @@ export default function CartPage() {
                 {items.map((item) => (
                   <div key={item.version_id} className="flex justify-between text-muted-foreground">
                     <span>{item.name} x{item.quantity}</span>
-                    <span>${(item.price * item.quantity).toFixed(2)}</span>
+                    <span>{formatPrice(item.price * item.quantity)}</span>
                   </div>
                 ))}
               </div>
@@ -663,15 +664,15 @@ export default function CartPage() {
               <div className="border-t pt-3 text-sm space-y-1">
                 <div className="flex justify-between">
                   <span>Subtotal</span>
-                  <span>${totalPrice.toFixed(2)}</span>
+                  <span>{formatPrice(totalPrice)}</span>
                 </div>
                 <div className="flex justify-between text-yellow-400">
                   <span>Envío</span>
-                  <span>${shippingOption.cost.toFixed(2)}</span>
+                  <span>{formatPrice(shippingOption.cost)}</span>
                 </div>
                 <div className="flex justify-between font-bold text-base">
                   <span>Total</span>
-                  <span className="text-primary">${totalWithShipping.toFixed(2)}</span>
+                  <span className="text-primary">{formatPrice(totalWithShipping)}</span>
                 </div>
               </div>
 

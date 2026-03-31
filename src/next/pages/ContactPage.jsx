@@ -9,6 +9,7 @@ import { toast } from "sonner";
 
 import { fetchStorefrontConfig, submitContactRequest } from "@/api/store";
 import { useCart } from "@/lib/cartStore";
+import { formatPrice } from "@/utils/currency";
 
 /**
  * @param {Array<{quantity: number, name: string, price: number}>} items
@@ -19,9 +20,9 @@ function buildWhatsAppCartMessage(items, totalPrice) {
     return encodeURIComponent("Hola, quisiera consultar sobre sus cartas.");
   }
 
-  const lines = items.map((/** @type {*} */ item) => `• ${item.quantity}x ${item.name} - $${(item.price * item.quantity).toFixed(2)}`);
+  const lines = items.map((/** @type {*} */ item) => `• ${item.quantity}x ${item.name} - ${formatPrice(item.price * item.quantity)}`);
   return encodeURIComponent(
-    `DuelVault - Consulta de carrito\n\n${lines.join("\n")}\n\nTotal: $${totalPrice.toFixed(2)}\n\n¿Podés confirmar disponibilidad?`
+    `DuelVault - Consulta de carrito\n\n${lines.join("\n")}\n\nTotal: ${formatPrice(totalPrice)}\n\n¿Podés confirmar disponibilidad?`
   );
 }
 
@@ -211,7 +212,7 @@ export default function ContactPage() {
                   </div>
                   <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-amber-300/80">Carrito actual</p>
-                    <p className="mt-2 text-sm text-slate-200">{items.length} ítem{items.length !== 1 ? "s" : ""} · ${totalPrice.toFixed(2)}</p>
+                    <p className="mt-2 text-sm text-slate-200">{items.length} ítem{items.length !== 1 ? "s" : ""} · {formatPrice(totalPrice)}</p>
                   </div>
                 </div>
               </div>

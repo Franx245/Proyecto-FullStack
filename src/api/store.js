@@ -668,8 +668,8 @@ export async function deleteMyAddress(addressId) {
   });
 }
 
-export async function fetchMyOrders() {
-  return authRequest("/api/auth/orders");
+export async function fetchMyOrders({ page = 1, limit = 10 } = {}) {
+  return authRequest(`/api/auth/orders?page=${page}&limit=${limit}`);
 }
 
 export async function fetchMyActivity() {

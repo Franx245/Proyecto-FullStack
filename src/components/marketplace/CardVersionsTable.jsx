@@ -4,6 +4,7 @@ import { ShoppingCart, ShieldCheck } from "lucide-react";
 import { useCart } from "@/lib/cartStore";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "sonner";
+import { formatPrice } from "@/utils/currency";
 
 import RarityBadge from "./RarityBadge";
 import QuantitySelector from "./QuantitySelector";
@@ -218,7 +219,7 @@ export default function CardVersionsTable({ versions = [], isLoading, onOpenDeta
                 </div>
                 <div className="mt-3 flex items-center justify-between gap-3">
                   <span className="text-lg font-bold text-primary">
-                    ${version.price?.toFixed(2) ?? "—"}
+                    {formatPrice(version.price)}
                   </span>
                   <button
                     type="button"
@@ -254,7 +255,7 @@ export default function CardVersionsTable({ versions = [], isLoading, onOpenDeta
               {/* Price */}
               <div className="hidden md:block">
                 <span className="text-lg font-bold text-primary">
-                  ${version.price?.toFixed(2) ?? "—"}
+                  {formatPrice(version.price)}
                 </span>
               </div>
 
