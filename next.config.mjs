@@ -2,7 +2,6 @@ const nextConfig = {
   allowedDevOrigins: ["127.0.0.1", "localhost", "*.localhost"],
   distDir: process.env.NEXT_DIST_DIR || ".next",
   experimental: {
-    optimizeCss: true,
     optimizePackageImports: ["lucide-react"],
   },
   images: {

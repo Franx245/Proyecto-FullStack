@@ -60,11 +60,9 @@ function inlineMainStylesheet() {
         (file) => file.type === "asset" && file.fileName === "index.html"
       );
 
-      const stylesheetAssets = Object.values(bundle).filter(
-        (file) => file.type === "asset" && /\.css$/.test(file.fileName)
+      const stylesheetAsset = Object.values(bundle).find(
+        (file) => file.type === "asset" && /^assets\/index-.*\.css$/.test(file.fileName)
       );
-
-      const stylesheetAsset = stylesheetAssets[0];
 
       if (!htmlAsset || !stylesheetAsset) {
         return;
@@ -123,7 +121,6 @@ export default defineConfig({
   },
 
   build: {
-    cssCodeSplit: false,
     chunkSizeWarningLimit: 1000,
     modulePreload: {
       resolveDependencies(_, dependencies) {

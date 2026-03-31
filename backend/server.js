@@ -6316,22 +6316,25 @@ app.put("/api/admin/cards/bulk", requireAdminAuth, requireAdminRole([UserRole.AD
     if (responsePayload.updatedCardIds.length) {
       invalidatePublicCatalogCaches();
 
-      /* ── Realtime: notify bulk stock/price changes ── */
+      /* ── Realtime: notify bulk stock/price changes with full card snapshots ── */
+      const cardsMap = new Map(responsePayload.updatedCards.map((c) => [c.id, c]));
       if (parsed.data.stock !== undefined) {
         for (const cardId of responsePayload.updatedCardIds) {
           publishEvent("stock-update", {
             cardId,
             reason: "admin_bulk_update",
-            stock: parsed.data.stock,
-            isLowStock: parsed.data.stock <= 3,
+            card: cardsMap.get(cardId) || null,
           });
         }
       }
       if (parsed.data.price !== undefined) {
-        publishEvent("price-change", {
-          updatedCount: responsePayload.updatedCardIds.length,
-          reason: "admin_bulk_update",
-        });
+        for (const cardId of responsePayload.updatedCardIds) {
+          publishEvent("price-change", {
+            cardId,
+            reason: "admin_bulk_update",
+            card: cardsMap.get(cardId) || null,
+          });
+        }
       }
     }
     try {
@@ -6444,20 +6447,20 @@ app.put("/api/admin/cards/:id", requireAdminAuth, requireAdminRole([UserRole.ADM
 
     invalidatePublicCatalogCaches();
 
-    /* ── Realtime: notify stock/price changes ── */
+    /* ── Realtime: notify stock/price changes with full card snapshot ── */
+    const updatedCard = responsePayload.card;
     if (parsed.data.stock !== undefined) {
       publishEvent("stock-update", {
         cardId: id,
         reason: "admin_update",
-        stock: parsed.data.stock,
-        isLowStock: parsed.data.stock <= 3,
+        card: updatedCard,
       });
     }
     if (parsed.data.price !== undefined) {
       publishEvent("price-change", {
         cardId: id,
         reason: "admin_update",
-        price: parsed.data.price,
+        card: updatedCard,
       });
     }
 

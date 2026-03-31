@@ -2,9 +2,30 @@ import { useEffect, useRef, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { buildAdminEventStreamUrl, getStoredSession, refreshAdminSession } from "../lib/api";
 
+/* ── Helpers ── */
+
 /**
- * Admin realtime hook — listens for SSE events and
- * auto-invalidates React Query caches for the admin panel.
+ * Surgically patch a card inside any admin paginated query.
+ * Data shape: { cards: Card[], total, page, ... }
+ */
+function patchAdminCardsPage(old, cardId, cardSnapshot) {
+  if (!old?.cards?.length) return old;
+
+  let changed = false;
+  const nextCards = old.cards.map((c) => {
+    if (Number(c.id) !== Number(cardId)) return c;
+    if (cardSnapshot.updated_at && c.updated_at && new Date(cardSnapshot.updated_at) < new Date(c.updated_at)) return c;
+    changed = true;
+    return { ...c, ...cardSnapshot };
+  });
+
+  return changed ? { ...old, cards: nextCards } : old;
+}
+
+/**
+ * Admin realtime hook — listens for SSE events and performs
+ * surgical React Query cache updates. Falls back to invalidation
+ * when events don't carry full card snapshots.
  */
 export function useAdminRealtimeEvents(session, onSessionChange) {
   const queryClient = useQueryClient();
@@ -54,21 +75,68 @@ export function useAdminRealtimeEvents(session, onSessionChange) {
 
       es.addEventListener("stock-update", (e) => {
         const { data } = JSON.parse(e.data);
-        queryClient.invalidateQueries({ queryKey: ["cards"] });
-        queryClient.invalidateQueries({ queryKey: ["inventory"] });
-        if (data?.isLowStock) {
+        const cardId = data?.cardId;
+        const card = data?.card;
+
+        if (card && cardId) {
+          // Surgical: patch all admin card list queries
+          queryClient.setQueriesData({ queryKey: ["cards"] }, (old) =>
+            patchAdminCardsPage(old, cardId, card),
+          );
+          queryClient.setQueriesData({ queryKey: ["home-cards"] }, (old) =>
+            patchAdminCardsPage(old, cardId, card),
+          );
+          queryClient.setQueriesData({ queryKey: ["inventory-cards"] }, (old) =>
+            patchAdminCardsPage(old, cardId, card),
+          );
+          queryClient.setQueriesData({ queryKey: ["admin-card-search"] }, (old) =>
+            patchAdminCardsPage(old, cardId, card),
+          );
+
+          if (card.is_low_stock || card.is_out_of_stock) {
+            queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+          }
+        } else {
+          // Fallback: checkout/expiry — no snapshot
+          queryClient.invalidateQueries({ queryKey: ["cards"] });
+          queryClient.invalidateQueries({ queryKey: ["home-cards"] });
+          queryClient.invalidateQueries({ queryKey: ["inventory-cards"] });
+          queryClient.invalidateQueries({ queryKey: ["admin-card-search"] });
           queryClient.invalidateQueries({ queryKey: ["dashboard"] });
         }
       });
 
-      es.addEventListener("price-change", () => {
-        queryClient.invalidateQueries({ queryKey: ["cards"] });
-        queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      es.addEventListener("price-change", (e) => {
+        const { data } = JSON.parse(e.data);
+        const cardId = data?.cardId;
+        const card = data?.card;
+
+        if (card && cardId) {
+          queryClient.setQueriesData({ queryKey: ["cards"] }, (old) =>
+            patchAdminCardsPage(old, cardId, card),
+          );
+          queryClient.setQueriesData({ queryKey: ["home-cards"] }, (old) =>
+            patchAdminCardsPage(old, cardId, card),
+          );
+          queryClient.setQueriesData({ queryKey: ["inventory-cards"] }, (old) =>
+            patchAdminCardsPage(old, cardId, card),
+          );
+          queryClient.setQueriesData({ queryKey: ["admin-card-search"] }, (old) =>
+            patchAdminCardsPage(old, cardId, card),
+          );
+        } else {
+          queryClient.invalidateQueries({ queryKey: ["cards"] });
+          queryClient.invalidateQueries({ queryKey: ["home-cards"] });
+          queryClient.invalidateQueries({ queryKey: ["inventory-cards"] });
+          queryClient.invalidateQueries({ queryKey: ["admin-card-search"] });
+        }
       });
 
       es.addEventListener("catalog-synced", () => {
         queryClient.invalidateQueries({ queryKey: ["cards"] });
-        queryClient.invalidateQueries({ queryKey: ["inventory"] });
+        queryClient.invalidateQueries({ queryKey: ["home-cards"] });
+        queryClient.invalidateQueries({ queryKey: ["inventory-cards"] });
+        queryClient.invalidateQueries({ queryKey: ["admin-card-search"] });
         queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       });
 

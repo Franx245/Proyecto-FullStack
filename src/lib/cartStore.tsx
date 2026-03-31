@@ -20,6 +20,7 @@ interface CartContextType {
   addItem: (version: Omit<CartItem, "quantity">, qty: number) => void;
   removeItem: (versionId: string) => void;
   updateQuantity: (versionId: string, quantity: number) => void;
+  patchItemsByCardId: (cardId: number, patch: { stock?: number; price?: number }) => void;
   clearCart: () => void;
   totalItems: number;
   totalPrice: number;
@@ -131,6 +132,34 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     );
   }, []);
 
+  // 🔄 Patch stock/price de items por cardId (realtime SSE)
+  const patchItemsByCardId = useCallback((cardId: number, patch: { stock?: number; price?: number }) => {
+    const versionId = String(cardId);
+    setItems((prev) => {
+      const idx = prev.findIndex((i) => i.version_id === versionId);
+      if (idx === -1) return prev;
+
+      const item = prev[idx];
+      const nextStock = typeof patch.stock === "number" ? patch.stock : item.stock;
+      const nextPrice = typeof patch.price === "number" ? patch.price : item.price;
+      const nextQty = clampQuantity(item.quantity, nextStock);
+
+      if (nextQty <= 0) {
+        return prev.filter((i) => i.version_id !== versionId);
+      }
+
+      if (nextStock === item.stock && nextPrice === item.price && nextQty === item.quantity) {
+        return prev;
+      }
+
+      return prev.map((i) =>
+        i.version_id === versionId
+          ? { ...i, stock: nextStock, price: nextPrice, quantity: nextQty }
+          : i
+      );
+    });
+  }, []);
+
   // 🧹 Limpiar carrito
   const clearCart = useCallback(() => {
     saveCart([]);
@@ -151,6 +180,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         addItem,
         removeItem,
         updateQuantity,
+        patchItemsByCardId,
         clearCart,
         totalItems,
         totalPrice,
