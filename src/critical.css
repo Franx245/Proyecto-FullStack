@@ -10,7 +10,7 @@ body {
   margin: 0;
   background: hsl(222 20% 7%);
   color: hsl(220 15% 92%);
-  font-family: "Space Grotesk", system-ui, sans-serif;
+  font-family: var(--font-body), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
