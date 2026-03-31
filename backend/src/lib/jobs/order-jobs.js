@@ -9,6 +9,7 @@ import { publishEvent } from "../events.js";
 
 /**
  * Expire pending orders whose `expires_at` has passed.
+ * Idempotent: re-fetches status inside the transaction to skip already-expired orders.
  * @param {{ batchSize?: number }} [data]
  */
 export async function expirePendingOrdersJob(data = {}) {
@@ -33,6 +34,15 @@ export async function expirePendingOrdersJob(data = {}) {
     try {
       await withDatabaseConnection(() =>
         prisma.$transaction(async (tx) => {
+          // Re-check status inside transaction to prevent double-expiry
+          const fresh = await tx.order.findUnique({
+            where: { id: order.id },
+            select: { status: true },
+          });
+          if (!fresh || !["PENDING_PAYMENT", "FAILED"].includes(fresh.status)) {
+            return; // Already expired/cancelled/completed — skip
+          }
+
           for (const item of order.items) {
             await tx.card.update({
               where: { id: item.cardId },

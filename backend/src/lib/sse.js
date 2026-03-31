@@ -1,10 +1,16 @@
 /**
  * SSE realtime streams — broadcasts Redis pub/sub events to connected clients.
  *
- * Falls back to 501 if Redis TCP is not configured (e.g. Vercel Serverless).
+ * Architecture:
+ * - ONE set of event bus listeners (registered once, never per-request)
+ * - Clients stored in Sets, cleaned up on close
+ * - Max client cap to prevent memory exhaustion
+ * - Falls back to 501 if Redis TCP is not configured
  */
 import { isRedisTcpConfigured } from "./redis-tcp.js";
 import { addEventBusListener, EVENT_CHANNELS } from "./events.js";
+
+const MAX_SSE_CLIENTS = Number(process.env.SSE_MAX_CLIENTS || 200);
 
 /** @type {Set<import("express").Response>} */
 const publicClients = new Set();
@@ -18,16 +24,19 @@ const adminClients = new Set();
  * @param {unknown} data
  */
 function sendSSE(res, data) {
-  if (res.writableEnded) return;
-  res.write(`data: ${JSON.stringify(data)}\n\n`);
+  if (res.writableEnded) return false;
+  try {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-/** Broadcast to a set of connected SSE clients. */
+/** Broadcast to a set of connected SSE clients. Remove dead ones. */
 function broadcast(clients, data) {
   for (const res of clients) {
-    try {
-      sendSSE(res, data);
-    } catch {
+    if (!sendSSE(res, data)) {
       clients.delete(res);
     }
   }
@@ -35,6 +44,10 @@ function broadcast(clients, data) {
 
 let listenersInitialized = false;
 
+/**
+ * Register event bus listeners ONCE.
+ * These are process-level singletons — never created per-request.
+ */
 function ensureEventListeners() {
   if (listenersInitialized) return;
   listenersInitialized = true;
@@ -50,6 +63,12 @@ function ensureEventListeners() {
   });
 }
 
+/**
+ * Set up SSE response headers and heartbeat.
+ * Returns cleanup function.
+ * @param {import("express").Request} req
+ * @param {import("express").Response} res
+ */
 function setupSSEResponse(req, res) {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -57,58 +76,66 @@ function setupSSEResponse(req, res) {
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
 
-  // Heartbeat every 30s to keep connection alive
+  // Heartbeat every 30s to keep connection alive + detect dead sockets
   const heartbeat = setInterval(() => {
     if (res.writableEnded) {
       clearInterval(heartbeat);
       return;
     }
-    res.write(":heartbeat\n\n");
+    try {
+      res.write(":heartbeat\n\n");
+    } catch {
+      clearInterval(heartbeat);
+    }
   }, 30_000);
 
   // Send initial connected event
   sendSSE(res, { event: "connected", ts: Date.now() });
 
-  req.on("close", () => {
-    clearInterval(heartbeat);
-  });
+  return () => clearInterval(heartbeat);
 }
 
 /** Public SSE handler — stock + order updates for storefront. */
 export function publicSSEHandler(req, res) {
   if (!isRedisTcpConfigured()) {
-    res.status(501).json({
-      error: "SSE not available in serverless mode",
-      code: "SSE_UNAVAILABLE",
-    });
+    res.status(501).json({ error: "SSE not available in serverless mode", code: "SSE_UNAVAILABLE" });
+    return;
+  }
+
+  if (publicClients.size + adminClients.size >= MAX_SSE_CLIENTS) {
+    res.status(503).json({ error: "Too many SSE connections", code: "SSE_CAPACITY" });
     return;
   }
 
   ensureEventListeners();
-  setupSSEResponse(req, res);
+  const cleanup = setupSSEResponse(req, res);
   publicClients.add(res);
 
   req.on("close", () => {
     publicClients.delete(res);
+    cleanup();
   });
 }
 
 /** Admin SSE handler — all events for dashboard. */
 export function adminSSEHandler(req, res) {
   if (!isRedisTcpConfigured()) {
-    res.status(501).json({
-      error: "SSE not available in serverless mode",
-      code: "SSE_UNAVAILABLE",
-    });
+    res.status(501).json({ error: "SSE not available in serverless mode", code: "SSE_UNAVAILABLE" });
+    return;
+  }
+
+  if (publicClients.size + adminClients.size >= MAX_SSE_CLIENTS) {
+    res.status(503).json({ error: "Too many SSE connections", code: "SSE_CAPACITY" });
     return;
   }
 
   ensureEventListeners();
-  setupSSEResponse(req, res);
+  const cleanup = setupSSEResponse(req, res);
   adminClients.add(res);
 
   req.on("close", () => {
     adminClients.delete(res);
+    cleanup();
   });
 }
 

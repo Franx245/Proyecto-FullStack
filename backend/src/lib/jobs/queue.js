@@ -34,9 +34,13 @@ function getQueue() {
 
 /**
  * Enqueue a job. Falls back to inline execution if Redis TCP is unavailable.
+ *
+ * When `opts.jobId` is provided BullMQ de-duplicates: a second add with the
+ * same jobId while the first is still in the queue is silently ignored.
+ *
  * @param {string} jobName
  * @param {Record<string, unknown>} data
- * @param {{ priority?: number, delay?: number }} [opts]
+ * @param {{ priority?: number, delay?: number, jobId?: string }} [opts]
  */
 export async function enqueueJob(jobName, data, opts = {}) {
   const queue = getQueue();
@@ -52,6 +56,7 @@ export async function enqueueJob(jobName, data, opts = {}) {
   const job = await queue.add(jobName, data, {
     priority: opts.priority,
     delay: opts.delay,
+    ...(opts.jobId ? { jobId: opts.jobId } : {}),
   });
 
   console.info(`[queue] enqueued ${jobName} (id=${job.id})`);

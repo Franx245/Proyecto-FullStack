@@ -31,7 +31,6 @@ import { publishEvent } from "./src/lib/events.js";
 import { publicSSEHandler, adminSSEHandler, getSSEClientCount } from "./src/lib/sse.js";
 /* ── Redis TCP + BullMQ ── */
 import { isRedisTcpConfigured, pingRedisTcp, shutdownRedisTcp } from "./src/lib/redis-tcp.js";
-import { startWorker, shutdownWorker } from "./src/lib/jobs/worker.js";
 import { enqueueJob, shutdownQueue } from "./src/lib/jobs/queue.js";
 import { stopEventBus } from "./src/lib/events.js";
 /* ── Cron job handlers ── */
@@ -4710,7 +4709,7 @@ app.post("/api/checkout", requireAuth, checkoutRateLimit, async (req, res) => {
     enqueueJob("process-order-post-checkout", {
       orderId: result.order.id,
       items: normalizedItems,
-    }).catch((postResponseError) => {
+    }, { jobId: `post-checkout-${result.order.id}` }).catch((postResponseError) => {
       console.error("[checkout] failed to enqueue post-checkout job", postResponseError);
     });
     return;
@@ -5217,7 +5216,7 @@ app.get("/api/internal/orders/expire-pending", async (req, res) => {
     assertCronAuthorized(req);
 
     if (isRedisTcpConfigured()) {
-      const job = await enqueueJob("expire-pending-orders", { source: "cron" });
+      const job = await enqueueJob("expire-pending-orders", { source: "cron" }, { jobId: `expire-pending-${Date.now()}` });
       res.json({ enqueued: true, jobId: job?.id ?? "inline" });
       return;
     }
@@ -7610,16 +7609,11 @@ if (isDirectExecution) {
     const redisCache = await probeRedisConnection();
     console.log(`[infra] cache backend=${redisCache.backend} ready=${redisCache.ok}`);
 
-    /* ── Redis TCP + BullMQ worker ── */
     if (isRedisTcpConfigured()) {
       const tcpOk = await pingRedisTcp();
       console.log(`[infra] redis-tcp ready=${tcpOk}`);
-
-      if (tcpOk) {
-        startWorker();
-      }
     } else {
-      console.log("[infra] redis-tcp not configured — workers will run inline");
+      console.log("[infra] redis-tcp not configured — jobs will run inline");
     }
   });
 
@@ -7632,7 +7626,6 @@ if (isDirectExecution) {
     });
 
     await Promise.allSettled([
-      shutdownWorker(),
       shutdownQueue(),
       stopEventBus(),
       shutdownRedisTcp(),
