@@ -31,7 +31,7 @@ function resolveApiBaseUrl() {
   }
 
   if (hostname === "duelvault-admin.vercel.app" || /duelvault-admin/i.test(hostname)) {
-    return "https://duelvault-store-api.vercel.app";
+    return "https://proyecto-fullstack-ehnn.onrender.com";
   }
 
   return "";
