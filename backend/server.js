@@ -7603,6 +7603,12 @@ app.use((error, req, res, next) => {
 });
 
 if (isDirectExecution) {
+  console.log("[startup] DuelVault API starting...");
+  console.log(`[startup] NODE_ENV=${process.env.NODE_ENV || "undefined"} PORT=${PORT}`);
+  console.log(`[startup] JWT configured: access=${!!process.env.ACCESS_TOKEN_SECRET} refresh=${!!process.env.REFRESH_TOKEN_SECRET}`);
+  console.log(`[startup] DB configured: ${!!process.env.DATABASE_URL}`);
+  console.log(`[startup] Redis TCP: ${isRedisTcpConfigured()}`);
+
   const server = app.listen(PORT, async () => {
     console.log(`DuelVault API running at http://localhost:${PORT}`);
 

@@ -2,12 +2,25 @@ import "./load-env.js";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+
+/**
+ * Read a required env var.
+ * - Production: throws immediately (fail-fast — never start without secrets).
+ * - Development: warns and returns a deterministic dev-only placeholder so
+ *   the server can boot for local testing.
+ */
 function requireEnv(name) {
   const value = process.env[name];
-  if (!value) {
+  if (value) return value;
+
+  if (IS_PRODUCTION) {
     throw new Error(`FATAL: ${name} environment variable is not set. Server cannot start without JWT secrets.`);
   }
-  return value;
+
+  const devFallback = `dev-only-${name}-NOT-FOR-PRODUCTION`;
+  console.warn(`[auth] ⚠️  Missing env: ${name} — using insecure dev fallback. Set it before deploying.`);
+  return devFallback;
 }
 
 const ACCESS_TOKEN_SECRET = requireEnv("ACCESS_TOKEN_SECRET");
