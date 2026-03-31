@@ -528,7 +528,7 @@ export async function fetchOrdersByIds(ids) {
     return { orders: [] };
   }
 
-  return request(`/api/orders?ids=${ids.join(",")}`);
+  return authRequest(`/api/orders?ids=${ids.join(",")}`);
 }
 
 /**
