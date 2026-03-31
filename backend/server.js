@@ -3858,6 +3858,8 @@ async function buildWorkbook(orders) {
 }
 
 app.get("/api/health", async (_req, res) => {
+  /* ── Health always returns 200 so Railway / load-balancers treat the
+       process as alive.  Infrastructure status is informational. ── */
   let dbOk = false;
   try {
     await Promise.race([
@@ -3868,13 +3870,11 @@ app.get("/api/health", async (_req, res) => {
     // intentionally silent
   }
 
-  const statusCode = dbOk ? 200 : 503;
-
   let redisCache = null;
   try {
     redisCache = await probeRedisConnection();
   } catch {
-    // Redis is non-critical — don't affect status code
+    // Redis is non-critical
   }
 
   let redisTcpOk = false;
@@ -3884,8 +3884,9 @@ app.get("/api/health", async (_req, res) => {
     // non-critical
   }
 
-  res.status(statusCode).json({
-    ok: dbOk,
+  res.status(200).json({
+    ok: true,
+    uptime: process.uptime(),
     database: { ok: dbOk },
     redis: {
       cache: redisCache,
@@ -7609,18 +7610,35 @@ if (isDirectExecution) {
   console.log(`[startup] DB configured: ${!!process.env.DATABASE_URL}`);
   console.log(`[startup] Redis TCP: ${isRedisTcpConfigured()}`);
 
-  const server = app.listen(PORT, async () => {
-    console.log(`DuelVault API running at http://localhost:${PORT}`);
+  const server = app.listen(PORT, () => {
+    console.log(`[startup] DuelVault API running at http://localhost:${PORT}`);
 
-    const redisCache = await probeRedisConnection();
-    console.log(`[infra] cache backend=${redisCache.backend} ready=${redisCache.ok}`);
+    /* ── Fire-and-forget infrastructure probes (never block startup) ── */
+    (async () => {
+      try {
+        await Promise.race([
+          prisma.$queryRaw`SELECT 1`,
+          new Promise((_, r) => setTimeout(() => r(new Error("timeout")), 5000)),
+        ]);
+        console.log("[db] connected");
+      } catch (err) {
+        console.warn(`[db] connection failed — ${err.message}. Will retry on first request.`);
+      }
 
-    if (isRedisTcpConfigured()) {
-      const tcpOk = await pingRedisTcp();
-      console.log(`[infra] redis-tcp ready=${tcpOk}`);
-    } else {
-      console.log("[infra] redis-tcp not configured — jobs will run inline");
-    }
+      try {
+        const redisCache = await probeRedisConnection();
+        console.log(`[infra] cache backend=${redisCache.backend} ready=${redisCache.ok}`);
+      } catch { /* non-critical */ }
+
+      if (isRedisTcpConfigured()) {
+        try {
+          const tcpOk = await pingRedisTcp();
+          console.log(`[infra] redis-tcp ready=${tcpOk}`);
+        } catch { /* non-critical */ }
+      } else {
+        console.log("[infra] redis-tcp not configured — jobs will run inline");
+      }
+    })();
   });
 
   /* ── Graceful shutdown ── */

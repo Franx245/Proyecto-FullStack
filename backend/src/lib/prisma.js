@@ -28,7 +28,7 @@ function normalizeDatabaseUrl(rawValue) {
       }
 
       if (!url.searchParams.has("connect_timeout")) {
-        url.searchParams.set("connect_timeout", "15");
+        url.searchParams.set("connect_timeout", "5");
       }
     }
 
