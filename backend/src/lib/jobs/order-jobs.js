@@ -22,7 +22,7 @@ export async function expirePendingOrdersJob(data = {}) {
         status: { in: ["PENDING_PAYMENT", "FAILED"] },
         expires_at: { not: null, lte: now },
       },
-      select: { id: true, items: { select: { cardId: true, quantity: true } } },
+      select: { id: true },
       take: batchSize * 2,
     }),
   );
@@ -32,18 +32,20 @@ export async function expirePendingOrdersJob(data = {}) {
   let expiredCount = 0;
   for (const order of orders) {
     try {
-      await withDatabaseConnection(() =>
+      const didExpire = await withDatabaseConnection(() =>
         prisma.$transaction(async (tx) => {
-          // Re-check status inside transaction to prevent double-expiry
+          // Row-level lock to prevent race with webhook / other expiry paths
+          await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${order.id} FOR UPDATE`;
+
           const fresh = await tx.order.findUnique({
             where: { id: order.id },
-            select: { status: true },
+            select: { status: true, items: { select: { cardId: true, quantity: true } } },
           });
           if (!fresh || !["PENDING_PAYMENT", "FAILED"].includes(fresh.status)) {
-            return; // Already expired/cancelled/completed — skip
+            return false;
           }
 
-          for (const item of order.items) {
+          for (const item of fresh.items) {
             await tx.card.update({
               where: { id: item.cardId },
               data: { stock: { increment: item.quantity } },
@@ -54,9 +56,12 @@ export async function expirePendingOrdersJob(data = {}) {
             where: { id: order.id },
             data: { status: "EXPIRED" },
           });
+
+          return true;
         }),
       );
 
+      if (!didExpire) continue;
       expiredCount++;
 
       await invalidateOrderRelatedCache(order.items);

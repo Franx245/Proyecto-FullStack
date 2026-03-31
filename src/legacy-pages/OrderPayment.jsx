@@ -445,8 +445,22 @@ export default function OrderPayment() {
                 Cargando orden...
               </div>
             ) : !order ? (
-              <div className="mt-5 rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm text-amber-100">
-                No encontramos la orden solicitada en tu historial.
+              <div className="mt-5 space-y-3">
+                <div className="rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm text-amber-100">
+                  {ordersQuery.isFetching
+                    ? "Buscando tu orden…"
+                    : "No encontramos la orden solicitada en tu historial. Si acabás de comprar, puede tardar unos segundos."}
+                </div>
+                {!ordersQuery.isFetching ? (
+                  <button
+                    type="button"
+                    onClick={() => { void ordersQuery.refetch(); void trackedOrdersQuery.refetch(); }}
+                    className="inline-flex items-center gap-2 rounded-xl border border-border px-4 py-2 text-sm font-medium transition hover:bg-secondary"
+                  >
+                    <Loader2 className={`h-3.5 w-3.5 ${ordersQuery.isFetching ? "animate-spin" : ""}`} />
+                    Reintentar
+                  </button>
+                ) : null}
               </div>
             ) : (
               <>
