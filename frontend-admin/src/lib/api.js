@@ -26,14 +26,13 @@ function resolveApiBaseUrl() {
     return "";
   }
 
+  // Same-origin Vercel deployment (storefront + API in one project)
   if (hostname === "duelvault-store-api.vercel.app") {
     return origin;
   }
 
-  if (hostname === "duelvault-admin.vercel.app" || /duelvault-admin/i.test(hostname)) {
-    return "https://proyecto-fullstack-ehnn.onrender.com";
-  }
-
+  // Admin on separate Vercel project — VITE_API_BASE_URL MUST be set.
+  // No hardcoded fallback: if missing, requests go relative and fail visibly.
   return "";
 }
 

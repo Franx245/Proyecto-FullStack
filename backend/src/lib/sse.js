@@ -20,13 +20,20 @@ const adminClients = new Set();
 
 /**
  * Send an SSE message to a response stream.
+ * Emits named events when data contains an `event` field,
+ * so frontend EventSource.addEventListener(eventName) can match.
  * @param {import("express").Response} res
  * @param {unknown} data
  */
 function sendSSE(res, data) {
   if (res.writableEnded) return false;
   try {
-    res.write(`data: ${JSON.stringify(data)}\n\n`);
+    const payload = JSON.stringify(data);
+    if (data && typeof data === "object" && typeof data.event === "string") {
+      res.write(`event: ${data.event}\ndata: ${payload}\n\n`);
+    } else {
+      res.write(`data: ${payload}\n\n`);
+    }
     return true;
   } catch {
     return false;
