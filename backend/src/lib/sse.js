@@ -1,13 +1,12 @@
 /**
- * SSE realtime streams — broadcasts Redis pub/sub events to connected clients.
+ * SSE realtime streams — broadcasts events to connected clients.
  *
  * Architecture:
  * - ONE set of event bus listeners (registered once, never per-request)
  * - Clients stored in Sets, cleaned up on close
  * - Max client cap to prevent memory exhaustion
- * - Falls back to 501 if Redis TCP is not configured
+ * - Works with local in-process events; Redis TCP adds cross-instance pub/sub
  */
-import { isRedisTcpConfigured } from "./redis-tcp.js";
 import { addEventBusListener, EVENT_CHANNELS } from "./events.js";
 
 const MAX_SSE_CLIENTS = Number(process.env.SSE_MAX_CLIENTS || 200);
@@ -104,11 +103,6 @@ function setupSSEResponse(req, res) {
 
 /** Public SSE handler — stock + order updates for storefront. */
 export function publicSSEHandler(req, res) {
-  if (!isRedisTcpConfigured()) {
-    res.status(501).json({ error: "SSE not available in serverless mode", code: "SSE_UNAVAILABLE" });
-    return;
-  }
-
   if (publicClients.size + adminClients.size >= MAX_SSE_CLIENTS) {
     res.status(503).json({ error: "Too many SSE connections", code: "SSE_CAPACITY" });
     return;
@@ -126,11 +120,6 @@ export function publicSSEHandler(req, res) {
 
 /** Admin SSE handler — all events for dashboard. */
 export function adminSSEHandler(req, res) {
-  if (!isRedisTcpConfigured()) {
-    res.status(501).json({ error: "SSE not available in serverless mode", code: "SSE_UNAVAILABLE" });
-    return;
-  }
-
   if (publicClients.size + adminClients.size >= MAX_SSE_CLIENTS) {
     res.status(503).json({ error: "Too many SSE connections", code: "SSE_CAPACITY" });
     return;

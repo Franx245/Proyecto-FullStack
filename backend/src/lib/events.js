@@ -54,16 +54,28 @@ function ensureSubscriber() {
  */
 export function publishEvent(eventName, data) {
   const channel = EVENT_CHANNELS[eventName] || eventName;
+  const envelope = { event: eventName, data, ts: Date.now() };
 
-  if (!isRedisTcpConfigured()) return;
-
-  const pub = getPublisherClient();
-  if (!pub) return;
-
-  const payload = JSON.stringify({ event: eventName, data, ts: Date.now() });
-  pub.publish(channel, payload).catch((err) => {
-    console.error(`[events] publish failed on ${channel}:`, err.message);
-  });
+  if (isRedisTcpConfigured()) {
+    /* Redis TCP available — publish via pub/sub; the subscriber connection
+       will call local listeners when the message comes back. */
+    const pub = getPublisherClient();
+    if (pub) {
+      pub.publish(channel, JSON.stringify(envelope)).catch((err) => {
+        console.error(`[events] publish failed on ${channel}:`, err.message);
+      });
+    }
+  } else {
+    /* No Redis TCP — broadcast directly to local in-process listeners */
+    const handlers = listeners.get(channel);
+    if (handlers && handlers.size > 0) {
+      for (const fn of handlers) {
+        try { fn(envelope); } catch (err) {
+          console.error(`[events] listener error on ${channel}:`, err.message);
+        }
+      }
+    }
+  }
 }
 
 /**
@@ -73,33 +85,39 @@ export function publishEvent(eventName, data) {
  * @returns {() => void} unsubscribe function
  */
 export function addEventBusListener(channels, fn) {
-  if (!isRedisTcpConfigured()) return () => {};
-
-  ensureSubscriber();
-  const sub = getSubscriberClient();
-  if (!sub) return () => {};
-
   const channelList = Array.isArray(channels) ? channels : [channels];
   const resolvedChannels = channelList.map((c) => EVENT_CHANNELS[c] || c);
 
+  /* Always register local listeners (works with or without Redis TCP) */
   for (const ch of resolvedChannels) {
     if (!listeners.has(ch)) {
       listeners.set(ch, new Set());
-      sub.subscribe(ch).catch((err) => {
-        console.error(`[events] subscribe failed on ${ch}:`, err.message);
-      });
     }
     listeners.get(ch).add(fn);
   }
 
+  /* If Redis TCP is available, also subscribe for cross-instance events */
+  if (isRedisTcpConfigured()) {
+    ensureSubscriber();
+    const sub = getSubscriberClient();
+    if (sub) {
+      for (const ch of resolvedChannels) {
+        sub.subscribe(ch).catch((err) => {
+          console.error(`[events] subscribe failed on ${ch}:`, err.message);
+        });
+      }
+    }
+  }
+
   return () => {
+    const sub = isRedisTcpConfigured() ? getSubscriberClient() : null;
     for (const ch of resolvedChannels) {
       const set = listeners.get(ch);
       if (set) {
         set.delete(fn);
         if (set.size === 0) {
           listeners.delete(ch);
-          sub.unsubscribe(ch).catch(() => {});
+          if (sub) sub.unsubscribe(ch).catch(() => {});
         }
       }
     }
