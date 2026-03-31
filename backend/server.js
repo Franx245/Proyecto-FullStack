@@ -3861,13 +3861,14 @@ app.get("/api/health", async (_req, res) => {
   /* ── Health always returns 200 so Railway / load-balancers treat the
        process as alive.  Infrastructure status is informational. ── */
   let dbOk = false;
+  let dbError = null;
   try {
     await Promise.race([
       prisma.$queryRaw`SELECT 1`.then(() => { dbOk = true; }),
       new Promise((_, reject) => setTimeout(() => reject(new Error("db probe timeout")), 2000)),
     ]);
-  } catch {
-    // intentionally silent
+  } catch (err) {
+    dbError = err?.message || "unknown";
   }
 
   let redisCache = null;
@@ -3887,7 +3888,7 @@ app.get("/api/health", async (_req, res) => {
   res.status(200).json({
     ok: true,
     uptime: process.uptime(),
-    database: { ok: dbOk },
+    database: { ok: dbOk, ...(dbError ? { error: dbError } : {}) },
     redis: {
       cache: redisCache,
       cache_backend: getRedisBackendName(),
@@ -7608,6 +7609,7 @@ if (isDirectExecution) {
   console.log(`[startup] NODE_ENV=${process.env.NODE_ENV || "undefined"} PORT=${PORT}`);
   console.log(`[startup] JWT configured: access=${!!process.env.ACCESS_TOKEN_SECRET} refresh=${!!process.env.REFRESH_TOKEN_SECRET}`);
   console.log(`[startup] DB configured: ${!!process.env.DATABASE_URL}`);
+  console.log(`[startup] DB host: ${(() => { try { return new URL(process.env.DATABASE_URL || "").hostname; } catch { return "INVALID_URL"; } })()}`);
   console.log(`[startup] Redis TCP: ${isRedisTcpConfigured()}`);
 
   const server = app.listen(PORT, () => {
