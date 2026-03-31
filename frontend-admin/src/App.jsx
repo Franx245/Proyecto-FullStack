@@ -1028,7 +1028,8 @@ async function resolveStorefrontLoginUrl() {
   const fallbackLegacyStorePort = 5173;
 
   try {
-    const response = await fetch("/api/health");
+    const apiBase = import.meta.env.VITE_API_BASE_URL || "https://proyecto-fullstack-production-8fe1.up.railway.app";
+    const response = await fetch(`${apiBase}/api/health`);
     const payload = await response.json().catch(() => ({}));
     const storePort = payload?.runtime?.next_store_port || payload?.runtime?.store_port || fallbackNextStorePort;
     return `${window.location.protocol}//${window.location.hostname}:${storePort}/auth?mode=login`;

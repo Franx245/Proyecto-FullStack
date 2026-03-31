@@ -41,7 +41,7 @@ export default async function sitemap() {
   let setPages = [];
 
   try {
-    const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.BACKEND_URL || "";
+    const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.BACKEND_URL || "https://proyecto-fullstack-production-8fe1.up.railway.app";
     if (apiBase) {
       const firstPage = await fetchJson(`${apiBase}/api/catalog?page=1&pageSize=50`, 3600);
       const totalPages = Math.min(Number(firstPage?.totalPages || 0), MAX_SITEMAP_PAGES);

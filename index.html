@@ -108,7 +108,8 @@
         }
 
         var cloudName = "%VITE_CLOUDINARY_CLOUD_NAME%";
-        var apiUrl = "/api/cards?" + params.toString();
+        var apiBase = "%VITE_API_BASE_URL%" || "https://proyecto-fullstack-production-8fe1.up.railway.app";
+        var apiUrl = apiBase + "/api/cards?" + params.toString();
         var readPersistedCatalog = function () {
           try {
             var raw = window.localStorage.getItem(PERSISTED_QUERY_KEY);
@@ -214,7 +215,8 @@
       (function () {
         if (window.location.pathname !== "/" && window.location.pathname !== "") return;
         var cloudName = "%VITE_CLOUDINARY_CLOUD_NAME%";
-        fetch("/api/catalog?featured=true&page=1&pageSize=5", { credentials: "same-origin", priority: "high" })
+        var featuredApiBase = "%VITE_API_BASE_URL%" || "https://proyecto-fullstack-production-8fe1.up.railway.app";
+        fetch(featuredApiBase + "/api/catalog?featured=true&page=1&pageSize=5", { priority: "high" })
           .then(function (r) { return r.ok ? r.json() : null; })
           .then(function (payload) {
             var cards = payload && Array.isArray(payload.cards) ? payload.cards : [];

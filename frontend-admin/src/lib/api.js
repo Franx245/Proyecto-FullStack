@@ -11,6 +11,8 @@ function normalizeBaseUrl(value) {
   return typeof value === "string" ? value.trim().replace(/\/$/, "") : "";
 }
 
+const RAILWAY_BACKEND_URL = "https://proyecto-fullstack-production-8fe1.up.railway.app";
+
 function resolveApiBaseUrl() {
   const configuredBaseUrl = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL || "");
   if (configuredBaseUrl) {
@@ -18,22 +20,15 @@ function resolveApiBaseUrl() {
   }
 
   if (typeof window === "undefined") {
-    return "";
+    return RAILWAY_BACKEND_URL;
   }
 
-  const { hostname, origin } = window.location;
+  const { hostname } = window.location;
   if (["localhost", "127.0.0.1"].includes(hostname)) {
     return "";
   }
 
-  // Same-origin Vercel deployment (storefront + API in one project)
-  if (hostname === "duelvault-store-api.vercel.app") {
-    return origin;
-  }
-
-  // Admin on separate Vercel project — VITE_API_BASE_URL MUST be set.
-  // No hardcoded fallback: if missing, requests go relative and fail visibly.
-  return "";
+  return RAILWAY_BACKEND_URL;
 }
 
 const API_BASE_URL = resolveApiBaseUrl();

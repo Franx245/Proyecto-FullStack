@@ -63,13 +63,15 @@ function readFlag(viteKey, nextKey, fallback = false) {
   return value === "true";
 }
 
+const RAILWAY_BACKEND_URL = "https://proyecto-fullstack-production-8fe1.up.railway.app";
+
 const resolveApiBaseUrl = () => {
   const configured = readEnv("VITE_API_BASE_URL", "NEXT_PUBLIC_API_BASE_URL", runtimeEnv?.BACKEND_URL || "");
   if (configured) {
     return configured.replace(/\/$/, "");
   }
 
-  return "";
+  return RAILWAY_BACKEND_URL;
 };
 
 export const ENV = {
