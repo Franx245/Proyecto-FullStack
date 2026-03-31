@@ -127,7 +127,8 @@ export const prisma =
     },
   });
 
-if (process.env.NODE_ENV !== "production") {
+/* Singleton: store in globalThis for BOTH dev and production (serverless). */
+if (!globalForPrisma.__duelvaultPrisma) {
   globalForPrisma.__duelvaultPrisma = prisma;
 }
 

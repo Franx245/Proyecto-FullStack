@@ -25,12 +25,10 @@ import {
 import { getUsdToArsRate } from "./src/lib/dollar.js";
 import { createMercadoPagoDirectPayment } from "./src/lib/mercadopagoPayments.js";
 import { createRateLimitMiddleware, getRequestIp, validateBody } from "./src/lib/requestGuards.js";
-/* ── BullMQ + Realtime ── */
-import { publishEvent, subscribeToEvents, stopEventBus } from "./src/lib/events.js";
+/* ── Realtime (no-ops in serverless) ── */
+import { publishEvent } from "./src/lib/events.js";
 import { publicSSEHandler, adminSSEHandler } from "./src/lib/sse.js";
-import { startWorker, stopWorker } from "./src/lib/worker.js";
-import { registerScheduledJobs, scheduleSyncCards, scheduleStockUpdate } from "./src/lib/scheduler.js";
-import { pingRedisTcp, isRedisTcpConfigured } from "./src/lib/redis-tcp.js";
+import { scheduleStockUpdate } from "./src/lib/scheduler.js";
 import { getRedisBackendName, probeRedisConnection } from "./src/lib/redis.js";
 import { invalidateOrderRelatedCache } from "./src/lib/cache-invalidation.js";
 import { recordApiMetric, recordCatalogSearchMetric } from "./src/lib/metrics.js";
@@ -348,8 +346,6 @@ const GLOBAL_RATE_LIMIT_SKIP = new Set([
   "/api/health",
   "/api/checkout/webhook",
   "/api/webhook/mercadopago",
-  "/api/events/stream",
-  "/api/admin/events/stream",
 ]);
 
 const globalRateLimit = createRateLimitMiddleware({
@@ -3857,18 +3853,14 @@ app.get("/api/health", async (_req, res) => {
       new Promise((_, reject) => setTimeout(() => reject(new Error("db probe timeout")), 2000)),
     ]);
   } catch {
-    // intentionally silent — Render polls this frequently
+    // intentionally silent
   }
 
   const statusCode = dbOk ? 200 : 503;
 
   let redisCache = null;
-  let redisTcpOk = false;
   try {
-    [redisCache, redisTcpOk] = await Promise.all([
-      probeRedisConnection(),
-      isRedisTcpConfigured() ? pingRedisTcp() : Promise.resolve(false),
-    ]);
+    redisCache = await probeRedisConnection();
   } catch {
     // Redis is non-critical — don't affect status code
   }
@@ -3878,10 +3870,6 @@ app.get("/api/health", async (_req, res) => {
     database: { ok: dbOk },
     redis: {
       cache: redisCache,
-      tcp: {
-        configured: isRedisTcpConfigured(),
-        ok: redisTcpOk,
-      },
       cache_backend: getRedisBackendName(),
     },
   });
@@ -6137,15 +6125,12 @@ app.post("/api/admin/cards/sync-catalog", requireAdminAuth, requireAdminRole([Us
   }
 });
 
-/* ── Async catalog sync (queued via BullMQ) ── */
+/* ── Async catalog sync (unavailable in serverless — use sync endpoint instead) ── */
 app.post("/api/admin/cards/sync-catalog/async", requireAdminAuth, requireAdminRole([UserRole.ADMIN]), async (_req, res) => {
-  try {
-    const job = await scheduleSyncCards();
-    res.json({ queued: true, jobId: job?.id || null });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to queue catalog sync" });
-  }
+  res.status(501).json({
+    error: "Async catalog sync unavailable in serverless mode. Use /api/admin/cards/sync-catalog instead.",
+    code: "ASYNC_UNAVAILABLE",
+  });
 });
 
 app.put("/api/admin/cards/bulk", requireAdminAuth, requireAdminRole([UserRole.ADMIN]), async (req, res) => {
@@ -7555,21 +7540,6 @@ if (isDirectExecution) {
 
     const redisCache = await probeRedisConnection();
     console.log(`[infra] cache backend=${redisCache.backend} ready=${redisCache.ok}`);
-
-    /* ── Bootstrap BullMQ + Realtime if Redis TCP is available ── */
-    if (isRedisTcpConfigured()) {
-      const alive = await pingRedisTcp();
-      if (alive) {
-        subscribeToEvents();
-        startWorker();
-        await registerScheduledJobs();
-        console.log("[infra] Redis TCP connected — BullMQ workers + pub/sub active");
-      } else {
-        console.warn("[infra] Redis TCP not reachable — running without BullMQ/realtime");
-      }
-    } else {
-      console.warn("[infra] Redis TCP not configured — running without BullMQ/realtime");
-    }
   });
 
   /* ── Graceful shutdown ── */
@@ -7578,8 +7548,6 @@ if (isDirectExecution) {
     server.close(() => {
       console.log("[shutdown] HTTP server closed");
     });
-    await stopWorker();
-    await stopEventBus();
     process.exit(0);
   };
 
