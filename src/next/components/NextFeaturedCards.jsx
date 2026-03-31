@@ -54,7 +54,7 @@ export default function NextFeaturedCards({
           ? Array.from({ length: 5 }).map((_, index) => <CardSkeleton key={index} />)
           : hasCards
             ? cards.map((/** @type {*} */ card, /** @type {number} */ index) => (
-                <NextCardItem key={card.version_id} card={card} priorityImage={index === 0} />
+                <NextCardItem key={card.version_id} card={card} priorityImage={index === 0} sizes="(max-width: 639px) calc(50vw - 1.5rem), (max-width: 1023px) calc(33.3vw - 1.5rem), (max-width: 1279px) calc(25vw - 1.5rem), calc(20vw - 1.5rem)" />
               ))
             : (
                 <div className="col-span-full rounded-[1.5rem] border border-white/10 bg-white/[0.03] px-6 py-12 text-center backdrop-blur-xl">

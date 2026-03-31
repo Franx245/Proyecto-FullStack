@@ -39,7 +39,7 @@ export default function NextCardGrid({ cards = [], isLoading = false, isLoadingM
 
         <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4" data-critical="catalog-grid">
           {cards.map((card, index) => (
-            <NextCardItem key={card?.version_id ?? card?.id ?? card?.ygoproId ?? `card-${index}`} card={card} priorityImage={index < 4} />
+            <NextCardItem key={card?.version_id ?? card?.id ?? card?.ygoproId ?? `card-${index}`} card={card} priorityImage={index < 4} sizes="(max-width: 1023px) calc(50vw - 1.5rem), (max-width: 1279px) calc(33.3vw - 2rem), calc(25vw - 2rem)" />
           ))}
           {(isLoading || isLoadingMore) && skeletons}
         </div>

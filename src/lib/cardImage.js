@@ -65,7 +65,8 @@ export function getCardImage(id, variant = "thumb") {
   }
 
   const baseTransforms = "q_auto:eco,f_auto";
-  const transformations = `w_${selectedVariant.width},${baseTransforms},dpr_auto`;
+  const smallestWidth = selectedVariant.srcsetWidths[0];
+  const transformations = `w_${smallestWidth},${baseTransforms}`;
 
   const srcset = selectedVariant.srcsetWidths
     .map((w) => `https://res.cloudinary.com/${cloudName}/image/fetch/w_${w},${baseTransforms}/${remoteUrl} ${w}w`)

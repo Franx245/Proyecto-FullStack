@@ -14,8 +14,8 @@ import { persistCatalogScroll, persistLastCatalogHref } from "@/lib/catalog-url-
 import { useCart } from "@/lib/cartStore";
 import { buildCardPath } from "@/lib/seo";
 
-/** @param {{ card: *, priorityImage?: boolean }} props */
-export default function NextCardItem({ card, priorityImage = false }) {
+/** @param {{ card: *, priorityImage?: boolean, sizes?: string }} props */
+export default function NextCardItem({ card, priorityImage = false, sizes }) {
   const queryClient = useQueryClient();
   const router = useRouter();
   const pathname = usePathname();
@@ -114,7 +114,7 @@ export default function NextCardItem({ card, priorityImage = false }) {
             name={card.name}
             priority={priorityImage}
             fallbackSrc={card.image}
-            sizes="(max-width: 640px) 50vw, (max-width: 1280px) 25vw, 20vw"
+            sizes={sizes || "(max-width: 1023px) calc(50vw - 1.5rem), (max-width: 1279px) calc(33.3vw - 2rem), calc(25vw - 2rem)"}
             className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.06] group-hover:saturate-[1.08]"
           />
         ) : (
