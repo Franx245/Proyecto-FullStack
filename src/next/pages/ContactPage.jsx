@@ -156,18 +156,18 @@ export default function ContactPage() {
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="mx-auto max-w-[1120px] px-4 py-6 sm:px-5 sm:py-8 lg:px-6 lg:py-9">
         <div className="mb-5 sm:mb-6">
-          <span className="inline-flex items-center gap-2 rounded-full border border-violet-400/20 bg-violet-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-violet-200">
+          <span className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-200">
             Soporte DuelVault
           </span>
           <h1 className="mt-3 text-3xl font-black tracking-tight text-white sm:text-[2.2rem]">Contacto</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400 sm:text-[15px]">Elegí el canal más rápido para cerrar tu compra o enviarnos una consulta.</p>
         </div>
 
-        <div className="overflow-hidden rounded-[28px] border border-violet-500/15 bg-[linear-gradient(135deg,rgba(15,12,42,0.97),rgba(20,16,48,0.98))] shadow-[0_24px_80px_rgba(100,60,200,0.15),0_0_60px_rgba(120,80,255,0.08)]">
+        <div className="overflow-hidden rounded-[28px] border border-emerald-500/15 bg-[linear-gradient(135deg,rgba(5,18,16,0.97),rgba(9,24,21,0.98))] shadow-[0_24px_80px_rgba(16,185,129,0.12),0_0_60px_rgba(45,212,191,0.06)]">
           <div className="grid lg:grid-cols-[0.94fr_1.06fr]">
-            <div className="border-b border-violet-500/10 bg-[radial-gradient(circle_at_top_left,rgba(139,92,246,0.18),transparent_50%),linear-gradient(180deg,rgba(15,12,42,0.95),rgba(12,10,36,1))] p-4 sm:p-6 lg:border-b-0 lg:border-r lg:border-violet-500/10">
+            <div className="border-b border-emerald-500/10 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.2),transparent_52%),linear-gradient(180deg,rgba(5,18,16,0.95),rgba(6,15,14,1))] p-4 sm:p-6 lg:border-b-0 lg:border-r lg:border-emerald-500/10">
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-violet-400/20 bg-violet-400/10 text-violet-300 shadow-[0_0_20px_rgba(139,92,246,0.2)]">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-400/20 bg-emerald-400/10 text-emerald-300 shadow-[0_0_20px_rgba(16,185,129,0.2)]">
                   <Phone className="h-5 w-5" />
                 </div>
                 <div>
@@ -177,19 +177,19 @@ export default function ContactPage() {
               </div>
 
               <div className="mt-4 grid gap-3 sm:mt-5 sm:gap-4">
-                <div className="rounded-3xl border border-violet-400/10 bg-violet-950/30 p-4 backdrop-blur-sm">
+                <div className="rounded-3xl border border-emerald-400/10 bg-emerald-950/20 p-4 backdrop-blur-sm">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-violet-300/80">WhatsApp activo</p>
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-300/80">WhatsApp activo</p>
                       <p className="mt-2 text-[15px] font-semibold text-white sm:text-base">{formatPhoneDisplay(supportWhatsappNumber)}</p>
                     </div>
-                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-violet-400/10 text-violet-300">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-400/10 text-emerald-300">
                       <QrCode className="h-5 w-5" />
                     </div>
                   </div>
                 </div>
 
-                <div className="flex justify-center overflow-hidden rounded-[28px] border border-white/10 bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.65),0_0_30px_rgba(139,92,246,0.12)]">
+                <div className="flex justify-center overflow-hidden rounded-[28px] border border-white/10 bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.65),0_0_30px_rgba(16,185,129,0.14)]">
                   {qrCodeUrl ? (
                     <img src={qrCodeUrl} alt="QR para enviar el carrito por WhatsApp" className="h-40 w-40 object-cover sm:h-[220px] sm:w-[220px]" loading="lazy" />
                   ) : (
@@ -206,23 +206,23 @@ export default function ContactPage() {
                 </button>
 
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-2xl border border-violet-400/10 bg-white/[0.03] p-4 backdrop-blur-sm">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-violet-300/80">Email soporte</p>
+                  <div className="rounded-2xl border border-emerald-400/10 bg-white/[0.03] p-4 backdrop-blur-sm">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-300/80">Email soporte</p>
                     <p className="mt-2 break-all text-sm text-slate-200">{supportEmail || "Sin email configurado"}</p>
                   </div>
-                  <div className="rounded-2xl border border-violet-400/10 bg-white/[0.03] p-4 backdrop-blur-sm">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-violet-300/80">Carrito actual</p>
+                  <div className="rounded-2xl border border-emerald-400/10 bg-white/[0.03] p-4 backdrop-blur-sm">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-300/80">Carrito actual</p>
                     <p className="mt-2 text-sm text-slate-200">{items.length} ítem{items.length !== 1 ? "s" : ""} · {formatPrice(totalPrice)}</p>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="bg-[radial-gradient(circle_at_bottom_right,rgba(139,92,246,0.1),transparent_60%),linear-gradient(180deg,rgba(24,20,52,0.98),rgba(20,16,44,1))] p-4 sm:p-6">
+            <div className="bg-[radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.1),transparent_60%),linear-gradient(180deg,rgba(9,23,21,0.98),rgba(8,19,18,1))] p-4 sm:p-6">
               {sent ? (
                 <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="flex flex-col items-center justify-center gap-4 py-10">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-violet-400/15 shadow-[0_0_30px_rgba(139,92,246,0.25)]">
-                    <CheckCircle className="h-7 w-7 text-violet-300" />
+                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-400/15 shadow-[0_0_30px_rgba(16,185,129,0.25)]">
+                    <CheckCircle className="h-7 w-7 text-emerald-300" />
                   </div>
                   <h3 className="text-lg font-bold text-white">Consulta recibida</h3>
                   <p className="text-center text-sm text-slate-400">Ya guardamos tu mensaje y el equipo podrá responderlo desde el panel administrativo.</p>
@@ -230,7 +230,7 @@ export default function ContactPage() {
                     setSent(false);
                     setSubmitFeedback({ type: "", message: "" });
                     setForm({ name: "", email: "", subject: "", message: "" });
-                  }} className="mt-2 text-sm font-medium text-violet-300 transition hover:text-violet-200">
+                  }} className="mt-2 text-sm font-medium text-emerald-300 transition hover:text-emerald-200">
                     Enviar otro mensaje
                   </button>
                 </motion.div>
@@ -238,7 +238,7 @@ export default function ContactPage() {
                 <form onSubmit={handleSubmit} className="space-y-4">
                   <div className="mb-3 sm:mb-4">
                     <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-violet-300/25 bg-violet-300/12 text-violet-300 shadow-[0_0_20px_rgba(139,92,246,0.2)]">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-300/25 bg-emerald-300/12 text-emerald-300 shadow-[0_0_20px_rgba(16,185,129,0.2)]">
                         <Mail className="h-5 w-5" />
                       </div>
                       <div>
@@ -252,8 +252,8 @@ export default function ContactPage() {
                     <div key={key}>
                       <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-300">{label}</label>
                       <div className="relative">
-                        <Icon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-violet-400/50" />
-                        <input type={type} placeholder={placeholder} value={form[/** @type {keyof typeof form} */ (key)]} onChange={(event) => setForm((prev) => ({ ...prev, [key]: event.target.value }))} className="h-11 w-full rounded-2xl border border-violet-500/20 bg-violet-950/30 pl-10 pr-4 text-sm text-slate-100 placeholder:text-slate-500 transition focus:border-violet-400/40 focus:outline-none focus:ring-4 focus:ring-violet-400/10 focus:shadow-[0_0_20px_rgba(139,92,246,0.12)]" />
+                        <Icon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-emerald-400/50" />
+                        <input type={type} placeholder={placeholder} value={form[/** @type {keyof typeof form} */ (key)]} onChange={(event) => setForm((prev) => ({ ...prev, [key]: event.target.value }))} className="h-11 w-full rounded-2xl border border-emerald-500/20 bg-emerald-950/20 pl-10 pr-4 text-sm text-slate-100 placeholder:text-slate-500 transition focus:border-emerald-400/40 focus:outline-none focus:ring-4 focus:ring-emerald-400/10 focus:shadow-[0_0_20px_rgba(16,185,129,0.12)]" />
                       </div>
                     </div>
                   ))}
@@ -261,8 +261,8 @@ export default function ContactPage() {
                   <div>
                     <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-300">Mensaje</label>
                     <div className="relative">
-                      <AlignLeft className="absolute left-3 top-3 h-4 w-4 text-violet-400/50" />
-                      <textarea placeholder="Escribe tu mensaje aquí..." rows={4} value={form.message} onChange={(event) => setForm((prev) => ({ ...prev, message: event.target.value }))} className="w-full resize-none rounded-2xl border border-violet-500/20 bg-violet-950/30 py-3 pl-10 pr-4 text-sm text-slate-100 placeholder:text-slate-500 transition focus:border-violet-400/40 focus:outline-none focus:ring-4 focus:ring-violet-400/10 focus:shadow-[0_0_20px_rgba(139,92,246,0.12)]" />
+                      <AlignLeft className="absolute left-3 top-3 h-4 w-4 text-emerald-400/50" />
+                      <textarea placeholder="Escribe tu mensaje aquí..." rows={4} value={form.message} onChange={(event) => setForm((prev) => ({ ...prev, message: event.target.value }))} className="w-full resize-none rounded-2xl border border-emerald-500/20 bg-emerald-950/20 py-3 pl-10 pr-4 text-sm text-slate-100 placeholder:text-slate-500 transition focus:border-emerald-400/40 focus:outline-none focus:ring-4 focus:ring-emerald-400/10 focus:shadow-[0_0_20px_rgba(16,185,129,0.12)]" />
                     </div>
                   </div>
 
@@ -272,7 +272,7 @@ export default function ContactPage() {
                     <p className="text-xs text-slate-500">Al enviar, guardamos tu consulta en nuestro panel para darte seguimiento.</p>
                   )}
 
-                  <button type="submit" disabled={loading} className="group flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-violet-500 text-sm font-bold text-white shadow-[0_16px_40px_rgba(139,92,246,0.3)] transition hover:bg-violet-400 hover:shadow-[0_16px_50px_rgba(139,92,246,0.4)] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40">
+                  <button type="submit" disabled={loading} className="group flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 text-sm font-bold text-slate-950 shadow-[0_16px_40px_rgba(16,185,129,0.28)] transition hover:bg-emerald-400 hover:shadow-[0_16px_50px_rgba(16,185,129,0.38)] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40">
                     <Send className="h-4 w-4 transition group-hover:translate-x-0.5" />
                     {loading ? "Enviando..." : "Enviar consulta"}
                   </button>
