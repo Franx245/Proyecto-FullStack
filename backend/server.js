@@ -6979,50 +6979,6 @@ app.delete("/api/admin/versions/:id", requireAdminAuth, requireAdminRole([UserRo
   }
 });
 
-// ── Temporary backfill endpoint (remove after use) ──────────────────────
-app.post("/api/admin/backfill-card-identity", async (req, res) => {
-  try {
-    assertCronAuthorized(req);
-
-    const dryRun = req.query.dry === "true";
-
-    const result = await prisma.$executeRawUnsafe(`
-      UPDATE "Card"
-      SET "cardIdentity" = CAST("ygoproId" AS TEXT),
-          "externalId"   = CAST("ygoproId" AS TEXT)
-      WHERE "ygoproId" IS NOT NULL
-        AND ("cardIdentity" IS NULL OR "cardIdentity" = '')
-    `);
-
-    if (dryRun) {
-      const preview = await prisma.$queryRawUnsafe(`
-        SELECT "id", "name", "ygoproId"
-        FROM "Card"
-        WHERE "ygoproId" IS NOT NULL
-        LIMIT 10
-      `);
-      res.json({ dryRun: true, preview, message: "No changes applied" });
-      return;
-    }
-
-    const nameFallback = await prisma.$executeRawUnsafe(`
-      UPDATE "Card"
-      SET "cardIdentity" = LOWER(REGEXP_REPLACE(TRIM("name"), '[^a-zA-Z0-9]', '', 'g'))
-      WHERE ("cardIdentity" IS NULL OR "cardIdentity" = '')
-        AND "name" IS NOT NULL AND TRIM("name") != ''
-    `);
-
-    res.json({
-      backfilled_from_ygopro: result,
-      backfilled_from_name: nameFallback,
-      message: "Backfill complete"
-    });
-  } catch (error) {
-    console.error("[backfill-card-identity]", error);
-    res.status(error.statusCode || 500).json({ error: error.message });
-  }
-});
-
 app.get("/api/admin/custom/categories", requireAdminAuth, async (_req, res) => {
   try {
     const categories = await prisma.customCategory.findMany({
