@@ -1,0 +1,14 @@
+[build]
+builder = "nixpacks"
+
+[build.nixpacks]
+# Use npm ci (faster with lockfile) + only generate Prisma client
+installCmd = "npm ci --prefer-offline"
+buildCmd = "npx prisma generate"
+
+[deploy]
+startCommand = "node backend/server.js"
+healthcheckPath = "/api/health"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
