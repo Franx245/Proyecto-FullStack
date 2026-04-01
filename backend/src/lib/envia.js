@@ -10,12 +10,28 @@ const ENVIA_API_KEY = process.env.ENVIA_API_KEY || "";
 const ENVIA_WEBHOOK_SECRET = process.env.ENVIA_WEBHOOK_SECRET || "";
 
 /** Carriers that Envia supports for Argentina */
-const ENVIA_CARRIERS = ["andreani"];
-/** Carriers added as flat-rate (not available in Envia) */
-const FLATRATE_CARRIERS = ["correo-argentino"];
+const ENVIA_CARRIERS = ["andreani", "correo-argentino"];
 
 const ENVIA_TIMEOUT_MS = 5_000;
 const ENVIA_MAX_RETRIES = 2;
+
+/** @param {string | null | undefined} value */
+export function normalizeEnviaCarrier(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  if (["correoargentino", "correo argentino", "correo_argentino", "correo-argentino"].includes(normalized)) {
+    return "correo-argentino";
+  }
+
+  if (["pickup", "showroom", "retiro"].includes(normalized)) {
+    return "showroom";
+  }
+
+  return normalized;
+}
 
 /** @param {string} rawBody @param {string} signature */
 export function verifyEnviaWebhookSignature(rawBody, signature) {
@@ -132,14 +148,14 @@ const DEFAULT_PARCEL = {
  */
 export async function getShippingRates(destination, options = {}) {
   if (!isEnviaConfigured()) {
-    return getFallbackRates();
+    throw new Error("Envia no esta configurado");
   }
 
   if (!destination?.postalCode) {
     throw new Error("Código postal requerido para cotizar envío");
   }
 
-  const weight = options.weight || Math.max(0.3, (options.itemCount || 1) * 0.05);
+  const weight = options.weight || Math.max(0.3, (options.itemCount || 1) * 0.6);
 
   const destinationPayload = {
     name: "Cliente",
@@ -156,6 +172,8 @@ export async function getShippingRates(destination, options = {}) {
     amount: 1,
     type: "box",
     weight,
+    weightUnit: "KG",
+    lengthUnit: "CM",
     insurance: 0,
     declaredValue: 0,
     dimensions: {
@@ -174,54 +192,53 @@ export async function getShippingRates(destination, options = {}) {
             origin: DEFAULT_ORIGIN,
             destination: destinationPayload,
             packages: packagesPayload,
-            carrier,
-            type: 2,
+            shipment: {
+              type: 1,
+              carrier,
+            },
+            settings: {
+              currency: "ARS",
+            },
           }),
         });
 
         const rates = Array.isArray(body?.data) ? body.data : [];
-        return rates.map((rate) => ({
-          carrier: String(rate.carrier || carrier).toLowerCase(),
-          carrierLabel: carrierDisplayName(rate.carrier || carrier),
-          service: String(rate.serviceDescription || rate.service || "Estándar"),
-          price: Math.round(Number(rate.totalPrice || rate.basePrice || 0)),
-          estimatedDays: String(rate.deliveryEstimate || rate.days || "3-7 días"),
-          currency: "ARS",
-        }));
+        return rates
+          .map((rate) => {
+            const normalizedCarrier = normalizeEnviaCarrier(rate.carrier || carrier);
+            const currency = String(rate.currency || "ARS").trim().toUpperCase();
+            const price = Number(rate.totalPrice ?? rate.basePrice ?? 0);
+
+            if (!normalizedCarrier || !Number.isFinite(price) || price <= 0 || (currency && currency !== "ARS")) {
+              return null;
+            }
+
+            return {
+              carrier: normalizedCarrier,
+              carrierLabel: carrierDisplayName(rate.carrier || carrier),
+              service: String(rate.serviceDescription || rate.service || "Estándar"),
+              price: Math.round(price),
+              estimatedDays: String(rate.deliveryEstimate || rate.days || "3-7 días"),
+              currency,
+            };
+          })
+          .filter(Boolean);
       } catch (err) {
         console.warn(`Envia rate failed for ${carrier}:`, err.message);
         return [];
       }
     });
 
-    const enviaRates = (await Promise.all(ratePromises)).flat();
+    const allRates = (await Promise.all(ratePromises)).flat();
 
-    // Always add Correo Argentino flat rate (not available in Envia AR)
-    const allRates = [
-      ...enviaRates,
-      {
-        carrier: "correo-argentino",
-        carrierLabel: "Correo Argentino",
-        service: "Estándar",
-        price: 4500,
-        estimatedDays: "3-5 días",
-        currency: "ARS",
-      },
-    ];
-
-    allRates.push({
-      carrier: "showroom",
-      carrierLabel: "Retiro en showroom",
-      service: "Retiro presencial",
-      price: 0,
-      estimatedDays: "A coordinar",
-      currency: "ARS",
-    });
+    if (!allRates.length) {
+      throw new Error("No shipping rates available");
+    }
 
     return allRates.sort((a, b) => a.price - b.price);
   } catch (error) {
-    console.warn("Envia rate quote failed, using fallback", error.message);
-    return getFallbackRates();
+    console.warn("Envia rate quote failed", error.message);
+    throw error;
   }
 }
 
@@ -246,6 +263,7 @@ export async function createShipment({ order, carrier, service }) {
     throw new Error("La orden no tiene dirección de envío completa");
   }
 
+  const normalizedCarrier = normalizeEnviaCarrier(carrier);
   const body = await enviaFetch("/ship/generate/", {
     method: "POST",
     body: JSON.stringify({
@@ -266,21 +284,31 @@ export async function createShipment({ order, carrier, service }) {
         country: "AR",
       },
       packages: [{
-        weight: Math.max(0.3, (order.items?.length || 1) * 0.05),
+        weight: Math.max(0.3, (order.items || []).reduce((sum, item) => sum + (0.6 * Number(item.quantity || 0)), 0)),
+        weightUnit: "KG",
+        lengthUnit: "CM",
         height: DEFAULT_PARCEL.height,
         width: DEFAULT_PARCEL.width,
         length: DEFAULT_PARCEL.length,
         content: `Cartas Yu-Gi-Oh! - Orden #${order.id}`,
       }],
-      carrier,
-      service,
+      shipment: {
+        type: 1,
+        carrier: normalizedCarrier,
+        service,
+      },
+      settings: {
+        currency: "ARS",
+      },
     }),
   });
 
+  const shipment = Array.isArray(body?.data) ? body.data[0] : body?.data;
+
   return {
-    shipmentId: String(body?.data?.carrier_tracking_number || body?.data?.shipment_id || body?.data?.id || ""),
-    trackingNumber: String(body?.data?.carrier_tracking_number || body?.data?.tracking || ""),
-    label: body?.data?.label || null,
+    shipmentId: String(shipment?.shipmentId || shipment?.shipment_id || shipment?.id || shipment?.carrier_tracking_number || ""),
+    trackingNumber: String(shipment?.trackingNumber || shipment?.tracking || shipment?.carrier_tracking_number || ""),
+    label: shipment?.label || null,
   };
 }
 
@@ -325,8 +353,9 @@ function carrierDisplayName(carrier) {
   const names = {
     "correo-argentino": "Correo Argentino",
     "andreani": "Andreani",
+    showroom: "Retiro en showroom",
   };
-  return names[String(carrier).toLowerCase()] || carrier;
+  return names[normalizeEnviaCarrier(carrier) || ""] || carrier;
 }
 
 /** Infer Argentine province code from postal code prefix */
@@ -358,36 +387,6 @@ function normalizeTrackingStatus(status) {
   if (s.includes("cancel")) return "cancelled";
   if (s.includes("return") || s.includes("devol")) return "returned";
   return s || "pending";
-}
-
-/** Fallback flat rates when Envia is unavailable */
-function getFallbackRates() {
-  return [
-    {
-      carrier: "correo-argentino",
-      carrierLabel: "Correo Argentino",
-      service: "Estándar",
-      price: 4500,
-      estimatedDays: "3-5 días",
-      currency: "ARS",
-    },
-    {
-      carrier: "andreani",
-      carrierLabel: "Andreani",
-      service: "Express",
-      price: 6000,
-      estimatedDays: "2-3 días",
-      currency: "ARS",
-    },
-    {
-      carrier: "showroom",
-      carrierLabel: "Retiro en showroom",
-      service: "Retiro",
-      price: 0,
-      estimatedDays: "A coordinar",
-      currency: "ARS",
-    },
-  ];
 }
 
 /**

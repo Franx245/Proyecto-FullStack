@@ -38,7 +38,7 @@ import { handleRecomputePrices } from "./src/lib/jobs/recompute-prices.js";
 import { handleComputeCardRankings } from "./src/lib/jobs/compute-card-rankings.js";
 import { handleWarmPublicCache } from "./src/lib/jobs/warm-public-cache.js";
 import { getRedisBackendName, probeRedisConnection } from "./src/lib/redis.js";
-import { getShippingRates, createShipment, getTracking, verifyEnviaWebhookSignature, normalizeEnviaWebhookStatus } from "./src/lib/envia.js";
+import { getShippingRates, createShipment, getTracking, verifyEnviaWebhookSignature, normalizeEnviaWebhookStatus, normalizeEnviaCarrier } from "./src/lib/envia.js";
 import { invalidateOrderRelatedCache } from "./src/lib/cache-invalidation.js";
 import { recordApiMetric, recordCatalogSearchMetric } from "./src/lib/metrics.js";
 import {
@@ -628,6 +628,111 @@ function assertExpectedUpdatedAt(entity, expectedUpdatedAt) {
 
 function getShippingInfo(zone) {
   return SHIPPING_OPTIONS[zone] || SHIPPING_OPTIONS[ShippingZone.PICKUP];
+}
+
+function normalizeCheckoutCarrier(value) {
+  return normalizeEnviaCarrier(value);
+}
+
+function buildCheckoutShippingLabel(rate, zone) {
+  const fallbackLabel = getShippingInfo(zone).label;
+  const carrierLabel = String(rate?.carrierLabel || "").trim();
+  const service = String(rate?.service || "").trim();
+
+  if (carrierLabel && service && carrierLabel.toLowerCase() !== service.toLowerCase()) {
+    return `${carrierLabel} · ${service}`;
+  }
+
+  return carrierLabel || fallbackLabel;
+}
+
+function getCheckoutCarrierLabel(carrier) {
+  const normalizedCarrier = normalizeCheckoutCarrier(carrier);
+  if (normalizedCarrier === "correo-argentino") {
+    return "Correo Argentino";
+  }
+
+  if (normalizedCarrier === "andreani") {
+    return "Andreani";
+  }
+
+  if (normalizedCarrier === "showroom") {
+    return "Retiro en showroom";
+  }
+
+  return null;
+}
+
+async function resolveCheckoutShippingQuote(payload, delivery, items) {
+  if (delivery.shippingZone === ShippingZone.PICKUP) {
+    return {
+      carrier: "showroom",
+      cost: 0,
+      label: getShippingInfo(ShippingZone.PICKUP).label,
+    };
+  }
+
+  const selectedCarrier = normalizeCheckoutCarrier(payload.shipping_carrier || payload.carrier);
+  if (!selectedCarrier || selectedCarrier === "showroom") {
+    throw createAppError("Shipping required", {
+      statusCode: 400,
+      code: "SHIPPING_REQUIRED",
+    });
+  }
+
+  const postalCode = String(delivery.snapshot.shippingPostalCode || "").trim();
+  const shippingCity = String(delivery.snapshot.shippingCity || "").trim();
+  const shippingProvince = String(delivery.snapshot.shippingProvince || "").trim();
+  if (!postalCode) {
+    throw createAppError("Shipping postal code is required", {
+      statusCode: 400,
+      code: "SHIPPING_POSTAL_CODE_REQUIRED",
+    });
+  }
+
+  const itemCount = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  const weight = items.reduce((sum, item) => sum + (0.6 * Number(item.quantity || 0)), 0);
+
+  try {
+    const rates = await cacheGetOrFetch(
+      `shipping-rates:${postalCode}:${shippingCity.toLowerCase()}:${shippingProvince.toLowerCase()}:${itemCount}:${Math.round(weight * 100)}`,
+      300,
+      () => getShippingRates({
+        postalCode,
+        city: shippingCity,
+        state: shippingProvince,
+      }, { itemCount, weight })
+    );
+
+    const selectedRate = Array.isArray(rates)
+      ? rates.find((rate) => normalizeCheckoutCarrier(rate?.carrier) === selectedCarrier)
+      : null;
+
+    if (!selectedRate || !Number.isFinite(Number(selectedRate.price)) || Number(selectedRate.price) < 0) {
+      throw createAppError("Selected shipping rate unavailable", {
+        statusCode: 409,
+        code: "SHIPPING_RATE_UNAVAILABLE",
+        details: {
+          carrier: selectedCarrier,
+        },
+      });
+    }
+
+    return {
+      carrier: selectedCarrier,
+      cost: formatCurrency(Number(selectedRate.price)),
+      label: buildCheckoutShippingLabel(selectedRate, delivery.shippingZone),
+    };
+  } catch (error) {
+    if (error?.statusCode) {
+      throw error;
+    }
+
+    throw createAppError("Shipping unavailable", {
+      statusCode: 503,
+      code: "SHIPPING_UNAVAILABLE",
+    });
+  }
 }
 
 function isBillableStatus(status) {
@@ -2265,6 +2370,11 @@ async function recordCardHistoryEntries(tx, cards, updates, source = "admin") {
 
 function parseAdminOrderShippingPayload(payload) {
   const data = {};
+
+  if (payload.carrier !== undefined) {
+    data.carrier = normalizeCheckoutCarrier(payload.carrier) || null;
+    data.shippingLabel = getCheckoutCarrierLabel(data.carrier);
+  }
 
   if (payload.tracking_code !== undefined) {
     const trackingCode = typeof payload.tracking_code === "string" ? payload.tracking_code.trim() : "";
@@ -4891,7 +5001,8 @@ app.post("/api/checkout", requireAuth, checkoutRateLimit, async (req, res) => {
       }
 
       const delivery = await buildCheckoutAddress(tx, userId, req.body || {}, fallbackPhone);
-      const total = formatCurrency(subtotal + delivery.shipping.cost);
+      const shippingQuote = await resolveCheckoutShippingQuote(req.body || {}, delivery, normalizedItems);
+      const total = formatCurrency(subtotal + shippingQuote.cost);
       const expiresAt = buildCheckoutExpirationDate();
 
       const order = await tx.order.create({
@@ -4899,7 +5010,7 @@ app.post("/api/checkout", requireAuth, checkoutRateLimit, async (req, res) => {
           userId,
           addressId: delivery.addressId,
           subtotal: formatCurrency(subtotal),
-          shippingCost: delivery.shipping.cost,
+          shippingCost: shippingQuote.cost,
           total,
           currency: "ARS",
           exchange_rate: 1,
@@ -4909,8 +5020,8 @@ app.post("/api/checkout", requireAuth, checkoutRateLimit, async (req, res) => {
           payment_status: null,
           payment_status_detail: null,
           shippingZone: delivery.shippingZone,
-          shippingLabel: delivery.shipping.label,
-          carrier: typeof req.body?.shipping_carrier === "string" && req.body.shipping_carrier.trim() ? req.body.shipping_carrier.trim() : null,
+          shippingLabel: shippingQuote.label,
+          carrier: shippingQuote.carrier,
           customerName,
           customerEmail,
           customerPhone: delivery.snapshot.customerPhone,
@@ -4964,6 +5075,7 @@ app.post("/api/checkout", requireAuth, checkoutRateLimit, async (req, res) => {
       total: result.order.total,
       shippingZone: result.order.shippingZone,
       carrier: result.order.carrier,
+      shippingLabel: result.order.shippingLabel,
       paymentRedirectAvailable: false,
     });
 
@@ -5489,15 +5601,21 @@ app.post("/api/shipping/rates", requireAuth, async (req, res) => {
     const city = String(req.body?.city || "").trim();
     const state = String(req.body?.state || "").trim();
     const itemCount = Number(req.body?.item_count || req.body?.itemCount || 1);
+    const weight = Number(req.body?.weight || 0);
 
-    console.log("SHIPPING_FLOW", { postalCode, city, state, itemCount });
+    console.log("SHIPPING_FLOW", { postalCode, city, state, itemCount, weight });
 
-    const cacheKey = `shipping-rates:${postalCode}:${itemCount}`;
+    const cacheKey = `shipping-rates:${postalCode}:${city.toLowerCase()}:${state.toLowerCase()}:${itemCount}:${Math.round(weight * 100)}`;
     const rates = await cacheGetOrFetch(
       cacheKey,
       300,
-      () => getShippingRates({ postalCode, city, state }, { itemCount }),
+      () => getShippingRates({ postalCode, city, state }, { itemCount, weight }),
     );
+
+    if (!Array.isArray(rates) || rates.length === 0) {
+      res.status(503).json({ error: "Shipping unavailable" });
+      return;
+    }
 
     res.json({ rates });
   } catch (error) {

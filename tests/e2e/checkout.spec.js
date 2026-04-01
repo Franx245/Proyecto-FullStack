@@ -136,7 +136,7 @@ test.describe("Checkout — MercadoPago brick", () => {
     await gotoLive(page, "/checkout/pay/1");
 
     // Should either show the brick container, auth redirect, or an error
-    const hasBrickContainer = await page.locator("#cardPaymentBrick_container").isVisible({ timeout: 10_000 }).catch(() => false);
+    const hasBrickContainer = await page.locator("[id^='cardPaymentBrick_container']").isVisible({ timeout: 10_000 }).catch(() => false);
     const hasAuthRedirect = await page.getByRole("button", { name: "Ir a login" }).isVisible().catch(() => false);
     const hasSecureRedirect = await page.getByText(/Redirigiendo al acceso seguro/i).isVisible().catch(() => false);
     const hasSessionLoading = await page.getByText(/Cargando sesión/i).isVisible().catch(() => false);

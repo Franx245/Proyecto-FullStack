@@ -17,7 +17,7 @@ import { useAuth } from "@/lib/auth";
 import {
   createMercadoPagoBrickBuilder,
   createMercadoPagoBrowserClient,
-  MERCADOPAGO_BRICK_DARK_STYLE,
+  createMercadoPagoBrickDarkStyle,
 } from "@/lib/mercadopago";
 import { getTrackedOrderIds } from "@/lib/orderTracking";
 import { orderStatusLabel } from "@/lib/shipping";
@@ -186,6 +186,7 @@ export default function OrderPayment() {
     const rawValue = Number(order?.total_ars ?? order?.total ?? 0);
     return Number.isFinite(rawValue) ? rawValue.toFixed(2) : "0.00";
   }, [order?.total, order?.total_ars]);
+  const brickContainerId = order?.id ? `cardPaymentBrick_container_${order.id}` : "cardPaymentBrick_container";
 
   const canPay = ownsOrder && canRetryDirectPayment(order);
   const shouldPollOrder = Boolean(lastAttempt && order?.status === "pending_payment");
@@ -326,7 +327,7 @@ export default function OrderPayment() {
 
     void (async () => {
       try {
-        const container = document.getElementById("cardPaymentBrick_container");
+        const container = document.getElementById(brickContainerId);
         if (container) {
           container.innerHTML = "";
         }
@@ -336,7 +337,7 @@ export default function OrderPayment() {
           return;
         }
 
-        localBrickController = await createMercadoPagoBrickBuilder(mp).create("cardPayment", "cardPaymentBrick_container", {
+        localBrickController = await createMercadoPagoBrickBuilder(mp).create("cardPayment", brickContainerId, {
           initialization: {
             amount: Number(amount),
             payer: {
@@ -346,7 +347,7 @@ export default function OrderPayment() {
           customization: {
             visual: {
               hideFormTitle: true,
-              style: MERCADOPAGO_BRICK_DARK_STYLE,
+              style: createMercadoPagoBrickDarkStyle(),
             },
             paymentMethods: {
               minInstallments: 1,
@@ -384,7 +385,7 @@ export default function OrderPayment() {
         // noop
       }
     };
-  }, [amount, canPay, isAuthenticated, order?.id, order?.customer_email, order?.customer_name, ownsOrder, ENV.MP_PUBLIC_KEY]);
+  }, [amount, brickContainerId, canPay, isAuthenticated, order?.id, order?.customer_email, order?.customer_name, ownsOrder, ENV.MP_PUBLIC_KEY]);
 
   if (isBootstrapping) {
     return (
@@ -576,7 +577,7 @@ export default function OrderPayment() {
                 ) : null}
 
                 <div key={order.id} className="overflow-hidden rounded-[28px] border border-violet-500/20 bg-slate-950/90 p-3 shadow-[0_24px_60px_rgba(15,23,42,0.18),0_0_40px_rgba(139,92,246,0.12)] backdrop-blur-xl">
-                  <div id="cardPaymentBrick_container" className="min-h-[420px] rounded-[24px] bg-slate-950" />
+                  <div id={brickContainerId} className="min-h-[420px] rounded-[24px] bg-slate-950" />
                 </div>
 
                 <div className="rounded-2xl border border-violet-500/15 bg-violet-500/5 backdrop-blur-sm p-4 text-sm text-muted-foreground">

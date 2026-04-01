@@ -13,6 +13,31 @@ import {
   orderStatusLabel,
 } from "./shared";
 
+function carrierLabel(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  if (["correoargentino", "correo-argentino"].includes(normalized)) {
+    return "Correo Argentino";
+  }
+
+  if (normalized === "andreani") {
+    return "Andreani";
+  }
+
+  if (normalized === "showroom") {
+    return "Retiro en showroom";
+  }
+
+  return value;
+}
+
+function visibleShippingLabel(order) {
+  return carrierLabel(order.carrier) || order.shipping_label || "Envío";
+}
+
 function getTransitionOptions(status, canCancelOrders) {
   const transitions = {
     pending_payment: ["pending_payment", "paid", "failed", "expired", ...(canCancelOrders ? ["cancelled"] : [])],
@@ -64,6 +89,7 @@ export default memo(function OrdersView({ orders, summary, pagination, filters, 
       const next = { ...current };
       for (const order of orders) {
         next[order.id] = {
+          carrier: current[order.id]?.carrier ?? (order.carrier || ""),
           tracking_code: current[order.id]?.tracking_code ?? (order.tracking_code || ""),
           tracking_visible_to_user: current[order.id]?.tracking_visible_to_user ?? Boolean(order.tracking_visible_to_user),
         };
@@ -73,6 +99,7 @@ export default memo(function OrdersView({ orders, summary, pagination, filters, 
   }, [orders]);
 
   const getShippingDraft = (order) => shippingDrafts[order.id] || {
+    carrier: order.carrier || "",
     tracking_code: order.tracking_code || "",
     tracking_visible_to_user: Boolean(order.tracking_visible_to_user),
   };
@@ -81,6 +108,7 @@ export default memo(function OrdersView({ orders, summary, pagination, filters, 
     setShippingDrafts((current) => ({
       ...current,
       [orderId]: {
+        carrier: current[orderId]?.carrier ?? "",
         tracking_code: current[orderId]?.tracking_code ?? "",
         tracking_visible_to_user: current[orderId]?.tracking_visible_to_user ?? false,
         ...current[orderId],
@@ -191,7 +219,8 @@ export default memo(function OrdersView({ orders, summary, pagination, filters, 
                 </div>
 
                 <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/30 px-3 py-3 text-xs text-slate-300">
-                  <p>{order.shipping_label || "Envío"} · {order.shipping_zone}</p>
+                  <p>{visibleShippingLabel(order)} · {order.shipping_zone}</p>
+                  {order.shipping_label && visibleShippingLabel(order) !== order.shipping_label ? <p className="mt-1 text-slate-400">Servicio: {order.shipping_label}</p> : null}
                   {order.tracking_code ? <p className="mt-1 text-slate-300">Tracking: {order.tracking_code}</p> : null}
                   {order.shipping_address ? <p className="mt-1 text-slate-400">{order.shipping_address}</p> : null}
                 </div>
@@ -206,6 +235,15 @@ export default memo(function OrdersView({ orders, summary, pagination, filters, 
 
                 {order.is_shipping_order ? (
                   <div className="mt-3 space-y-3 rounded-2xl border border-white/10 bg-slate-950/30 px-3 py-3 text-sm text-slate-300">
+                    <select
+                      value={getShippingDraft(order).carrier}
+                      onChange={(event) => updateShippingDraft(order.id, "carrier", event.target.value)}
+                      className="h-11 w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition focus:border-amber-400"
+                    >
+                      <option value="">Carrier sin definir</option>
+                      <option value="correo-argentino">Correo Argentino</option>
+                      <option value="andreani">Andreani</option>
+                    </select>
                     <input
                       value={getShippingDraft(order).tracking_code}
                       onChange={(event) => updateShippingDraft(order.id, "tracking_code", event.target.value)}
@@ -345,7 +383,8 @@ export default memo(function OrdersView({ orders, summary, pagination, filters, 
                   </div>
 
                   <div className="rounded-2xl border border-white/10 bg-slate-950/30 px-4 py-3 text-sm text-slate-300">
-                    <p>{order.shipping_label || "Envío"} · {order.shipping_zone}</p>
+                    <p>{visibleShippingLabel(order)} · {order.shipping_zone}</p>
+                    {order.shipping_label && visibleShippingLabel(order) !== order.shipping_label ? <p className="mt-1 text-slate-400">Servicio: {order.shipping_label}</p> : null}
                     {order.tracking_code ? <p className="mt-1 text-slate-300">Tracking: {order.tracking_code}</p> : null}
                     {order.shipping_address ? <p className="mt-1 text-slate-400">{order.shipping_address}</p> : null}
                   </div>
@@ -362,6 +401,15 @@ export default memo(function OrdersView({ orders, summary, pagination, filters, 
                     <div className="rounded-2xl border border-white/10 bg-slate-950/30 p-4 text-sm text-slate-300">
                       <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
                         <div className="space-y-3">
+                          <select
+                            value={getShippingDraft(order).carrier}
+                            onChange={(event) => updateShippingDraft(order.id, "carrier", event.target.value)}
+                            className="h-11 w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition focus:border-amber-400"
+                          >
+                            <option value="">Carrier sin definir</option>
+                            <option value="correo-argentino">Correo Argentino</option>
+                            <option value="andreani">Andreani</option>
+                          </select>
                           <input
                             value={getShippingDraft(order).tracking_code}
                             onChange={(event) => updateShippingDraft(order.id, "tracking_code", event.target.value)}

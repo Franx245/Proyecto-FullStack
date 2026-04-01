@@ -27,7 +27,7 @@ import { checkoutCart, createStoreMutationId, fetchMyAddresses, fetchShippingRat
 import { useDebounce } from "@/lib/useDebounce";
 import { trackOrderId } from "@/lib/orderTracking";
 import { useAuth } from "@/lib/auth";
-import { getShippingOption } from "@/lib/shipping";
+import { getShippingCarrierLabel, normalizeShippingCarrier } from "@/lib/shipping";
 import { refreshCards } from "@/lib/query-client";
 import CardImage from "@/components/marketplace/CardImage";
 import { formatPrice } from "@/utils/currency";
@@ -216,6 +216,17 @@ function getPreferredAddress(addresses) {
   return addresses.find((address) => address.is_default) || addresses[0] || null;
 }
 
+const DEFAULT_DELIVERY_CARRIER = "correo-argentino";
+
+function findRateByCarrier(rates, carrier) {
+  const normalizedCarrier = normalizeShippingCarrier(carrier);
+  if (!normalizedCarrier) {
+    return null;
+  }
+
+  return rates.find((rate) => normalizeShippingCarrier(rate.carrier) === normalizedCarrier) || null;
+}
+
 export default function CartPage() {
   const { items, totalPrice, totalItems, clearCart, removeItem, isHydrated } = useCart();
   const { user, isAuthenticated, isBootstrapping } = useAuth();
@@ -232,29 +243,10 @@ export default function CartPage() {
   const [accepted, setAccepted] = useState(false);
   const [errors, setErrors] = useState(/** @type {CheckoutErrors} */ ({}));
   const [shippingPostalCode, setShippingPostalCode] = useState("");
-  const [selectedCarrier, setSelectedCarrier] = useState("correoargentino");
-  const [newAddressConfirmed, setNewAddressConfirmed] = useState(false);
+  const [selectedCarrier, setSelectedCarrier] = useState(/** @type {string | null} */ (null));
 
   const debouncedPostalCode = useDebounce(shippingPostalCode, 400);
   const totalWeight = items.reduce((acc, item) => acc + 0.6 * item.quantity, 0);
-
-  const shippingRatesQuery = useQuery({
-    queryKey: ["shipping-rates", debouncedPostalCode, items.length, totalWeight],
-    queryFn: () => fetchShippingRates({ postalCode: debouncedPostalCode, itemCount: items.length }),
-    enabled: isAuthenticated && debouncedPostalCode.length >= 4 && shippingZone !== "pickup",
-    staleTime: 1000 * 60 * 5,
-    placeholderData: (prev) => prev,
-    retry: 1,
-  });
-
-  const shippingRates = useMemo(
-    () => /** @type {Array<{ carrier: string, carrierLabel: string, service: string, price: number, estimatedDays: string }>} */ (
-      shippingRatesQuery.data?.rates ?? []
-    ),
-    [shippingRatesQuery.data?.rates]
-  );
-
-  const selectedRate = shippingRates.find((r) => r.carrier === selectedCarrier) || null;
 
   /** @param {CartItem} item */
   const handleOpenDetail = (item) => {
@@ -276,6 +268,43 @@ export default function CartPage() {
     [addressesQuery.data?.addresses]
   ));
 
+  const selectedAddress = /** @type {CheckoutAddress | null} */ (useMemo(
+    () => addresses.find((address) => String(address.id) === selectedAddressId) || null,
+    [addresses, selectedAddressId]
+  ));
+
+  const effectiveZone = selectedAddress?.zone || shippingZone;
+  const quotedAddress = deliveryMode === "saved" ? selectedAddress : newAddress;
+  const isPickup = effectiveZone === "pickup";
+  const normalizedQuotedCity = String(quotedAddress?.city || "").trim().toLowerCase();
+  const normalizedQuotedState = String(quotedAddress?.state || "").trim().toLowerCase();
+
+  const shippingRatesQuery = useQuery({
+    queryKey: ["shipping", debouncedPostalCode, normalizedQuotedCity, normalizedQuotedState, items.length, totalWeight],
+    queryFn: () => fetchShippingRates({
+      postalCode: debouncedPostalCode,
+      city: quotedAddress?.city,
+      state: quotedAddress?.state,
+      itemCount: items.length,
+      weight: totalWeight,
+    }),
+    enabled: isAuthenticated && debouncedPostalCode.length >= 4 && !isPickup,
+    staleTime: 1000 * 60 * 5,
+    placeholderData: (prev) => prev,
+    retry: 1,
+  });
+
+  const shippingRates = useMemo(
+    () => /** @type {Array<{ carrier: string, carrierLabel: string, service: string, price: number, estimatedDays: string }>} */ (
+      shippingRatesQuery.data?.rates ?? []
+    ),
+    [shippingRatesQuery.data?.rates]
+  );
+
+  const selectedRate = findRateByCarrier(shippingRates, selectedCarrier);
+  const correoRate = findRateByCarrier(shippingRates, "correo-argentino");
+  const andreaniRate = findRateByCarrier(shippingRates, "andreani");
+
   useEffect(() => {
     if (user) {
       setPhone((current) => current || user.phone || "");
@@ -295,59 +324,51 @@ export default function CartPage() {
     setShippingZone(defaultAddress.zone);
   }, [addresses]);
 
-  const selectedAddress = /** @type {CheckoutAddress | null} */ (useMemo(
-    () => addresses.find((address) => String(address.id) === selectedAddressId) || null,
-    [addresses, selectedAddressId]
-  ));
-
-  const effectiveZone = selectedAddress?.zone || shippingZone;
-
-  // Invalidate selected rate when postal code changes (rates will refetch)
   useEffect(() => {
-    setSelectedCarrier((prev) => prev || "correoargentino");
-    // selectedRate is a derived lookup — the query refetch handles staleness
-  }, [debouncedPostalCode]);
-
-  // Invalidate rates when items change (weight/count affects price)
-  useEffect(() => {
-    if (shippingRatesQuery.data) {
-      shippingRatesQuery.refetch();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items.length, totalWeight]);
-
-  // Auto-propagate postal code from address to trigger rate fetch
-  useEffect(() => {
-    if (effectiveZone === "pickup") {
+    if (isPickup) {
       setShippingPostalCode("");
+      setSelectedCarrier("showroom");
       return;
     }
-    if (deliveryMode === "saved" && selectedAddress?.postal_code) {
-      setShippingPostalCode(selectedAddress.postal_code);
-    } else if (deliveryMode === "new" && newAddressConfirmed && newAddress.postal_code?.length >= 4) {
-      setShippingPostalCode(newAddress.postal_code);
-    }
-  }, [deliveryMode, selectedAddress?.postal_code, selectedAddressId, newAddress.postal_code, newAddressConfirmed, effectiveZone]);
 
-  // Auto-select carrier when rates arrive
+    if (deliveryMode === "saved") {
+      setShippingPostalCode(selectedAddress?.postal_code || "");
+      return;
+    }
+
+    setShippingPostalCode(newAddress.postal_code?.trim() || "");
+  }, [deliveryMode, isPickup, newAddress.postal_code, selectedAddress?.postal_code]);
+
   useEffect(() => {
-    if (shippingRates.length > 0 && selectedCarrier) {
-      const hasSelected = shippingRates.some((r) => r.carrier === selectedCarrier);
-      if (!hasSelected) {
-        setSelectedCarrier(shippingRates[0].carrier);
+    if (isPickup) {
+      return;
+    }
+
+    setSelectedCarrier(null);
+  }, [debouncedPostalCode, normalizedQuotedCity, normalizedQuotedState, items.length, totalWeight, isPickup]);
+
+  useEffect(() => {
+    if (isPickup) {
+      return;
+    }
+
+    if (shippingRatesQuery.isFetching || !shippingRates.length) {
+      return;
+    }
+
+    setSelectedCarrier((current) => {
+      const currentRate = findRateByCarrier(shippingRates, current);
+      if (currentRate) {
+        return normalizeShippingCarrier(currentRate.carrier);
       }
-    }
-  }, [shippingRates, selectedCarrier]);
 
-  // Auto-select correoargentino when switching from pickup to delivery
-  useEffect(() => {
-    if (shippingZone !== "pickup" && !selectedCarrier) {
-      setSelectedCarrier("correoargentino");
-    }
-  }, [shippingZone, selectedCarrier]);
+      const preferredRate = findRateByCarrier(shippingRates, DEFAULT_DELIVERY_CARRIER);
+      return normalizeShippingCarrier(preferredRate?.carrier || shippingRates[0]?.carrier);
+    });
+  }, [shippingRates, shippingRatesQuery.isFetching, isPickup]);
 
   useEffect(() => {
-    if (!isAuthenticated || deliveryMode !== "saved" || shippingZone === "pickup") {
+    if (!isAuthenticated || deliveryMode !== "saved" || isPickup) {
       return;
     }
 
@@ -363,30 +384,28 @@ export default function CartPage() {
 
     setSelectedAddressId(String(fallbackAddress.id));
     setShippingZone(fallbackAddress.zone);
-  }, [addresses, deliveryMode, isAuthenticated, selectedAddress, shippingZone]);
+  }, [addresses, deliveryMode, isAuthenticated, isPickup, selectedAddress]);
 
   useEffect(() => {
     setNewAddress((current) => ({ ...current, zone: shippingZone }));
   }, [shippingZone]);
 
-  const shippingOption = getShippingOption(effectiveZone);
-
   /** @type {number | null} */
   let effectiveShippingCost = null;
-  if (effectiveZone === "pickup") {
+  if (isPickup) {
     effectiveShippingCost = 0;
-  } else if (selectedCarrier === "showroom") {
+  } else if (normalizeShippingCarrier(selectedCarrier) === "showroom") {
     effectiveShippingCost = 0;
-  } else if (selectedRate?.price > 0) {
+  } else if (Number(selectedRate?.price) > 0) {
     effectiveShippingCost = selectedRate.price;
   }
 
-  const shippingLoading = effectiveZone !== "pickup" && shippingRatesQuery.isFetching;
-  const effectiveCarrierLabel = effectiveZone === "pickup"
+  const shippingLoading = !isPickup && shippingRatesQuery.isFetching;
+  const effectiveCarrierLabel = isPickup
     ? "Retiro en showroom"
-    : selectedRate?.carrierLabel || (selectedCarrier === "andreani" ? "Andreani" : "Correo Argentino");
+    : selectedRate?.carrierLabel || getShippingCarrierLabel(selectedCarrier) || "Seleccioná envío";
   const totalWithShipping = effectiveShippingCost === null ? null : totalPrice + effectiveShippingCost;
-  const isShippingValid = effectiveZone === "pickup" || (!!selectedCarrier && selectedRate?.price > 0);
+  const isShippingValid = isPickup || (!!normalizeShippingCarrier(selectedCarrier) && Number(selectedRate?.price) > 0);
   const requiresManualAddress = isAuthenticated && effectiveZone !== "pickup" && (deliveryMode === "new" || !selectedAddress);
 
   const checkoutMutation = useMutation({
@@ -432,8 +451,7 @@ export default function CartPage() {
       customer_name: customerName.trim(),
       phone,
       shipping_zone: effectiveZone,
-      shipping_carrier: selectedRate?.carrier || null,
-      shipping_cost: effectiveShippingCost ?? 0,
+      shipping_carrier: selectedRate?.carrier || normalizeShippingCarrier(selectedCarrier),
       notes: notes.trim(),
       accepted,
       mutation_id: checkoutMutationId,
@@ -623,9 +641,16 @@ export default function CartPage() {
                         {/* Correo Argentino */}
                         <button
                           type="button"
+                          disabled={!isPickup && !shippingLoading && !correoRate}
                           onClick={() => {
-                            setShippingZone("gba");
-                            setSelectedCarrier("correoargentino");
+                            setSelectedCarrier("correo-argentino");
+                            if (effectiveZone === "pickup") {
+                              const fallbackAddress = getPreferredAddress(addresses);
+                              if (fallbackAddress) {
+                                setSelectedAddressId(String(fallbackAddress.id));
+                                setShippingZone(fallbackAddress.zone);
+                              }
+                            }
                             if (deliveryMode === "saved") {
                               const fallbackAddress = getPreferredAddress(addresses);
                               if (fallbackAddress) {
@@ -634,40 +659,46 @@ export default function CartPage() {
                             }
                           }}
                           className={`group relative flex flex-col items-center gap-1 sm:gap-2 rounded-2xl border-2 px-2 sm:px-4 py-3 sm:py-5 text-center transition-all duration-200 ${
-                            selectedCarrier === "correoargentino" && effectiveZone !== "pickup"
+                            normalizeShippingCarrier(selectedCarrier) === "correo-argentino" && !isPickup
                               ? "border-sky-400 bg-sky-400/10 shadow-[0_0_24px_rgba(56,189,248,0.12)]"
-                              : "border-border/60 hover:border-sky-400/40 hover:bg-sky-400/5"
-                          }`}
+                              : !isPickup && !shippingLoading && !correoRate
+                                ? "border-border/40 opacity-50"
+                                : "border-border/60 hover:border-sky-400/40 hover:bg-sky-400/5"
+                          } disabled:cursor-not-allowed`}
                         >
-                          {selectedCarrier === "correoargentino" && effectiveZone !== "pickup" ? (
+                          {normalizeShippingCarrier(selectedCarrier) === "correo-argentino" && !isPickup ? (
                             <div className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-sky-400 shadow-lg shadow-sky-400/30">
                               <Check className="h-3 w-3 text-background" />
                             </div>
                           ) : null}
                           <Package className="w-5 h-5 sm:w-6 sm:h-6 text-sky-400" />
                           <p className="text-[11px] sm:text-sm font-bold text-foreground leading-tight">Correo Arg.</p>
-                          {(() => {
-                            const correoRate = shippingRates.find((r) => r.carrier === "correoargentino" || r.carrier === "correo-argentino");
-                            return correoRate ? (
-                              <>
-                                <p className="text-sm sm:text-lg font-black text-sky-400">{formatPrice(correoRate.price)}</p>
-                                <p className="text-[10px] sm:text-[11px] text-muted-foreground">{correoRate.estimatedDays}</p>
-                              </>
-                            ) : (
-                              <>
-                                <p className="text-sm sm:text-lg font-black text-sky-400">{shippingLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : formatPrice(shippingOption.cost)}</p>
-                                <p className="text-[10px] sm:text-[11px] text-muted-foreground">3–6 días</p>
-                              </>
-                            );
-                          })()}
+                          {correoRate ? (
+                            <>
+                              <p className="text-sm sm:text-lg font-black text-sky-400">{formatPrice(correoRate.price)}</p>
+                              <p className="text-[10px] sm:text-[11px] text-muted-foreground">{correoRate.estimatedDays}</p>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-sm sm:text-lg font-black text-sky-400">{shippingLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : "—"}</p>
+                              <p className="text-[10px] sm:text-[11px] text-muted-foreground">{shippingLoading ? "Cotizando..." : "No disponible para esta dirección"}</p>
+                            </>
+                          )}
                         </button>
 
                         {/* Andreani */}
                         <button
                           type="button"
+                          disabled={!isPickup && !shippingLoading && !andreaniRate}
                           onClick={() => {
-                            setShippingZone("interior");
                             setSelectedCarrier("andreani");
+                            if (effectiveZone === "pickup") {
+                              const fallbackAddress = getPreferredAddress(addresses);
+                              if (fallbackAddress) {
+                                setSelectedAddressId(String(fallbackAddress.id));
+                                setShippingZone(fallbackAddress.zone);
+                              }
+                            }
                             if (deliveryMode === "saved") {
                               const fallbackAddress = getPreferredAddress(addresses);
                               if (fallbackAddress) {
@@ -676,42 +707,49 @@ export default function CartPage() {
                             }
                           }}
                           className={`group relative flex flex-col items-center gap-1 sm:gap-2 rounded-2xl border-2 px-2 sm:px-4 py-3 sm:py-5 text-center transition-all duration-200 ${
-                            selectedCarrier === "andreani" && effectiveZone !== "pickup"
+                            normalizeShippingCarrier(selectedCarrier) === "andreani" && !isPickup
                               ? "border-violet-400 bg-violet-400/10 shadow-[0_0_24px_rgba(167,139,250,0.12)]"
-                              : "border-border/60 hover:border-violet-400/40 hover:bg-violet-400/5"
-                          }`}
+                              : !isPickup && !shippingLoading && !andreaniRate
+                                ? "border-border/40 opacity-50"
+                                : "border-border/60 hover:border-violet-400/40 hover:bg-violet-400/5"
+                          } disabled:cursor-not-allowed`}
                         >
-                          {selectedCarrier === "andreani" && effectiveZone !== "pickup" ? (
+                          {normalizeShippingCarrier(selectedCarrier) === "andreani" && !isPickup ? (
                             <div className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-violet-400 shadow-lg shadow-violet-400/30">
                               <Check className="h-3 w-3 text-background" />
                             </div>
                           ) : null}
                           <Truck className="w-5 h-5 sm:w-6 sm:h-6 text-violet-400" />
                           <p className="text-[11px] sm:text-sm font-bold text-foreground leading-tight">Andreani</p>
-                          {(() => {
-                            const andreaniRate = shippingRates.find((r) => r.carrier === "andreani");
-                            return andreaniRate ? (
-                              <>
-                                <p className="text-sm sm:text-lg font-black text-violet-400">{formatPrice(andreaniRate.price)}</p>
-                                <p className="text-[10px] sm:text-[11px] text-muted-foreground">{andreaniRate.estimatedDays}</p>
-                              </>
-                            ) : (
-                              <>
-                                <p className="text-sm sm:text-lg font-black text-violet-400">{shippingLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : "—"}</p>
-                                <p className="text-[10px] sm:text-[11px] text-muted-foreground">2–4 días</p>
-                              </>
-                            );
-                          })()}
+                          {andreaniRate ? (
+                            <>
+                              <p className="text-sm sm:text-lg font-black text-violet-400">{formatPrice(andreaniRate.price)}</p>
+                              <p className="text-[10px] sm:text-[11px] text-muted-foreground">{andreaniRate.estimatedDays}</p>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-sm sm:text-lg font-black text-violet-400">{shippingLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : "—"}</p>
+                              <p className="text-[10px] sm:text-[11px] text-muted-foreground">{shippingLoading ? "Cotizando..." : "No disponible para esta dirección"}</p>
+                            </>
+                          )}
                         </button>
                       </div>
 
-                      {effectiveZone !== "pickup" && shippingPostalCode.length >= 4 && shippingRatesQuery.isLoading ? (
+                      {!isPickup && shippingRatesQuery.isError ? (
+                        <div className="rounded-xl border border-rose-400/25 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">
+                          ⚠️ No pudimos calcular el envío para ese código postal.
+                        </div>
+                      ) : !isPickup && shippingPostalCode.length >= 4 && shippingRatesQuery.isLoading ? (
                         <div className="flex items-center gap-2 rounded-xl border border-border bg-secondary/60 px-4 py-3 text-sm text-muted-foreground">
                           <Loader2 className="h-4 w-4 animate-spin" /> Calculando envío real para CP {shippingPostalCode}...
                         </div>
-                      ) : effectiveZone !== "pickup" && shippingRates.length > 0 ? (
+                      ) : !isPickup && shippingRates.length > 0 ? (
                         <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/5 px-4 py-2 text-xs text-emerald-300">
                           ✓ Tarifa actualizada por Envia.com para CP {shippingPostalCode}
+                        </div>
+                      ) : !isPickup ? (
+                        <div className="rounded-xl border border-border bg-secondary/40 px-4 py-2 text-xs text-muted-foreground">
+                          {shippingPostalCode.length >= 4 ? "Seleccioná un carrier para continuar." : "Completá el código postal para calcular el envío automáticamente."}
                         </div>
                       ) : null}
                     </div>
@@ -744,7 +782,6 @@ export default function CartPage() {
                               onClick={() => {
                                 setDeliveryMode("new");
                                 setSelectedAddressId("");
-                                setNewAddressConfirmed(false);
                               }}
                               className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${deliveryMode === "new" ? "bg-primary text-primary-foreground" : "border border-border hover:bg-background"}`}
                             >
@@ -839,29 +876,10 @@ export default function CartPage() {
                               Guardar esta dirección en mi cuenta
                             </label>
 
-                            <div className="sm:col-span-2">
-                              {newAddressConfirmed ? (
-                                <div className="flex items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-2.5 text-sm text-emerald-300">
-                                  <Check className="w-4 h-4" />
-                                  Dirección aplicada — envío calculado para CP {newAddress.postal_code || "—"}
-                                  <button type="button" onClick={() => setNewAddressConfirmed(false)} className="ml-auto text-xs underline opacity-70 hover:opacity-100">Editar</button>
-                                </div>
-                              ) : (
-                                <button
-                                  type="button"
-                                  disabled={!newAddress.line1.trim() || !newAddress.city.trim() || !newAddress.postal_code?.trim()}
-                                  onClick={() => {
-                                    setNewAddressConfirmed(true);
-                                    if (newAddress.postal_code?.length >= 4) {
-                                      setShippingPostalCode(newAddress.postal_code);
-                                    }
-                                  }}
-                                  className="w-full h-11 rounded-xl bg-primary/90 font-semibold text-primary-foreground text-sm flex items-center justify-center gap-2 transition hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed"
-                                >
-                                  <MapPin className="w-4 h-4" />
-                                  Confirmar dirección y calcular envío
-                                </button>
-                              )}
+                            <div className="sm:col-span-2 rounded-xl border border-border bg-background/60 px-4 py-3 text-sm text-muted-foreground">
+                              {newAddress.postal_code?.trim().length >= 4
+                                ? "El envío se recalcula automáticamente cuando cambiás el código postal o los ítems del carrito."
+                                : "Completá el código postal para calcular el envío automáticamente."}
                             </div>
                           </div>
                         )}

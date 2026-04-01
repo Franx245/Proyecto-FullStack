@@ -5,9 +5,45 @@ export const SHIPPING_OPTIONS = {
   pickup: { cost: 0, label: "Retiro en showroom", eta: "Coordinar" },
 };
 
+const SHIPPING_CARRIER_ALIASES = {
+  showroom: "showroom",
+  pickup: "showroom",
+  andreani: "andreani",
+  correoargentino: "correo-argentino",
+  "correo argentino": "correo-argentino",
+  "correo-argentino": "correo-argentino",
+  correo_argentino: "correo-argentino",
+};
+
+const SHIPPING_CARRIER_LABELS = {
+  showroom: "Retiro en showroom",
+  andreani: "Andreani",
+  "correo-argentino": "Correo Argentino",
+};
+
 /** @param {string} zone */
 export function getShippingOption(zone) {
   return SHIPPING_OPTIONS[/** @type {keyof typeof SHIPPING_OPTIONS} */ (zone)] || SHIPPING_OPTIONS.pickup;
+}
+
+/** @param {string | null | undefined} value */
+export function normalizeShippingCarrier(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  return SHIPPING_CARRIER_ALIASES[normalized] || normalized;
+}
+
+/** @param {string | null | undefined} value */
+export function getShippingCarrierLabel(value) {
+  const normalized = normalizeShippingCarrier(value);
+  if (!normalized) {
+    return null;
+  }
+
+  return SHIPPING_CARRIER_LABELS[normalized] || normalized;
 }
 
 /** @param {string} status */

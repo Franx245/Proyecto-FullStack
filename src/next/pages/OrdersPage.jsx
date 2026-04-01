@@ -14,7 +14,7 @@ import CardImage from "@/components/marketplace/CardImage";
 import { useAuth } from "@/lib/auth";
 import { formatPrice } from "@/utils/currency";
 import { getTrackedOrderIds } from "@/lib/orderTracking";
-import { getOrderProgress, getShippingOption, orderStatusLabel } from "@/lib/shipping";
+import { getOrderProgress, getShippingCarrierLabel, getShippingOption, orderStatusLabel } from "@/lib/shipping";
 
 const NON_RETRYABLE_PAYMENT_STATUSES = new Set(["approved", "pending", "in_process", "authorized", "in_mediation"]);
 const PENDING_PAYMENT_FEEDBACK_KEY = "duelvault_pending_payment_feedback";
@@ -50,6 +50,16 @@ function ShipmentTimeline({ status }) {
       })}
     </div>
   );
+}
+
+/** @param {*} order */
+function getVisibleShippingLabel(order) {
+  const carrierLabel = getShippingCarrierLabel(order?.carrier);
+  if (carrierLabel) {
+    return carrierLabel;
+  }
+
+  return order?.shipping_label || getShippingOption(order?.shipping_zone).label;
 }
 
 /** @param {*} order */
@@ -341,11 +351,11 @@ export default function OrdersPage() {
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Seguimiento</p>
-                        <p className="mt-1 text-sm font-semibold">{order.shipping_label || getShippingOption(order.shipping_zone).label}</p>
+                        <p className="mt-1 text-sm font-semibold">{getVisibleShippingLabel(order)}</p>
+                        {order.shipping_label && getVisibleShippingLabel(order) !== order.shipping_label ? <p className="mt-2 text-xs text-muted-foreground">Servicio: {order.shipping_label}</p> : null}
                         {order.tracking_code ? (
                           <div className="mt-2 space-y-2">
                             <p className="text-sm text-primary">Tracking: {order.tracking_code}</p>
-                            {order.carrier ? <p className="text-xs text-muted-foreground">Carrier: {order.carrier === "correo-argentino" ? "Correo Argentino" : order.carrier === "andreani" ? "Andreani" : order.carrier}</p> : null}
                             <ShipmentTimeline status={order.shipment_status || order.status} />
                           </div>
                         ) : null}

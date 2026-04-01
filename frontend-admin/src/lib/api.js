@@ -520,7 +520,7 @@ export async function updateOrderShipping(orderId, payload) {
     body: payload,
     requestLabel: "update-order-shipping",
     idempotencyKey: payload?.mutation_id,
-    dedupeKey: `${orderId}:${payload?.tracking_code || "shipping"}`,
+    dedupeKey: `${orderId}:${payload?.tracking_code || "shipping"}:${payload?.carrier || "carrier"}`,
   });
 }
 

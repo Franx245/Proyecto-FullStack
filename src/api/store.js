@@ -673,12 +673,12 @@ export async function fetchMyOrders({ page = 1, limit = 10 } = {}) {
 }
 
 /**
- * @param {{ postalCode: string, city?: string, state?: string, itemCount?: number }} params
+ * @param {{ postalCode: string, city?: string, state?: string, itemCount?: number, weight?: number }} params
  */
-export async function fetchShippingRates({ postalCode, city, state, itemCount }) {
+export async function fetchShippingRates({ postalCode, city, state, itemCount, weight }) {
   return authRequest("/api/shipping/rates", {
     method: "POST",
-    body: { postal_code: postalCode, city, state, item_count: itemCount },
+    body: { postal_code: postalCode, city, state, item_count: itemCount, weight },
   });
 }
 

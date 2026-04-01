@@ -1952,11 +1952,13 @@ function AdminShell({ session, onLogout }) {
       const previousOrderDetail = queryClient.getQueryData(orderEntityQueryKey);
       for (const [queryKey] of previousOrders) {
         queryClient.setQueryData(queryKey, (current) => mergeOrderIntoResponse(current, queryKey, orderId, {
+          carrier: payload.carrier,
           tracking_code: payload.tracking_code,
           tracking_visible_to_user: payload.tracking_visible_to_user,
         }));
       }
       mergeEntityCache(queryClient, orderEntityQueryKey, "order", {
+        carrier: payload.carrier,
         tracking_code: payload.tracking_code,
         tracking_visible_to_user: payload.tracking_visible_to_user,
       }, { createIfMissing: false });

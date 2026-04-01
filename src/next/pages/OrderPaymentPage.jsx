@@ -14,7 +14,7 @@ import { useAuth } from "@/lib/auth";
 import {
   createMercadoPagoBrickBuilder,
   createMercadoPagoBrowserClient,
-  MERCADOPAGO_BRICK_DARK_STYLE,
+  createMercadoPagoBrickDarkStyle,
 } from "@/lib/mercadopago";
 import { getTrackedOrderIds } from "@/lib/orderTracking";
 import { orderStatusLabel } from "@/lib/shipping";
@@ -130,6 +130,7 @@ export default function OrderPaymentPage({ orderId }) {
   const [sdkReady, setSdkReady] = useState(false);
   const [lastAttempt, setLastAttempt] = useState(/** @type {PaymentAttemptLike | null} */ (null));
   const brickControllerRef = useRef(/** @type {BrickControllerLike | null} */ (null));
+  const orderRef = useRef(/** @type {OrderLike | null} */ (null));
   const paymentMutationRef = useRef(/** @type {DirectPaymentMutation | null} */ (null));
   const hasPersistedSession = Boolean(getUsableStoredUserSession()?.accessToken);
   const authRedirectHref = isValidOrderId ? buildAuthRedirectPath(`/checkout/pay/${numericOrderId}`) : buildAuthRedirectPath("/orders");
@@ -193,6 +194,9 @@ export default function OrderPaymentPage({ orderId }) {
     const rawValue = Number(order?.total_ars ?? order?.total ?? 0);
     return Number.isFinite(rawValue) ? rawValue.toFixed(2) : "0.00";
   }, [order?.total, order?.total_ars]);
+  const orderCustomerEmail = String(order?.customer_email || user?.email || "");
+  const currentOrderId = Number(order?.id || 0);
+  const brickContainerId = currentOrderId ? `cardPaymentBrick_container_${currentOrderId}` : "cardPaymentBrick_container";
 
   const canPay = ownsOrder && canRetryDirectPayment(order);
   const shouldPollOrder = Boolean(lastAttempt && order?.status === "pending_payment");
@@ -246,6 +250,10 @@ export default function OrderPaymentPage({ orderId }) {
   }, [paymentMutation]);
 
   useEffect(() => {
+    orderRef.current = order;
+  }, [order]);
+
+  useEffect(() => {
     if (!shouldRedirectToAuth) {
       return;
     }
@@ -268,7 +276,7 @@ export default function OrderPaymentPage({ orderId }) {
   }, [ordersQuery, shouldPollOrder]);
 
   useEffect(() => {
-    if (!isAuthenticated || !order || !canPay || !ENV.MP_PUBLIC_KEY) {
+    if (!isAuthenticated || !currentOrderId || !canPay || !ENV.MP_PUBLIC_KEY) {
       setSdkReady(false);
       return undefined;
     }
@@ -288,7 +296,8 @@ export default function OrderPaymentPage({ orderId }) {
 
     /** @param {BrickSubmitLike} cardData */
     const handleBrickSubmit = async (cardData) => {
-      if (!order || !ownsOrder || !canRetryDirectPayment(order)) {
+      const activeOrder = orderRef.current;
+      if (!activeOrder || !ownsOrder || !canRetryDirectPayment(activeOrder)) {
         throw new Error("La orden ya no admite cobro directo.");
       }
 
@@ -300,7 +309,7 @@ export default function OrderPaymentPage({ orderId }) {
       }
 
       const payload = await activePaymentMutation.mutateAsync({
-        orderId: Number(order.id),
+        orderId: Number(activeOrder.id),
         token: cardData.token,
         payment_method_id: cardData.payment_method_id,
         issuer_id: cardData.issuer_id || null,
@@ -329,7 +338,7 @@ export default function OrderPaymentPage({ orderId }) {
 
     void (async () => {
       try {
-        const container = document.getElementById("cardPaymentBrick_container");
+        const container = document.getElementById(brickContainerId);
         if (container) {
           container.innerHTML = "";
         }
@@ -339,17 +348,17 @@ export default function OrderPaymentPage({ orderId }) {
           return;
         }
 
-        localBrickController = await createMercadoPagoBrickBuilder(mp).create("cardPayment", "cardPaymentBrick_container", {
+        localBrickController = await createMercadoPagoBrickBuilder(mp).create("cardPayment", brickContainerId, {
           initialization: {
             amount: Number(amount),
             payer: {
-              email: String(order.customer_email || user?.email || ""),
+              email: orderCustomerEmail,
             },
           },
           customization: {
             visual: {
               hideFormTitle: true,
-              style: MERCADOPAGO_BRICK_DARK_STYLE,
+              style: createMercadoPagoBrickDarkStyle(),
             },
             paymentMethods: {
               minInstallments: 1,
@@ -400,7 +409,7 @@ export default function OrderPaymentPage({ orderId }) {
         // noop
       }
     };
-  }, [amount, canPay, isAuthenticated, order, orderId, user?.email, ownsOrder]);
+  }, [amount, brickContainerId, canPay, currentOrderId, isAuthenticated, orderCustomerEmail, ownsOrder]);
 
   if (isBootstrapping || isRestoringSession) {
     return (
@@ -568,7 +577,7 @@ export default function OrderPaymentPage({ orderId }) {
                   ) : null}
 
                   <div key={order?.id} className="overflow-hidden rounded-[28px] border border-violet-500/20 bg-slate-950/90 p-3 shadow-[0_24px_60px_rgba(15,23,42,0.18),0_0_40px_rgba(139,92,246,0.12)] backdrop-blur-xl">
-                    <div id="cardPaymentBrick_container" className="min-h-[420px] rounded-[24px] bg-slate-950" />
+                    <div id={brickContainerId} className="min-h-[420px] rounded-[24px] bg-slate-950" />
                   </div>
 
                   <div className="rounded-2xl border border-violet-500/15 bg-violet-500/5 backdrop-blur-sm p-4 text-sm text-muted-foreground">

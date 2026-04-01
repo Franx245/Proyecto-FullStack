@@ -3,9 +3,10 @@ const MERCADOPAGO_SANDBOX_HOSTS = new Set([
 ]);
 const MERCADOPAGO_SDK_URL = "https://sdk.mercadopago.com/js/v2";
 
-export const MERCADOPAGO_BRICK_DARK_STYLE = Object.freeze({
-  theme: "dark",
-  customVariables: {
+export function createMercadoPagoBrickDarkStyle() {
+  return {
+    theme: "dark",
+    customVariables: {
     formBackgroundColor: "#0b1020",
     inputBackgroundColor: "#121a2f",
     textPrimaryColor: "#f8fafc",
@@ -13,6 +14,7 @@ export const MERCADOPAGO_BRICK_DARK_STYLE = Object.freeze({
     baseColor: "#22c55e",
     baseColorFirstVariant: "#8b5cf6",
     baseColorSecondVariant: "#06b6d4",
+    secondaryColor: "#0f172a",
     buttonTextColor: "#f8fafc",
     errorColor: "#fb7185",
     successColor: "#22c55e",
@@ -35,8 +37,11 @@ export const MERCADOPAGO_BRICK_DARK_STYLE = Object.freeze({
     formPadding: "24px",
     inputVerticalPadding: "14px",
     inputHorizontalPadding: "14px",
-  },
-});
+    },
+  };
+}
+
+export const MERCADOPAGO_BRICK_DARK_STYLE = createMercadoPagoBrickDarkStyle();
 
 /** @type {Promise<*> | null} */
 let mercadoPagoSdkPromise = null;
@@ -118,5 +123,5 @@ export async function createMercadoPagoBrowserClient(publicKey) {
 
 /** @param {*} mercadoPagoClient */
 export function createMercadoPagoBrickBuilder(mercadoPagoClient) {
-  return mercadoPagoClient.bricks({ theme: MERCADOPAGO_BRICK_DARK_STYLE.theme });
+  return mercadoPagoClient.bricks({ theme: "dark" });
 }
