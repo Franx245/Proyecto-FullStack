@@ -14,7 +14,8 @@ const ENVIA_CARRIERS = ["andreani"];
 /** Carriers added as flat-rate (not available in Envia) */
 const FLATRATE_CARRIERS = ["correo-argentino"];
 
-const ENVIA_TIMEOUT_MS = 10_000;
+const ENVIA_TIMEOUT_MS = 5_000;
+const ENVIA_MAX_RETRIES = 2;
 
 /** @param {string} rawBody @param {string} signature */
 export function verifyEnviaWebhookSignature(rawBody, signature) {
@@ -43,34 +44,47 @@ export function isEnviaConfigured() {
  */
 async function enviaFetch(path, options = {}) {
   const url = `${ENVIA_BASE_URL}${path}`;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), ENVIA_TIMEOUT_MS);
+  let lastError;
 
-  try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${ENVIA_API_KEY}`,
-        ...options.headers,
-      },
-    });
+  for (let attempt = 1; attempt <= ENVIA_MAX_RETRIES; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), ENVIA_TIMEOUT_MS);
 
-    const body = await response.json().catch(() => null);
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${ENVIA_API_KEY}`,
+          ...options.headers,
+        },
+      });
 
-    if (!response.ok) {
-      const errorMessage = body?.message || body?.error || `Envia API error ${response.status}`;
-      const error = new Error(errorMessage);
-      /** @type {*} */ (error).statusCode = response.status;
-      /** @type {*} */ (error).enviaBody = body;
-      throw error;
+      const body = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        const errorMessage = body?.message || body?.error || `Envia API error ${response.status}`;
+        const error = new Error(errorMessage);
+        /** @type {*} */ (error).statusCode = response.status;
+        /** @type {*} */ (error).enviaBody = body;
+        throw error;
+      }
+
+      return body;
+    } catch (err) {
+      lastError = err;
+      if (attempt < ENVIA_MAX_RETRIES && (err.name === "AbortError" || /** @type {*} */ (err).statusCode >= 500)) {
+        console.warn(`ENVIA_RETRY attempt=${attempt} path=${path} error=${err.message}`);
+        continue;
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeout);
     }
-
-    return body;
-  } finally {
-    clearTimeout(timeout);
   }
+
+  throw lastError;
 }
 
 /**

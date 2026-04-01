@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { ArrowLeft, CheckCircle2, Clock3, CreditCard, Loader2, ShieldCheck, TriangleAlert, XCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Clock3, Loader2, ShieldCheck, TriangleAlert, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import { createDirectPayment, createStoreMutationId, fetchMyOrders, fetchOrdersByIds } from "@/api/store";
@@ -340,6 +340,9 @@ export default function OrderPaymentPage({ orderId }) {
           customization: {
             visual: {
               hideFormTitle: true,
+              style: {
+                theme: "dark",
+              },
             },
             paymentMethods: {
               minInstallments: 1,
@@ -426,7 +429,11 @@ export default function OrderPaymentPage({ orderId }) {
   const attemptTone = lastAttempt?.status ? getAttemptTone(String(lastAttempt.status).toLowerCase()) : null;
 
   return (
-    <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-[1180px] px-4 py-8">
+    <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-[1180px] px-4 py-8 relative">
+        <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
+          <div className="absolute -top-40 left-1/2 h-[600px] w-[600px] -translate-x-1/2 rounded-full bg-violet-600/10 blur-[120px]" />
+          <div className="absolute -bottom-20 right-0 h-[400px] w-[400px] rounded-full bg-indigo-600/8 blur-[100px]" />
+        </div>
         <Link href="/orders" className="inline-flex items-center gap-2 text-sm text-muted-foreground transition hover:text-foreground">
           <ArrowLeft className="h-4 w-4" />
           Volver a Mis Pedidos
@@ -434,8 +441,8 @@ export default function OrderPaymentPage({ orderId }) {
 
         <div className="mt-6 grid gap-6 lg:grid-cols-[0.95fr_1.25fr]">
           <div className="space-y-6">
-            <div className="rounded-[32px] border border-border bg-card/80 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
-              <div className="inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-primary">
+            <div className="group rounded-[32px] border border-violet-500/20 bg-card/60 backdrop-blur-xl p-6 shadow-[0_24px_80px_rgba(0,0,0,0.24),0_0_40px_rgba(139,92,246,0.08)] transition-all duration-300 hover:border-violet-500/35 hover:shadow-[0_24px_80px_rgba(0,0,0,0.24),0_0_60px_rgba(139,92,246,0.12)]">
+              <div className="inline-flex items-center gap-2 rounded-full border border-violet-400/25 bg-violet-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-violet-300">
                 <ShieldCheck className="h-4 w-4" />
                 Checkout API
               </div>
@@ -444,7 +451,7 @@ export default function OrderPaymentPage({ orderId }) {
               <p className="mt-3 text-sm text-muted-foreground">La tarjeta se tokeniza en Mercado Pago desde tu navegador. El backend solo recibe el token, recalcula el monto y espera el webhook para cerrar la orden.</p>
             </div>
 
-            <div className="rounded-[32px] border border-border bg-card/80 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
+            <div className="group rounded-[32px] border border-violet-500/20 bg-card/60 backdrop-blur-xl p-6 shadow-[0_24px_80px_rgba(0,0,0,0.24),0_0_40px_rgba(139,92,246,0.08)] transition-all duration-300 hover:border-violet-500/35 hover:shadow-[0_24px_80px_rgba(0,0,0,0.24),0_0_60px_rgba(139,92,246,0.12)]">
               <h2 className="text-lg font-black text-foreground">Resumen de la orden</h2>
 
               {ordersQuery.isLoading || trackedOrdersQuery.isLoading ? (
@@ -521,7 +528,7 @@ export default function OrderPaymentPage({ orderId }) {
               </div>
             ) : null}
 
-            <div className="rounded-[32px] border border-border bg-card/80 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
+            <div className="rounded-[32px] border border-violet-500/20 bg-card/60 backdrop-blur-xl p-6 shadow-[0_24px_80px_rgba(0,0,0,0.24),0_0_40px_rgba(139,92,246,0.08)]">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h2 className="text-2xl font-black text-foreground">Formulario de pago</h2>
@@ -553,14 +560,17 @@ export default function OrderPaymentPage({ orderId }) {
                     </div>
                   ) : null}
 
-                  <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white p-3 shadow-[0_24px_60px_rgba(15,23,42,0.18)]">
+                  <div key={order?.id} className="overflow-hidden rounded-[28px] border border-border bg-card p-3 shadow-[0_24px_60px_rgba(15,23,42,0.18)]">
                     <div id="cardPaymentBrick_container" />
                   </div>
 
-                  <div className="rounded-2xl border border-border bg-background/50 p-4 text-sm text-muted-foreground">
+                  <div className="rounded-2xl border border-violet-500/15 bg-violet-500/5 backdrop-blur-sm p-4 text-sm text-muted-foreground">
                     <div className="flex items-start gap-3">
-                      <CreditCard className="mt-0.5 h-4 w-4 text-primary" />
-                      <p>Los datos sensibles se tokenizan en Mercado Pago desde el Brick oficial. El backend solo recibe el token y valida orden, monto e idempotencia antes de crear el pago.</p>
+                      <ShieldCheck className="mt-0.5 h-4 w-4 text-violet-400" />
+                      <div>
+                        <p className="font-semibold text-violet-300">Pago seguro con MercadoPago</p>
+                        <p className="mt-1 text-muted-foreground">Los datos sensibles se tokenizan en Mercado Pago desde el Brick oficial. El backend solo recibe el token y valida orden, monto e idempotencia antes de crear el pago.</p>
+                      </div>
                     </div>
                   </div>
                 </div>

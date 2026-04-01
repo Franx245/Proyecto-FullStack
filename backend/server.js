@@ -4956,9 +4956,14 @@ app.post("/api/checkout", requireAuth, checkoutRateLimit, async (req, res) => {
       console.error("Failed to record checkout activity", activityError);
     }
 
-    console.info("Checkout created", {
+    console.info("CHECKOUT_FLOW", {
       requestId: req.requestContext?.requestId || null,
       orderId: result.order.id,
+      subtotal: result.order.subtotal,
+      shipping: result.order.shippingCost,
+      total: result.order.total,
+      shippingZone: result.order.shippingZone,
+      carrier: result.order.carrier,
       paymentRedirectAvailable: false,
     });
 
@@ -5485,6 +5490,8 @@ app.post("/api/shipping/rates", requireAuth, async (req, res) => {
     const state = String(req.body?.state || "").trim();
     const itemCount = Number(req.body?.item_count || req.body?.itemCount || 1);
 
+    console.log("SHIPPING_FLOW", { postalCode, city, state, itemCount });
+
     const cacheKey = `shipping-rates:${postalCode}:${itemCount}`;
     const rates = await cacheGetOrFetch(
       cacheKey,
@@ -5494,8 +5501,8 @@ app.post("/api/shipping/rates", requireAuth, async (req, res) => {
 
     res.json({ rates });
   } catch (error) {
-    console.error("Shipping rates failed", error);
-    res.status(500).json({ error: error.message || "No se pudieron obtener las tarifas de envío" });
+    console.error("SHIPPING_ERROR", { error: error.message, stack: error.stack });
+    res.status(503).json({ error: "Shipping unavailable" });
   }
 });
 
@@ -5565,7 +5572,7 @@ app.post("/api/admin/shipping/create", requireAdminAuth, async (req, res) => {
       label: shipment.label,
     });
   } catch (error) {
-    console.error("Create shipment failed", error);
+    console.error("ADMIN_SHIPMENT_ERROR", { orderId: orderId || null, error: error.message, stack: error.stack });
     res.status(500).json({ error: error.message || "No se pudo crear el envío" });
   }
 });
