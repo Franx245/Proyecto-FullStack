@@ -15,6 +15,76 @@ const ENVIA_CARRIERS = ["andreani", "correo-argentino"];
 const ENVIA_TIMEOUT_MS = 5_000;
 const ENVIA_MAX_RETRIES = 2;
 
+const ARGENTINA_STATE_CODES = {
+  ba: "BA",
+  "buenos aires": "BA",
+  gba: "BA",
+  caba: "CF",
+  cf: "CF",
+  cabaa: "CF",
+  "capital federal": "CF",
+  "ciudad autonoma de buenos aires": "CF",
+  "ciudad autónoma de buenos aires": "CF",
+  catamarca: "CA",
+  ca: "CA",
+  chaco: "CH",
+  ch: "CH",
+  chubut: "CH",
+  cordoba: "CO",
+  córdoba: "CO",
+  co: "CO",
+  corrientes: "CR",
+  cr: "CR",
+  entrerrios: "ER",
+  "entre rios": "ER",
+  "entre ríos": "ER",
+  er: "ER",
+  formosa: "FO",
+  fo: "FO",
+  jujuy: "JY",
+  jy: "JY",
+  lapampa: "LP",
+  "la pampa": "LP",
+  lp: "LP",
+  larioja: "LR",
+  "la rioja": "LR",
+  lr: "LR",
+  mendoza: "ME",
+  me: "ME",
+  misiones: "MI",
+  mi: "MI",
+  neuquen: "NQ",
+  neuquén: "NQ",
+  nq: "NQ",
+  rionegro: "RN",
+  "rio negro": "RN",
+  "río negro": "RN",
+  rn: "RN",
+  salta: "SA",
+  sa: "SA",
+  sanjuan: "SJ",
+  "san juan": "SJ",
+  sj: "SJ",
+  sanluis: "SL",
+  "san luis": "SL",
+  sl: "SL",
+  santacruz: "SC",
+  "santa cruz": "SC",
+  sc: "SC",
+  santafe: "SF",
+  "santa fe": "SF",
+  sf: "SF",
+  santiagodelestero: "SE",
+  "santiago del estero": "SE",
+  se: "SE",
+  tierradelfuego: "TF",
+  "tierra del fuego": "TF",
+  tf: "TF",
+  tucuman: "TU",
+  tucumán: "TU",
+  tu: "TU",
+};
+
 /** @param {string | null | undefined} value */
 export function normalizeEnviaCarrier(value) {
   const normalized = String(value || "").trim().toLowerCase();
@@ -31,6 +101,22 @@ export function normalizeEnviaCarrier(value) {
   }
 
   return normalized;
+}
+
+/** @param {string | null | undefined} value @param {string | null | undefined} postalCode */
+export function normalizeEnviaState(value, postalCode) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  if (normalized) {
+    const collapsed = normalized.replace(/[^a-z]/g, "");
+    return ARGENTINA_STATE_CODES[normalized] || ARGENTINA_STATE_CODES[collapsed] || String(value).trim().toUpperCase();
+  }
+
+  return inferStateFromPostalCode(postalCode);
 }
 
 /** @param {string} rawBody @param {string} signature */
@@ -162,7 +248,7 @@ export async function getShippingRates(destination, options = {}) {
     street: "Calle",
     number: "0",
     city: destination.city || "Buenos Aires",
-    state: destination.state || inferStateFromPostalCode(destination.postalCode),
+    state: normalizeEnviaState(destination.state, destination.postalCode),
     postalCode: destination.postalCode,
     country: "AR",
   };
@@ -279,7 +365,7 @@ export async function createShipment({ order, carrier, service }) {
         street: order.shippingAddress || "Calle",
         number: "S/N",
         city: order.shippingCity || "Buenos Aires",
-        state: order.shippingProvince || inferStateFromPostalCode(order.shippingPostalCode),
+        state: normalizeEnviaState(order.shippingProvince, order.shippingPostalCode),
         postalCode: order.shippingPostalCode,
         country: "AR",
       },
