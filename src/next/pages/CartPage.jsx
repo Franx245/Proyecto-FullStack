@@ -231,18 +231,23 @@ export default function CartPage() {
   const [accepted, setAccepted] = useState(false);
   const [errors, setErrors] = useState(/** @type {CheckoutErrors} */ ({}));
   const [shippingPostalCode, setShippingPostalCode] = useState("");
-  const [selectedCarrier, setSelectedCarrier] = useState(/** @type {string | null} */ (null));
+  const [selectedCarrier, setSelectedCarrier] = useState("correoargentino");
+  const [newAddressConfirmed, setNewAddressConfirmed] = useState(false);
 
   const shippingRatesQuery = useQuery({
-    queryKey: ["shipping-rates", shippingPostalCode],
+    queryKey: ["shipping-rates", shippingPostalCode, totalItems],
     queryFn: () => fetchShippingRates({ postalCode: shippingPostalCode, itemCount: totalItems }),
     enabled: isAuthenticated && shippingPostalCode.length >= 4 && shippingZone !== "pickup",
     staleTime: 1000 * 60 * 5,
+    placeholderData: (prev) => prev,
     retry: 1,
   });
 
-  const shippingRates = /** @type {Array<{ carrier: string, carrierLabel: string, service: string, price: number, estimatedDays: string }>} */ (
-    shippingRatesQuery.data?.rates ?? []
+  const shippingRates = useMemo(
+    () => /** @type {Array<{ carrier: string, carrierLabel: string, service: string, price: number, estimatedDays: string }>} */ (
+      shippingRatesQuery.data?.rates ?? []
+    ),
+    [shippingRatesQuery.data?.rates]
   );
 
   const selectedRate = shippingRates.find((r) => r.carrier === selectedCarrier) || null;
@@ -291,13 +296,32 @@ export default function CartPage() {
     [addresses, selectedAddressId]
   ));
 
+  // Auto-propagate postal code from address to trigger rate fetch
   useEffect(() => {
+    if (shippingZone === "pickup") return;
     if (deliveryMode === "saved" && selectedAddress?.postal_code) {
       setShippingPostalCode(selectedAddress.postal_code);
-    } else if (deliveryMode === "new" && newAddress.postal_code?.length >= 4) {
+    } else if (deliveryMode === "new" && newAddressConfirmed && newAddress.postal_code?.length >= 4) {
       setShippingPostalCode(newAddress.postal_code);
     }
-  }, [deliveryMode, selectedAddress?.postal_code, newAddress.postal_code]);
+  }, [deliveryMode, selectedAddress?.postal_code, newAddress.postal_code, newAddressConfirmed, shippingZone]);
+
+  // Auto-select carrier when rates arrive
+  useEffect(() => {
+    if (shippingRates.length > 0 && selectedCarrier) {
+      const hasSelected = shippingRates.some((r) => r.carrier === selectedCarrier);
+      if (!hasSelected) {
+        setSelectedCarrier(shippingRates[0].carrier);
+      }
+    }
+  }, [shippingRates, selectedCarrier]);
+
+  // Auto-select correoargentino when switching from pickup to delivery
+  useEffect(() => {
+    if (shippingZone !== "pickup" && !selectedCarrier) {
+      setSelectedCarrier("correoargentino");
+    }
+  }, [shippingZone, selectedCarrier]);
 
   useEffect(() => {
     if (!isAuthenticated || deliveryMode !== "saved" || shippingZone === "pickup") {
@@ -326,11 +350,9 @@ export default function CartPage() {
   const shippingOption = getShippingOption(effectiveZone);
   const effectiveShippingCost = effectiveZone === "pickup"
     ? 0
-    : selectedRate?.carrier === selectedCarrier
+    : selectedRate && selectedRate.carrier === selectedCarrier
       ? selectedRate.price
-      : selectedCarrier === "andreani"
-        ? 6000
-        : shippingOption.cost;
+      : selectedCarrier === "andreani" ? 6000 : 4500;
   const effectiveCarrierLabel = effectiveZone === "pickup"
     ? "Retiro en showroom"
     : selectedRate?.carrierLabel || (selectedCarrier === "andreani" ? "Andreani" : "Correo Argentino");
@@ -686,6 +708,7 @@ export default function CartPage() {
                               onClick={() => {
                                 setDeliveryMode("new");
                                 setSelectedAddressId("");
+                                setNewAddressConfirmed(false);
                               }}
                               className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${deliveryMode === "new" ? "bg-primary text-primary-foreground" : "border border-border hover:bg-background"}`}
                             >
@@ -704,6 +727,9 @@ export default function CartPage() {
                                 setSelectedAddressId(nextAddressId);
                                 if (nextAddress?.zone) {
                                   setShippingZone(nextAddress.zone);
+                                }
+                                if (nextAddress?.postal_code) {
+                                  setShippingPostalCode(nextAddress.postal_code);
                                 }
                                 setErrors((prev) => ({ ...prev, addressId: "" }));
                               }}
@@ -776,6 +802,31 @@ export default function CartPage() {
                               <input type="checkbox" checked={saveAddress} onChange={(e) => setSaveAddress(e.target.checked)} />
                               Guardar esta dirección en mi cuenta
                             </label>
+
+                            <div className="sm:col-span-2">
+                              {newAddressConfirmed ? (
+                                <div className="flex items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-2.5 text-sm text-emerald-300">
+                                  <Check className="w-4 h-4" />
+                                  Dirección aplicada — envío calculado para CP {newAddress.postal_code || "—"}
+                                  <button type="button" onClick={() => setNewAddressConfirmed(false)} className="ml-auto text-xs underline opacity-70 hover:opacity-100">Editar</button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled={!newAddress.line1.trim() || !newAddress.city.trim() || !newAddress.postal_code?.trim()}
+                                  onClick={() => {
+                                    setNewAddressConfirmed(true);
+                                    if (newAddress.postal_code?.length >= 4) {
+                                      setShippingPostalCode(newAddress.postal_code);
+                                    }
+                                  }}
+                                  className="w-full h-11 rounded-xl bg-primary/90 font-semibold text-primary-foreground text-sm flex items-center justify-center gap-2 transition hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed"
+                                >
+                                  <MapPin className="w-4 h-4" />
+                                  Confirmar dirección y calcular envío
+                                </button>
+                              )}
+                            </div>
                           </div>
                         )}
                       </div>
