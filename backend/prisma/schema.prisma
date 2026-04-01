@@ -36,10 +36,33 @@ model Card {
   orderItems        OrderItem[]
   priceHistory      CardPriceHistory[]
   stockHistory      CardStockHistory[]
+  versions          CardVersion[]
 
   @@index([name])
   @@index([cardType])
   @@index([rarity])
+}
+
+model CardVersion {
+  id        Int      @id @default(autoincrement())
+  cardId    Int
+  setName   String   @default("")
+  setCode   String   @default("")
+  rarity    String   @default("Common")
+  condition String   @default("Near Mint")
+  edition   String   @default("")
+  language  String   @default("en")
+  image     String?
+  price     Float
+  stock     Int      @default(0)
+  isVisible Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@index([cardId])
+  @@index([rarity])
+  @@index([isVisible])
 }
 
 model CardPriceHistory {

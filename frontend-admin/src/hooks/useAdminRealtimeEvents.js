@@ -23,6 +23,24 @@ function patchAdminCardsPage(old, cardId, cardSnapshot) {
 }
 
 /**
+ * Surgically patch an order inside any admin orders query.
+ * Data shape: { orders: Order[], summary, ... }
+ */
+function patchAdminOrdersPage(old, orderId, orderSnapshot) {
+  if (!old?.orders?.length) return old;
+
+  let changed = false;
+  const nextOrders = old.orders.map((o) => {
+    if (Number(o.id) !== Number(orderId)) return o;
+    if (orderSnapshot.updated_at && o.updated_at && new Date(orderSnapshot.updated_at) < new Date(o.updated_at)) return o;
+    changed = true;
+    return { ...o, ...orderSnapshot };
+  });
+
+  return changed ? { ...old, orders: nextOrders } : old;
+}
+
+/**
  * Admin realtime hook — listens for SSE events and performs
  * surgical React Query cache updates. Falls back to invalidation
  * when events don't carry full card snapshots.
@@ -68,8 +86,27 @@ export function useAdminRealtimeEvents(session, onSessionChange) {
         queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       });
 
-      es.addEventListener("order-update", () => {
-        queryClient.invalidateQueries({ queryKey: ["orders"] });
+      es.addEventListener("order-update", (e) => {
+        try {
+          const { data } = JSON.parse(e.data);
+          const orderSnapshot = data?.order;
+          const orderId = data?.orderId;
+
+          if (orderSnapshot && orderId) {
+            queryClient.setQueriesData({ queryKey: ["orders"] }, (old) =>
+              patchAdminOrdersPage(old, orderId, orderSnapshot)
+            );
+
+            const entityKey = ["order", Number(orderId)];
+            queryClient.setQueriesData({ queryKey: entityKey }, (old) =>
+              old ? { ...old, ...orderSnapshot } : old
+            );
+          } else {
+            queryClient.invalidateQueries({ queryKey: ["orders"] });
+          }
+        } catch {
+          queryClient.invalidateQueries({ queryKey: ["orders"] });
+        }
         queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       });
 

@@ -2338,6 +2338,7 @@ async function applyOrderStatusPostCommitEffect(effect) {
     orderId: effect.orderId,
     previousStatus: effect.previousStatus,
     newStatus: effect.nextStatus,
+    order: effect.orderSnapshot || null,
   });
 
   if (effect.releasesReservation) {
@@ -3985,22 +3986,45 @@ async function handlePublicCatalogDetail(req, res) {
     }
 
     const publicCard = toPublicCard(card);
+
+    const dbVersions = await prisma.cardVersion.findMany({
+      where: { cardId: id, isVisible: true },
+      orderBy: [{ createdAt: "desc" }],
+    });
+
+    const baseVersion = {
+      version_id: String(card.id),
+      card_id: String(card.id),
+      name: publicCard.name,
+      image: publicCard.image,
+      set_name: publicCard.set_name,
+      set_code: publicCard.set_code,
+      rarity: publicCard.rarity,
+      price: publicCard.price,
+      stock: publicCard.stock,
+      condition: publicCard.condition,
+      edition: "",
+      language: "en",
+    };
+
+    const extraVersions = dbVersions.map((v) => ({
+      version_id: `v-${v.id}`,
+      card_id: String(card.id),
+      name: [publicCard.name, v.edition, v.setName].filter(Boolean).join(" — "),
+      image: v.image || publicCard.image,
+      set_name: v.setName || publicCard.set_name,
+      set_code: v.setCode || publicCard.set_code,
+      rarity: v.rarity,
+      price: v.price,
+      stock: v.stock,
+      condition: v.condition,
+      edition: v.edition,
+      language: v.language,
+    }));
+
     return {
       card: publicCard,
-      versions: [
-        {
-          version_id: String(card.id),
-          card_id: String(card.id),
-          name: publicCard.name,
-          image: publicCard.image,
-          set_name: publicCard.set_name,
-          set_code: publicCard.set_code,
-          rarity: publicCard.rarity,
-          price: publicCard.price,
-          stock: publicCard.stock,
-          condition: publicCard.condition,
-        },
-      ],
+      versions: [baseVersion, ...extraVersions],
       ygoproData: {
         description: publicCard.description,
         image: publicCard.image,
@@ -6178,6 +6202,9 @@ app.get("/api/admin/cards/:id", requireAdminAuth, async (req, res) => {
           take: 20,
           orderBy: { createdAt: "desc" },
         },
+        versions: {
+          orderBy: { createdAt: "desc" },
+        },
       },
     });
 
@@ -6190,6 +6217,22 @@ app.get("/api/admin/cards/:id", requireAdminAuth, async (req, res) => {
       card: toPublicCard(card, { adminThumbnail: true }),
       price_history: card.priceHistory.map(serializeCardPriceHistory),
       stock_history: card.stockHistory.map(serializeCardStockHistory),
+      versions: card.versions.map((v) => ({
+        id: v.id,
+        card_id: v.cardId,
+        set_name: v.setName,
+        set_code: v.setCode,
+        rarity: v.rarity,
+        condition: v.condition,
+        edition: v.edition,
+        language: v.language,
+        image: v.image,
+        price: v.price,
+        stock: v.stock,
+        is_visible: v.isVisible,
+        created_at: v.createdAt,
+        updated_at: v.updatedAt,
+      })),
     });
   } catch (error) {
     console.error(error);
@@ -6690,6 +6733,217 @@ app.delete("/api/admin/cards", requireAdminAuth, requireAdminRole([UserRole.ADMI
 
     console.error(error);
     res.status(500).json({ error: "Failed to delete cards" });
+  }
+});
+
+// ─── CardVersion CRUD ───────────────────────────────────────────────
+
+app.get("/api/admin/cards/:id/versions", requireAdminAuth, async (req, res) => {
+  try {
+    const cardId = Number(req.params.id);
+    if (!Number.isFinite(cardId)) {
+      res.status(400).json({ error: "Invalid card id" });
+      return;
+    }
+
+    const versions = await prisma.cardVersion.findMany({
+      where: { cardId },
+      orderBy: [{ createdAt: "desc" }],
+    });
+
+    res.json({
+      versions: versions.map((v) => ({
+        id: v.id,
+        card_id: v.cardId,
+        set_name: v.setName,
+        set_code: v.setCode,
+        rarity: v.rarity,
+        condition: v.condition,
+        edition: v.edition,
+        language: v.language,
+        image: v.image,
+        price: v.price,
+        stock: v.stock,
+        is_visible: v.isVisible,
+        created_at: v.createdAt,
+        updated_at: v.updatedAt,
+      })),
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to load card versions" });
+  }
+});
+
+app.post("/api/admin/cards/:id/versions", requireAdminAuth, requireAdminRole([UserRole.ADMIN]), async (req, res) => {
+  try {
+    const cardId = Number(req.params.id);
+    if (!Number.isFinite(cardId)) {
+      res.status(400).json({ error: "Invalid card id" });
+      return;
+    }
+
+    const card = await prisma.card.findUnique({ where: { id: cardId } });
+    if (!card) {
+      res.status(404).json({ error: "Card not found" });
+      return;
+    }
+
+    const { set_name, set_code, rarity, condition, edition, language, image, price, stock } = req.body || {};
+    if (price == null || !Number.isFinite(Number(price)) || Number(price) < 0) {
+      res.status(400).json({ error: "Valid price is required" });
+      return;
+    }
+
+    const version = await prisma.cardVersion.create({
+      data: {
+        cardId,
+        setName: String(set_name || ""),
+        setCode: String(set_code || ""),
+        rarity: String(rarity || "Common"),
+        condition: String(condition || "Near Mint"),
+        edition: String(edition || ""),
+        language: String(language || "en"),
+        image: image || null,
+        price: Number(price),
+        stock: Math.max(0, Math.round(Number(stock || 0))),
+      },
+    });
+
+    publishEvent("admin", {
+      type: "card-version-update",
+      cardId,
+      versionId: version.id,
+      action: "created",
+    });
+
+    res.status(201).json({
+      version: {
+        id: version.id,
+        card_id: version.cardId,
+        set_name: version.setName,
+        set_code: version.setCode,
+        rarity: version.rarity,
+        condition: version.condition,
+        edition: version.edition,
+        language: version.language,
+        image: version.image,
+        price: version.price,
+        stock: version.stock,
+        is_visible: version.isVisible,
+        created_at: version.createdAt,
+        updated_at: version.updatedAt,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to create card version" });
+  }
+});
+
+app.put("/api/admin/versions/:id", requireAdminAuth, requireAdminRole([UserRole.ADMIN]), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      res.status(400).json({ error: "Invalid version id" });
+      return;
+    }
+
+    const existing = await prisma.cardVersion.findUnique({ where: { id } });
+    if (!existing) {
+      res.status(404).json({ error: "Version not found" });
+      return;
+    }
+
+    const data = {};
+    const body = req.body || {};
+    if (body.set_name !== undefined) data.setName = String(body.set_name);
+    if (body.set_code !== undefined) data.setCode = String(body.set_code);
+    if (body.rarity !== undefined) data.rarity = String(body.rarity);
+    if (body.condition !== undefined) data.condition = String(body.condition);
+    if (body.edition !== undefined) data.edition = String(body.edition);
+    if (body.language !== undefined) data.language = String(body.language);
+    if (body.image !== undefined) data.image = body.image || null;
+    if (body.price !== undefined) {
+      const numPrice = Number(body.price);
+      if (!Number.isFinite(numPrice) || numPrice < 0) {
+        res.status(400).json({ error: "Invalid price" });
+        return;
+      }
+      data.price = numPrice;
+    }
+    if (body.stock !== undefined) {
+      data.stock = Math.max(0, Math.round(Number(body.stock || 0)));
+    }
+    if (body.is_visible !== undefined) {
+      data.isVisible = Boolean(body.is_visible);
+    }
+
+    if (!Object.keys(data).length) {
+      res.status(400).json({ error: "No fields to update" });
+      return;
+    }
+
+    const version = await prisma.cardVersion.update({ where: { id }, data });
+
+    publishEvent("admin", {
+      type: "card-version-update",
+      cardId: version.cardId,
+      versionId: version.id,
+      action: "updated",
+    });
+
+    res.json({
+      version: {
+        id: version.id,
+        card_id: version.cardId,
+        set_name: version.setName,
+        set_code: version.setCode,
+        rarity: version.rarity,
+        condition: version.condition,
+        edition: version.edition,
+        language: version.language,
+        image: version.image,
+        price: version.price,
+        stock: version.stock,
+        is_visible: version.isVisible,
+        created_at: version.createdAt,
+        updated_at: version.updatedAt,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to update version" });
+  }
+});
+
+app.delete("/api/admin/versions/:id", requireAdminAuth, requireAdminRole([UserRole.ADMIN]), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      res.status(400).json({ error: "Invalid version id" });
+      return;
+    }
+
+    const existing = await prisma.cardVersion.findUnique({ where: { id } });
+    if (!existing) {
+      res.status(404).json({ error: "Version not found" });
+      return;
+    }
+
+    await prisma.cardVersion.delete({ where: { id } });
+
+    publishEvent("admin", {
+      type: "card-version-update",
+      cardId: existing.cardId,
+      versionId: id,
+      action: "deleted",
+    });
+
+    res.json({ deleted: true, id });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to delete version" });
   }
 });
 
@@ -7267,8 +7521,13 @@ app.put("/api/admin/orders/:id/status", requireAdminAuth, async (req, res) => {
       };
     });
 
-    await applyOrderStatusPostCommitEffect(orderUpdateResult.postCommitEffect);
     const updatedOrder = orderUpdateResult.order;
+
+    const cardsById = await getOrderCardsMap([updatedOrder], { adminThumbnail: true });
+    const responsePayload = { order: toOrderResponse(updatedOrder, cardsById, { includeAdminFields: true }) };
+
+    orderUpdateResult.postCommitEffect.orderSnapshot = responsePayload.order;
+    await applyOrderStatusPostCommitEffect(orderUpdateResult.postCommitEffect);
 
     try {
       await recordActivity(req.user.id, "ADMIN_ORDER_STATUS_UPDATED", req, {
@@ -7280,9 +7539,6 @@ app.put("/api/admin/orders/:id/status", requireAdminAuth, async (req, res) => {
     } catch (activityError) {
       console.error("Failed to record order status activity", activityError);
     }
-
-    const cardsById = await getOrderCardsMap([updatedOrder], { adminThumbnail: true });
-    const responsePayload = { order: toOrderResponse(updatedOrder, cardsById, { includeAdminFields: true }) };
     await finalizeIdempotentMutation(idempotency, 200, responsePayload);
     return res.json(responsePayload);
   } catch (error) {
