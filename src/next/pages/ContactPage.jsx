@@ -163,9 +163,9 @@ export default function ContactPage() {
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400 sm:text-[15px]">Elegí el canal más rápido para cerrar tu compra o enviarnos una consulta.</p>
         </div>
 
-        <div className="overflow-hidden rounded-[28px] border border-emerald-500/15 bg-[linear-gradient(135deg,rgba(5,18,16,0.97),rgba(9,24,21,0.98))] shadow-[0_24px_80px_rgba(16,185,129,0.12),0_0_60px_rgba(45,212,191,0.06)]">
+        <div className="overflow-hidden rounded-[28px] border border-emerald-500/15 bg-[linear-gradient(135deg,rgba(3,14,12,0.98),rgba(8,25,20,0.99))] shadow-[0_24px_80px_rgba(16,185,129,0.14),0_0_70px_rgba(16,185,129,0.08)]">
           <div className="grid lg:grid-cols-[0.94fr_1.06fr]">
-            <div className="border-b border-emerald-500/10 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.2),transparent_52%),linear-gradient(180deg,rgba(5,18,16,0.95),rgba(6,15,14,1))] p-4 sm:p-6 lg:border-b-0 lg:border-r lg:border-emerald-500/10">
+            <div className="border-b border-emerald-500/10 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.24),transparent_48%),linear-gradient(180deg,rgba(3,14,12,0.96),rgba(5,18,15,1))] p-4 sm:p-6 lg:border-b-0 lg:border-r lg:border-emerald-500/10">
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-400/20 bg-emerald-400/10 text-emerald-300 shadow-[0_0_20px_rgba(16,185,129,0.2)]">
                   <Phone className="h-5 w-5" />
@@ -189,11 +189,11 @@ export default function ContactPage() {
                   </div>
                 </div>
 
-                <div className="flex justify-center overflow-hidden rounded-[28px] border border-white/10 bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.65),0_0_30px_rgba(16,185,129,0.14)]">
+                <div className="mx-auto flex h-44 w-44 items-center justify-center overflow-hidden rounded-[28px] border border-emerald-100/40 bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_0_34px_rgba(16,185,129,0.16)] sm:h-[220px] sm:w-[220px]">
                   {qrCodeUrl ? (
-                    <img src={qrCodeUrl} alt="QR para enviar el carrito por WhatsApp" className="h-40 w-40 object-cover sm:h-[220px] sm:w-[220px]" loading="lazy" />
+                    <img src={qrCodeUrl} alt="QR para enviar el carrito por WhatsApp" className="h-full w-full object-contain" loading="lazy" />
                   ) : (
-                    <div className="flex h-40 w-40 flex-col items-center justify-center border border-slate-200 bg-slate-100 px-4 text-center text-sm text-slate-500 sm:h-[220px] sm:w-[220px]">
+                    <div className="flex h-full w-full flex-col items-center justify-center border border-slate-200 bg-slate-100 px-4 text-center text-sm text-slate-500">
                       <QrCode className="mb-3 h-8 w-8" />
                       {supportWhatsappNumber ? (qrCodeError ? "No pudimos generar el QR. Probá abrir WhatsApp desde el botón." : "Generando QR...") : "Configurá el número desde admin para generar el QR."}
                     </div>
@@ -218,7 +218,7 @@ export default function ContactPage() {
               </div>
             </div>
 
-            <div className="bg-[radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.1),transparent_60%),linear-gradient(180deg,rgba(9,23,21,0.98),rgba(8,19,18,1))] p-4 sm:p-6">
+            <div className="bg-[radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.16),transparent_56%),linear-gradient(180deg,rgba(7,20,17,0.99),rgba(6,16,14,1))] p-4 sm:p-6">
               {sent ? (
                 <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="flex flex-col items-center justify-center gap-4 py-10">
                   <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-400/15 shadow-[0_0_30px_rgba(16,185,129,0.25)]">
@@ -250,19 +250,19 @@ export default function ContactPage() {
 
                   {formFields.map(({ key, label, placeholder, icon: Icon, type }) => (
                     <div key={key}>
-                      <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-300">{label}</label>
+                      <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-emerald-100/85">{label}</label>
                       <div className="relative">
                         <Icon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-emerald-400/50" />
-                        <input type={type} placeholder={placeholder} value={form[/** @type {keyof typeof form} */ (key)]} onChange={(event) => setForm((prev) => ({ ...prev, [key]: event.target.value }))} className="h-11 w-full rounded-2xl border border-emerald-500/20 bg-emerald-950/20 pl-10 pr-4 text-sm text-slate-100 placeholder:text-slate-500 transition focus:border-emerald-400/40 focus:outline-none focus:ring-4 focus:ring-emerald-400/10 focus:shadow-[0_0_20px_rgba(16,185,129,0.12)]" />
+                        <input type={type} placeholder={placeholder} value={form[/** @type {keyof typeof form} */ (key)]} onChange={(event) => setForm((prev) => ({ ...prev, [key]: event.target.value }))} className="h-11 w-full rounded-2xl border border-emerald-500/20 bg-emerald-950/30 pl-10 pr-4 text-sm text-slate-100 placeholder:text-slate-500 transition focus:border-emerald-400/45 focus:outline-none focus:ring-4 focus:ring-emerald-400/10 focus:shadow-[0_0_20px_rgba(16,185,129,0.14)]" />
                       </div>
                     </div>
                   ))}
 
                   <div>
-                    <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-300">Mensaje</label>
+                    <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-emerald-100/85">Mensaje</label>
                     <div className="relative">
                       <AlignLeft className="absolute left-3 top-3 h-4 w-4 text-emerald-400/50" />
-                      <textarea placeholder="Escribe tu mensaje aquí..." rows={4} value={form.message} onChange={(event) => setForm((prev) => ({ ...prev, message: event.target.value }))} className="w-full resize-none rounded-2xl border border-emerald-500/20 bg-emerald-950/20 py-3 pl-10 pr-4 text-sm text-slate-100 placeholder:text-slate-500 transition focus:border-emerald-400/40 focus:outline-none focus:ring-4 focus:ring-emerald-400/10 focus:shadow-[0_0_20px_rgba(16,185,129,0.12)]" />
+                      <textarea placeholder="Escribe tu mensaje aquí..." rows={4} value={form.message} onChange={(event) => setForm((prev) => ({ ...prev, message: event.target.value }))} className="w-full resize-none rounded-2xl border border-emerald-500/20 bg-emerald-950/30 py-3 pl-10 pr-4 text-sm text-slate-100 placeholder:text-slate-500 transition focus:border-emerald-400/45 focus:outline-none focus:ring-4 focus:ring-emerald-400/10 focus:shadow-[0_0_20px_rgba(16,185,129,0.14)]" />
                     </div>
                   </div>
 

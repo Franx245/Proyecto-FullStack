@@ -163,13 +163,13 @@ export default function Contact() {
         </span>
         <h1 className="mt-3 text-3xl font-black tracking-tight text-white sm:text-[2.2rem]">Contacto</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400 sm:text-[15px]">
-          Elegí el canal más rápido para cerrar tu compra o enviarnos una consulta. Mantuvimos la estética de la tienda y comprimimos el bloque para que en mobile respire mejor.
+          Elegí el canal más rápido para cerrar tu compra o enviarnos una consulta.
         </p>
       </div>
 
-      <div className="overflow-hidden rounded-[28px] border border-white/10 bg-[linear-gradient(135deg,rgba(15,23,42,0.96),rgba(18,30,46,0.98))] shadow-[0_24px_80px_rgba(2,6,23,0.45)]">
+      <div className="overflow-hidden rounded-[28px] border border-emerald-500/15 bg-[linear-gradient(135deg,rgba(3,14,12,0.98),rgba(8,25,20,0.99))] shadow-[0_24px_80px_rgba(16,185,129,0.14),0_0_70px_rgba(16,185,129,0.08)]">
         <div className="grid lg:grid-cols-[0.94fr_1.06fr]">
-          <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.2),transparent_42%),linear-gradient(180deg,rgba(15,23,42,0.95),rgba(12,20,34,1))] p-4 sm:p-6 lg:border-b-0 lg:border-r">
+          <div className="border-b border-emerald-500/10 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.24),transparent_48%),linear-gradient(180deg,rgba(3,14,12,0.96),rgba(5,18,15,1))] p-4 sm:p-6 lg:border-b-0 lg:border-r lg:border-emerald-500/10">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-400/20 bg-emerald-400/10 text-emerald-300">
                 <Phone className="h-5 w-5" />
@@ -183,7 +183,7 @@ export default function Contact() {
             </div>
 
             <div className="mt-4 grid gap-3 sm:mt-5 sm:gap-4">
-              <div className="rounded-3xl border border-white/8 bg-slate-950/45 p-4">
+              <div className="rounded-3xl border border-emerald-400/10 bg-emerald-950/20 p-4 backdrop-blur-sm">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-300/80">WhatsApp activo</p>
@@ -195,16 +195,16 @@ export default function Contact() {
                 </div>
               </div>
 
-              <div className="flex justify-center overflow-hidden rounded-[28px] border border-white/10 bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
+              <div className="mx-auto flex h-44 w-44 items-center justify-center overflow-hidden rounded-[28px] border border-emerald-100/40 bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_0_34px_rgba(16,185,129,0.16)] sm:h-[220px] sm:w-[220px]">
                 {qrCodeUrl ? (
                   <img
                     src={qrCodeUrl}
                     alt="QR para enviar el carrito por WhatsApp"
-                    className="h-40 w-40 object-cover sm:h-[220px] sm:w-[220px]"
+                    className="h-full w-full object-contain"
                     loading="lazy"
                   />
                 ) : (
-                  <div className="flex h-40 w-40 flex-col items-center justify-center border border-slate-200 bg-slate-100 px-4 text-center text-sm text-slate-500 sm:h-[220px] sm:w-[220px]">
+                  <div className="flex h-full w-full flex-col items-center justify-center border border-slate-200 bg-slate-100 px-4 text-center text-sm text-slate-500">
                     <QrCode className="mb-3 h-8 w-8" />
                     {supportWhatsappNumber
                       ? qrCodeError
@@ -224,12 +224,12 @@ export default function Contact() {
               </button>
 
               <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-amber-300/80">Email soporte</p>
+                <div className="rounded-2xl border border-emerald-400/10 bg-white/[0.03] p-4 backdrop-blur-sm">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-300/80">Email soporte</p>
                   <p className="mt-2 break-all text-sm text-slate-200">{supportEmail || 'Sin email configurado'}</p>
                 </div>
-                <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-amber-300/80">Carrito actual</p>
+                <div className="rounded-2xl border border-emerald-400/10 bg-white/[0.03] p-4 backdrop-blur-sm">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-300/80">Carrito actual</p>
                   <p className="mt-2 text-sm text-slate-200">
                     {items.length} ítem{items.length !== 1 ? 's' : ''} · {formatPrice(totalPrice)}
                   </p>
@@ -238,15 +238,15 @@ export default function Contact() {
             </div>
           </div>
 
-          <div className="bg-[linear-gradient(180deg,rgba(36,49,70,0.98),rgba(29,40,58,1))] p-4 sm:p-6">
+          <div className="bg-[radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.16),transparent_56%),linear-gradient(180deg,rgba(7,20,17,0.99),rgba(6,16,14,1))] p-4 sm:p-6">
             {sent ? (
               <motion.div
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 className="flex flex-col items-center justify-center gap-4 py-10"
               >
-                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-amber-400/15">
-                  <CheckCircle className="h-7 w-7 text-amber-300" />
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-400/15 shadow-[0_0_30px_rgba(16,185,129,0.25)]">
+                  <CheckCircle className="h-7 w-7 text-emerald-300" />
                 </div>
                 <h3 className="text-lg font-bold text-white">Consulta recibida</h3>
                 <p className="text-center text-sm text-slate-400">Ya guardamos tu mensaje y el equipo podrá responderlo desde el panel administrativo.</p>
@@ -256,7 +256,7 @@ export default function Contact() {
                     setSubmitFeedback({ type: '', message: '' });
                     setForm({ name: '', email: '', subject: '', message: '' });
                   }}
-                  className="mt-2 text-sm font-medium text-amber-300 hover:text-amber-200"
+                  className="mt-2 text-sm font-medium text-emerald-300 transition hover:text-emerald-200"
                 >
                   Enviar otro mensaje
                 </button>
@@ -265,7 +265,7 @@ export default function Contact() {
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="mb-3 sm:mb-4">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-amber-300/25 bg-amber-300/12 text-amber-300">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-300/25 bg-emerald-300/12 text-emerald-300 shadow-[0_0_20px_rgba(16,185,129,0.2)]">
                       <Mail className="h-5 w-5" />
                     </div>
                     <div>
@@ -277,30 +277,30 @@ export default function Contact() {
 
                 {formFields.map(({ key, label, placeholder, icon: Icon, type }) => (
                   <div key={key}>
-                    <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-300">{label}</label>
+                    <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-emerald-100/85">{label}</label>
                     <div className="relative">
-                      <Icon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                      <Icon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-emerald-400/50" />
                       <input
                         type={type}
                         placeholder={placeholder}
                         value={form[key]}
                         onChange={e => setForm(prev => ({ ...prev, [key]: e.target.value }))}
-                        className="h-11 w-full rounded-2xl border border-slate-700/80 bg-slate-950/45 pl-10 pr-4 text-sm text-slate-100 placeholder:text-slate-500 focus:border-amber-300/35 focus:outline-none focus:ring-4 focus:ring-amber-300/10"
+                        className="h-11 w-full rounded-2xl border border-emerald-500/20 bg-emerald-950/30 pl-10 pr-4 text-sm text-slate-100 placeholder:text-slate-500 transition focus:border-emerald-400/45 focus:outline-none focus:ring-4 focus:ring-emerald-400/10 focus:shadow-[0_0_20px_rgba(16,185,129,0.14)]"
                       />
                     </div>
                   </div>
                 ))}
 
                 <div>
-                  <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-300">Mensaje</label>
+                  <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-emerald-100/85">Mensaje</label>
                   <div className="relative">
-                    <AlignLeft className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
+                    <AlignLeft className="absolute left-3 top-3 h-4 w-4 text-emerald-400/50" />
                     <textarea
                       placeholder="Escribe tu mensaje aquí..."
                       rows={4}
                       value={form.message}
                       onChange={e => setForm(prev => ({ ...prev, message: e.target.value }))}
-                      className="w-full resize-none rounded-2xl border border-slate-700/80 bg-slate-950/45 py-3 pl-10 pr-4 text-sm text-slate-100 placeholder:text-slate-500 focus:border-amber-300/35 focus:outline-none focus:ring-4 focus:ring-amber-300/10"
+                      className="w-full resize-none rounded-2xl border border-emerald-500/20 bg-emerald-950/30 py-3 pl-10 pr-4 text-sm text-slate-100 placeholder:text-slate-500 transition focus:border-emerald-400/45 focus:outline-none focus:ring-4 focus:ring-emerald-400/10 focus:shadow-[0_0_20px_rgba(16,185,129,0.14)]"
                     />
                   </div>
                 </div>
@@ -318,7 +318,7 @@ export default function Contact() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-amber-400 text-slate-950 text-sm font-bold transition hover:bg-amber-300 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
+                  className="group flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 text-sm font-bold text-slate-950 shadow-[0_16px_40px_rgba(16,185,129,0.28)] transition hover:bg-emerald-400 hover:shadow-[0_16px_50px_rgba(16,185,129,0.38)] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {loading ? (
                     <span className="flex items-center gap-2">
@@ -330,8 +330,8 @@ export default function Contact() {
                     </span>
                   ) : (
                     <>
-                      <Send className="h-4 w-4" />
-                      Enviar Mensaje
+                      <Send className="h-4 w-4 transition group-hover:translate-x-0.5" />
+                      Enviar consulta
                     </>
                   )}
                 </button>
