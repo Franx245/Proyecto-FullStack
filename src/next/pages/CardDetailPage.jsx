@@ -10,6 +10,7 @@ import { ArrowLeft } from "lucide-react";
 import { fetchCardDetail } from "@/api/store";
 import CardInfo from "@/components/marketplace/CardInfo";
 import CardVersionsTable from "@/components/marketplace/CardVersionsTable";
+import RelatedCards from "@/components/marketplace/RelatedCards";
 import { readLastCatalogHref } from "@/lib/catalog-url-state";
 import { retainPreviousData } from "@/lib/query-client";
 import { buildCardPath } from "@/lib/seo";
@@ -60,6 +61,7 @@ export default function CardDetailPage({ id, initialData }) {
 
   const card = data?.card ?? null;
   const versions = data?.versions ?? [];
+  const relatedCards = data?.related_cards ?? [];
   const ygoproData = data?.ygoproData ?? null;
   const shouldShowInitialSkeleton = isLoading && !card;
 
@@ -104,6 +106,10 @@ export default function CardDetailPage({ id, initialData }) {
               });
             }}
           />
+
+          {relatedCards.length > 0 && (
+            <RelatedCards cards={relatedCards} currentCardId={card.id} />
+          )}
         </motion.div>
       )
   );

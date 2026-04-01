@@ -428,6 +428,24 @@ function detectRarity(card) {
   return "Unknown";
 }
 
+/**
+ * Extract archetype prefix from card name for family grouping.
+ * "Blue-Eyes Twin Burst Dragon" → "Blue-Eyes"
+ * "Dark Magician Girl" → "Dark Magician"
+ * "Elemental HERO Neos" → "Elemental HERO"
+ * @param {string | null | undefined} name
+ * @returns {string | null}
+ */
+function extractArchetypePrefix(name) {
+  if (!name || name.length < 4) return null;
+  const words = name.split(/\s+/);
+  if (words.length < 2) return null;
+  // Hyphenated first word (e.g. "Blue-Eyes") → use just that as prefix
+  if (words[0].includes("-") && words[0].length > 3) return words[0];
+  // Otherwise use first 2 words
+  return words.slice(0, 2).join(" ");
+}
+
 function getAdminCardImageUrl(imageUrl) {
   const normalizedImageUrl = typeof imageUrl === "string" ? imageUrl.trim() : "";
 
@@ -4060,6 +4078,23 @@ async function handlePublicCatalogDetail(req, res) {
         })
       : [];
 
+    // Related cards from the same archetype/family
+    const archPrefix = card.archetype || extractArchetypePrefix(card.name);
+    const relatedCards = archPrefix
+      ? await prisma.card.findMany({
+          where: {
+            ...(card.archetype
+              ? { archetype: card.archetype }
+              : { name: { startsWith: archPrefix, mode: "insensitive" } }),
+            id: { not: card.id },
+            isVisible: true,
+            stock: { gt: 0 },
+          },
+          orderBy: [{ price: "asc" }],
+          take: 20,
+        })
+      : [];
+
     const baseVersion = {
       version_id: String(card.id),
       card_id: String(card.id),
@@ -4118,9 +4153,30 @@ async function handlePublicCatalogDetail(req, res) {
         return Number(a.price || 0) - Number(b.price || 0);
       });
 
+    // Filter related cards that are already in siblings (avoid duplicates)
+    const siblingIdSet = new Set(siblingCards.map((s) => s.id));
+    const uniqueRelated = relatedCards.filter((r) => r.id !== card.id && !siblingIdSet.has(r.id));
+
+    const relatedMapped = uniqueRelated.map((r) => {
+      const pub = toPublicCard(r);
+      return {
+        id: r.id,
+        name: pub.name,
+        image: pub.image,
+        set_name: pub.set_name,
+        set_code: pub.set_code,
+        rarity: detectRarity(r),
+        price: pub.price,
+        stock: pub.stock,
+        condition: pub.condition,
+        language: detectLanguage(r.name),
+      };
+    });
+
     return {
       card: { ...publicCard, version_count: allVersions.length },
       versions: allVersions,
+      related_cards: relatedMapped,
       ygoproData: {
         description: publicCard.description,
         image: publicCard.image,
