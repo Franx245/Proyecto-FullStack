@@ -5366,19 +5366,6 @@ app.get("/api/internal/warm-cache", async (req, res) => {
   }
 });
 
-app.post("/api/internal/backfill-card-identity", async (req, res) => {
-  try {
-    assertCronAuthorized(req);
-    const result = await prisma.$executeRawUnsafe(
-      "UPDATE cards SET card_identity = CAST(ygopro_id AS TEXT), external_id = CAST(ygopro_id AS TEXT) WHERE ygopro_id IS NOT NULL AND (card_identity IS NULL OR card_identity != CAST(ygopro_id AS TEXT))"
-    );
-    res.json({ ok: true, updated: result });
-  } catch (error) {
-    if (res.headersSent) return;
-    res.status(500).json({ error: error?.message || "Backfill failed" });
-  }
-});
-
 app.get("/api/orders", requireAuth, async (req, res) => {
   try {
     const currentUserId = Number(req.user.sub);
@@ -7001,10 +6988,10 @@ app.post("/api/admin/backfill-card-identity", async (req, res) => {
 
     const result = await prisma.$executeRawUnsafe(`
       UPDATE "Card"
-      SET "card_identity" = CAST("ygoproId" AS TEXT),
-          "external_id"   = CAST("ygoproId" AS TEXT)
+      SET "cardIdentity" = CAST("ygoproId" AS TEXT),
+          "externalId"   = CAST("ygoproId" AS TEXT)
       WHERE "ygoproId" IS NOT NULL
-        AND ("card_identity" IS NULL OR "card_identity" = '')
+        AND ("cardIdentity" IS NULL OR "cardIdentity" = '')
     `);
 
     if (dryRun) {
@@ -7020,8 +7007,8 @@ app.post("/api/admin/backfill-card-identity", async (req, res) => {
 
     const nameFallback = await prisma.$executeRawUnsafe(`
       UPDATE "Card"
-      SET "card_identity" = LOWER(REGEXP_REPLACE(TRIM("name"), '[^a-zA-Z0-9]', '', 'g'))
-      WHERE ("card_identity" IS NULL OR "card_identity" = '')
+      SET "cardIdentity" = LOWER(REGEXP_REPLACE(TRIM("name"), '[^a-zA-Z0-9]', '', 'g'))
+      WHERE ("cardIdentity" IS NULL OR "cardIdentity" = '')
         AND "name" IS NOT NULL AND TRIM("name") != ''
     `);
 
