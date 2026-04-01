@@ -21,7 +21,7 @@ import { useCart } from "@/lib/cartStore";
 import { checkoutCart, createStoreMutationId, fetchMyAddresses, fetchShippingRates } from "@/api/store";
 import { trackOrderId } from "@/lib/orderTracking";
 import { useAuth } from "@/lib/auth";
-import { SHIPPING_OPTIONS, getShippingOption } from "@/lib/shipping";
+import { getShippingOption } from "@/lib/shipping";
 import { refreshCards } from "@/lib/query-client";
 import CardImage from "@/components/marketplace/CardImage";
 import { formatPrice } from "@/utils/currency";
@@ -311,7 +311,16 @@ export default function CartPage() {
 
   const effectiveZone = selectedAddress?.zone || shippingZone;
   const shippingOption = getShippingOption(effectiveZone);
-  const effectiveShippingCost = selectedRate ? selectedRate.price : shippingOption.cost;
+  const effectiveShippingCost = effectiveZone === "pickup"
+    ? 0
+    : selectedRate
+      ? selectedRate.price
+      : selectedCarrier === "andreani"
+        ? 6000
+        : shippingOption.cost;
+  const effectiveCarrierLabel = effectiveZone === "pickup"
+    ? "Retiro en showroom"
+    : selectedRate?.carrierLabel || (selectedCarrier === "andreani" ? "Andreani" : "Correo Argentino");
   const totalWithShipping = totalPrice + effectiveShippingCost;
   const requiresManualAddress = isAuthenticated && effectiveZone !== "pickup" && (deliveryMode === "new" || !selectedAddress);
 
@@ -504,64 +513,125 @@ export default function CartPage() {
                       </div>
                     </div>
 
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <label className="space-y-2 text-sm">
-                        <span className="font-semibold">Modalidad</span>
-                        <select
-                          value={shippingZone}
-                          onChange={(e) => {
-                            const nextZone = e.target.value;
-                            setShippingZone(nextZone);
-                            if (nextZone === "pickup") {
-                              setSelectedAddressId("");
-                            } else if (deliveryMode === "saved") {
+                    <div className="space-y-3">
+                      <p className="flex items-center gap-2 text-sm font-bold">
+                        <span className="text-lg">🚚</span> Elegí cómo recibir tu pedido
+                      </p>
+
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        {/* Retiro en showroom */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShippingZone("pickup");
+                            setSelectedCarrier("showroom");
+                            setSelectedAddressId("");
+                          }}
+                          className={`group relative flex flex-col items-center gap-2 rounded-2xl border-2 px-4 py-5 text-center transition-all duration-200 ${
+                            effectiveZone === "pickup"
+                              ? "border-emerald-400 bg-emerald-400/10 shadow-[0_0_20px_rgba(52,211,153,0.15)]"
+                              : "border-border hover:border-emerald-400/40 hover:bg-emerald-400/5"
+                          }`}
+                        >
+                          {effectiveZone === "pickup" ? (
+                            <div className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-400">
+                              <Check className="h-3 w-3 text-background" />
+                            </div>
+                          ) : null}
+                          <span className="text-2xl">🏪</span>
+                          <p className="text-sm font-bold text-foreground">Retiro en showroom</p>
+                          <p className="text-lg font-black text-emerald-400">GRATIS</p>
+                          <p className="text-[11px] text-muted-foreground">Inmediato</p>
+                        </button>
+
+                        {/* Correo Argentino */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShippingZone("gba");
+                            setSelectedCarrier("correoargentino");
+                            if (deliveryMode === "saved") {
                               const fallbackAddress = getPreferredAddress(addresses);
                               if (fallbackAddress) {
                                 setSelectedAddressId(String(fallbackAddress.id));
-                                setShippingZone(fallbackAddress.zone);
                               }
                             }
                           }}
-                          className="w-full h-11 rounded-xl border border-border bg-secondary px-3 outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+                          className={`group relative flex flex-col items-center gap-2 rounded-2xl border-2 px-4 py-5 text-center transition-all duration-200 ${
+                            selectedCarrier === "correoargentino" && effectiveZone !== "pickup"
+                              ? "border-sky-400 bg-sky-400/10 shadow-[0_0_20px_rgba(56,189,248,0.15)]"
+                              : "border-border hover:border-sky-400/40 hover:bg-sky-400/5"
+                          }`}
                         >
-                          {Object.entries(SHIPPING_OPTIONS).map(([zone, option]) => (
-                            <option key={zone} value={zone}>{option.label} · {option.eta}</option>
-                          ))}
-                        </select>
-                      </label>
+                          {selectedCarrier === "correoargentino" && effectiveZone !== "pickup" ? (
+                            <div className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-sky-400">
+                              <Check className="h-3 w-3 text-background" />
+                            </div>
+                          ) : null}
+                          <span className="text-2xl">📦</span>
+                          <p className="text-sm font-bold text-foreground">Correo Argentino</p>
+                          {selectedRate?.carrier === "correoargentino" ? (
+                            <>
+                              <p className="text-lg font-black text-sky-400">{formatPrice(selectedRate.price)}</p>
+                              <p className="text-[11px] text-muted-foreground">{selectedRate.estimatedDays}</p>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-lg font-black text-sky-400">{formatPrice(shippingOption.cost)}</p>
+                              <p className="text-[11px] text-muted-foreground">3 – 6 días hábiles</p>
+                            </>
+                          )}
+                        </button>
 
-                      <div className="rounded-2xl border border-border bg-secondary/60 px-4 py-3 text-sm">
-                        <p className="font-semibold">Costo estimado</p>
-                        {effectiveZone === "pickup" ? (
-                          <p className="mt-2 text-lg font-black text-primary">Gratis</p>
-                        ) : shippingRates.length > 0 ? (
-                          <div className="mt-2 space-y-2">
-                            {shippingRates.map((rate) => (
-                              <button
-                                key={rate.carrier}
-                                type="button"
-                                onClick={() => setSelectedCarrier(rate.carrier)}
-                                className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left transition ${selectedCarrier === rate.carrier ? "border-primary bg-primary/10" : "border-border hover:border-primary/30"}`}
-                              >
-                                <div>
-                                  <p className="font-semibold text-foreground">{rate.carrierLabel}</p>
-                                  <p className="text-xs text-muted-foreground">{rate.service} · {rate.estimatedDays}</p>
-                                </div>
-                                <p className="font-bold text-primary">{formatPrice(rate.price)}</p>
-                              </button>
-                            ))}
-                          </div>
-                        ) : shippingRatesQuery.isLoading ? (
-                          <div className="mt-2 flex items-center gap-2 text-muted-foreground">
-                            <Loader2 className="h-4 w-4 animate-spin" /> Cotizando...
-                          </div>
-                        ) : (
-                          <>
-                            <p className="mt-1 text-muted-foreground">{shippingOption.label}</p>
-                            <p className="mt-2 text-lg font-black text-primary">{formatPrice(shippingOption.cost)}</p>
-                          </>
-                        )}
+                        {/* Andreani */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShippingZone("interior");
+                            setSelectedCarrier("andreani");
+                            if (deliveryMode === "saved") {
+                              const fallbackAddress = getPreferredAddress(addresses);
+                              if (fallbackAddress) {
+                                setSelectedAddressId(String(fallbackAddress.id));
+                              }
+                            }
+                          }}
+                          className={`group relative flex flex-col items-center gap-2 rounded-2xl border-2 px-4 py-5 text-center transition-all duration-200 ${
+                            selectedCarrier === "andreani" && effectiveZone !== "pickup"
+                              ? "border-violet-400 bg-violet-400/10 shadow-[0_0_20px_rgba(167,139,250,0.15)]"
+                              : "border-border hover:border-violet-400/40 hover:bg-violet-400/5"
+                          }`}
+                        >
+                          {selectedCarrier === "andreani" && effectiveZone !== "pickup" ? (
+                            <div className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-violet-400">
+                              <Check className="h-3 w-3 text-background" />
+                            </div>
+                          ) : null}
+                          <span className="text-2xl">🚛</span>
+                          <p className="text-sm font-bold text-foreground">Andreani</p>
+                          {selectedRate?.carrier === "andreani" ? (
+                            <>
+                              <p className="text-lg font-black text-violet-400">{formatPrice(selectedRate.price)}</p>
+                              <p className="text-[11px] text-muted-foreground">{selectedRate.estimatedDays}</p>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-lg font-black text-violet-400">{formatPrice(6000)}</p>
+                              <p className="text-[11px] text-muted-foreground">2 – 4 días hábiles</p>
+                            </>
+                          )}
+                        </button>
                       </div>
+
+                      {effectiveZone !== "pickup" && shippingPostalCode.length >= 4 && shippingRatesQuery.isLoading ? (
+                        <div className="flex items-center gap-2 rounded-xl border border-border bg-secondary/60 px-4 py-3 text-sm text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin" /> Calculando envío real para CP {shippingPostalCode}...
+                        </div>
+                      ) : effectiveZone !== "pickup" && shippingRates.length > 0 ? (
+                        <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/5 px-4 py-2 text-xs text-emerald-300">
+                          ✓ Tarifa actualizada por Envia.com para CP {shippingPostalCode}
+                        </div>
+                      ) : null}
                     </div>
 
                     {effectiveZone !== "pickup" ? (
@@ -721,8 +791,8 @@ export default function CartPage() {
                   <span>{formatPrice(totalPrice)}</span>
                 </div>
                 <div className="flex justify-between text-yellow-400">
-                  <span>Envío{selectedRate ? ` (${selectedRate.carrierLabel})` : ""}</span>
-                  <span>{formatPrice(effectiveShippingCost)}</span>
+                  <span>Envío ({effectiveCarrierLabel})</span>
+                  <span>{effectiveShippingCost === 0 ? "GRATIS" : formatPrice(effectiveShippingCost)}</span>
                 </div>
                 <div className="flex justify-between font-bold text-base">
                   <span>Total</span>
