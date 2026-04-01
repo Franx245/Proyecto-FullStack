@@ -20,7 +20,7 @@ import RarityBadge from "./RarityBadge";
  */
 
 /** @param {{ cards: RelatedCard[], currentCardId?: number | string }} props */
-export default function RelatedCards({ cards, currentCardId }) {
+export default function RelatedCards({ cards, currentCardId: _currentCardId }) {
   if (!cards || cards.length === 0) return null;
 
   return (
