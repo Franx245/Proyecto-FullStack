@@ -1,6 +1,7 @@
 import { Suspense } from "react";
+import dynamic from "next/dynamic";
 
-import CartPage from "@/next/pages/CartPage.jsx";
+const CartPage = dynamic(() => import("@/next/pages/CartPage.jsx"), { ssr: false });
 
 export default function CartRoute() {
   return (
