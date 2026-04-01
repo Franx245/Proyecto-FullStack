@@ -11,7 +11,11 @@ import { toast } from "sonner";
 import { createDirectPayment, createStoreMutationId, fetchMyOrders, fetchOrdersByIds } from "@/api/store";
 import { ENV } from "@/config/env";
 import { useAuth } from "@/lib/auth";
-import { createMercadoPagoBrowserClient } from "@/lib/mercadopago";
+import {
+  createMercadoPagoBrickBuilder,
+  createMercadoPagoBrowserClient,
+  MERCADOPAGO_BRICK_DARK_STYLE,
+} from "@/lib/mercadopago";
 import { getTrackedOrderIds } from "@/lib/orderTracking";
 import { orderStatusLabel } from "@/lib/shipping";
 import { getUsableStoredUserSession } from "@/lib/userSession";
@@ -325,12 +329,17 @@ export default function OrderPaymentPage({ orderId }) {
 
     void (async () => {
       try {
+        const container = document.getElementById("cardPaymentBrick_container");
+        if (container) {
+          container.innerHTML = "";
+        }
+
         const mp = await createMercadoPagoBrowserClient(/** @type {string} */ (ENV.MP_PUBLIC_KEY));
         if (cancelled) {
           return;
         }
 
-        localBrickController = await mp.bricks().create("cardPayment", "cardPaymentBrick_container", {
+        localBrickController = await createMercadoPagoBrickBuilder(mp).create("cardPayment", "cardPaymentBrick_container", {
           initialization: {
             amount: Number(amount),
             payer: {
@@ -340,9 +349,7 @@ export default function OrderPaymentPage({ orderId }) {
           customization: {
             visual: {
               hideFormTitle: true,
-              style: {
-                theme: "dark",
-              },
+              style: MERCADOPAGO_BRICK_DARK_STYLE,
             },
             paymentMethods: {
               minInstallments: 1,
@@ -560,8 +567,8 @@ export default function OrderPaymentPage({ orderId }) {
                     </div>
                   ) : null}
 
-                  <div key={order?.id} className="overflow-hidden rounded-[28px] border border-border bg-card p-3 shadow-[0_24px_60px_rgba(15,23,42,0.18)]">
-                    <div id="cardPaymentBrick_container" />
+                  <div key={order?.id} className="overflow-hidden rounded-[28px] border border-violet-500/20 bg-slate-950/90 p-3 shadow-[0_24px_60px_rgba(15,23,42,0.18),0_0_40px_rgba(139,92,246,0.12)] backdrop-blur-xl">
+                    <div id="cardPaymentBrick_container" className="min-h-[420px] rounded-[24px] bg-slate-950" />
                   </div>
 
                   <div className="rounded-2xl border border-violet-500/15 bg-violet-500/5 backdrop-blur-sm p-4 text-sm text-muted-foreground">
