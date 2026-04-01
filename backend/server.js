@@ -38,7 +38,7 @@ import { handleRecomputePrices } from "./src/lib/jobs/recompute-prices.js";
 import { handleComputeCardRankings } from "./src/lib/jobs/compute-card-rankings.js";
 import { handleWarmPublicCache } from "./src/lib/jobs/warm-public-cache.js";
 import { getRedisBackendName, probeRedisConnection } from "./src/lib/redis.js";
-import { getShippingRates, createShipment, getTracking, verifyEnviaWebhookSignature, normalizeEnviaWebhookStatus, isEnviaConfigured } from "./src/lib/envia.js";
+import { getShippingRates, createShipment, getTracking, verifyEnviaWebhookSignature, normalizeEnviaWebhookStatus } from "./src/lib/envia.js";
 import { invalidateOrderRelatedCache } from "./src/lib/cache-invalidation.js";
 import { recordApiMetric, recordCatalogSearchMetric } from "./src/lib/metrics.js";
 import {
@@ -4910,6 +4910,7 @@ app.post("/api/checkout", requireAuth, checkoutRateLimit, async (req, res) => {
           payment_status_detail: null,
           shippingZone: delivery.shippingZone,
           shippingLabel: delivery.shipping.label,
+          carrier: typeof req.body?.shipping_carrier === "string" && req.body.shipping_carrier.trim() ? req.body.shipping_carrier.trim() : null,
           customerName,
           customerEmail,
           customerPhone: delivery.snapshot.customerPhone,
