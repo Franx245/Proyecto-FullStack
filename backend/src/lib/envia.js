@@ -5,11 +5,14 @@
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-const ENVIA_BASE_URL = process.env.ENVIA_BASE_URL || "https://ship-test.envia.com";
+const ENVIA_BASE_URL = process.env.ENVIA_BASE_URL || "https://api-test.envia.com";
 const ENVIA_API_KEY = process.env.ENVIA_API_KEY || "";
 const ENVIA_WEBHOOK_SECRET = process.env.ENVIA_WEBHOOK_SECRET || "";
 
-const ALLOWED_CARRIERS = new Set(["correo-argentino", "andreani"]);
+/** Carriers that Envia supports for Argentina */
+const ENVIA_CARRIERS = ["andreani"];
+/** Carriers added as flat-rate (not available in Envia) */
+const FLATRATE_CARRIERS = ["correo-argentino"];
 
 const ENVIA_TIMEOUT_MS = 10_000;
 
@@ -89,9 +92,13 @@ async function enviaFetch(path, options = {}) {
 
 /** Default origin = CABA (DuelVault showroom) */
 const DEFAULT_ORIGIN = {
-  postal_code: "1425",
+  name: "DuelVault",
+  company: "DuelVault",
+  street: "Av Corrientes",
+  number: "1234",
   city: "Buenos Aires",
-  state: "AR-C",
+  state: "CF",
+  postalCode: "1425",
   country: "AR",
 };
 
@@ -104,7 +111,7 @@ const DEFAULT_PARCEL = {
 };
 
 /**
- * Get shipping rates from Envia
+ * Get shipping rates from Envia (one request per carrier, in parallel)
  * @param {{ postalCode: string, city?: string, state?: string }} destination
  * @param {{ weight?: number, itemCount?: number }} [options]
  * @returns {Promise<ShippingRate[]>}
@@ -120,39 +127,84 @@ export async function getShippingRates(destination, options = {}) {
 
   const weight = options.weight || Math.max(0.3, (options.itemCount || 1) * 0.05);
 
+  const destinationPayload = {
+    name: "Cliente",
+    street: "Calle",
+    number: "0",
+    city: destination.city || "Buenos Aires",
+    state: destination.state || inferStateFromPostalCode(destination.postalCode),
+    postalCode: destination.postalCode,
+    country: "AR",
+  };
+
+  const packagesPayload = [{
+    content: "cards",
+    amount: 1,
+    type: "box",
+    weight,
+    insurance: 0,
+    declaredValue: 0,
+    dimensions: {
+      length: DEFAULT_PARCEL.length,
+      width: DEFAULT_PARCEL.width,
+      height: DEFAULT_PARCEL.height,
+    },
+  }];
+
   try {
-    const body = await enviaFetch("/ship/rate/", {
-      method: "POST",
-      body: JSON.stringify({
-        origin: DEFAULT_ORIGIN,
-        destination: {
-          postal_code: destination.postalCode,
-          city: destination.city || "",
-          state: destination.state || "",
-          country: "AR",
-        },
-        packages: [{
-          weight,
-          height: DEFAULT_PARCEL.height,
-          width: DEFAULT_PARCEL.width,
-          length: DEFAULT_PARCEL.length,
-        }],
-      }),
+    const ratePromises = ENVIA_CARRIERS.map(async (carrier) => {
+      try {
+        const body = await enviaFetch("/ship/rate/", {
+          method: "POST",
+          body: JSON.stringify({
+            origin: DEFAULT_ORIGIN,
+            destination: destinationPayload,
+            packages: packagesPayload,
+            carrier,
+            type: 2,
+          }),
+        });
+
+        const rates = Array.isArray(body?.data) ? body.data : [];
+        return rates.map((rate) => ({
+          carrier: String(rate.carrier || carrier).toLowerCase(),
+          carrierLabel: carrierDisplayName(rate.carrier || carrier),
+          service: String(rate.serviceDescription || rate.service || "Estándar"),
+          price: Math.round(Number(rate.totalPrice || rate.basePrice || 0)),
+          estimatedDays: String(rate.deliveryEstimate || rate.days || "3-7 días"),
+          currency: "ARS",
+        }));
+      } catch (err) {
+        console.warn(`Envia rate failed for ${carrier}:`, err.message);
+        return [];
+      }
     });
 
-    const rates = Array.isArray(body?.data) ? body.data : [];
+    const enviaRates = (await Promise.all(ratePromises)).flat();
 
-    return rates
-      .filter((rate) => ALLOWED_CARRIERS.has(String(rate.carrier || "").toLowerCase()))
-      .map((rate) => ({
-        carrier: String(rate.carrier || "").toLowerCase(),
-        carrierLabel: carrierDisplayName(rate.carrier),
-        service: String(rate.service || rate.service_description || "Estándar"),
-        price: Number(rate.total_price || rate.base_price || 0),
-        estimatedDays: String(rate.days || rate.estimated_delivery || "3-5 días"),
+    // Always add Correo Argentino flat rate (not available in Envia AR)
+    const allRates = [
+      ...enviaRates,
+      {
+        carrier: "correo-argentino",
+        carrierLabel: "Correo Argentino",
+        service: "Estándar",
+        price: 4500,
+        estimatedDays: "3-5 días",
         currency: "ARS",
-      }))
-      .sort((a, b) => a.price - b.price);
+      },
+    ];
+
+    allRates.push({
+      carrier: "showroom",
+      carrierLabel: "Retiro en showroom",
+      service: "Retiro presencial",
+      price: 0,
+      estimatedDays: "Inmediato",
+      currency: "ARS",
+    });
+
+    return allRates.sort((a, b) => a.price - b.price);
   } catch (error) {
     console.warn("Envia rate quote failed, using fallback", error.message);
     return getFallbackRates();
@@ -184,23 +236,19 @@ export async function createShipment({ order, carrier, service }) {
     method: "POST",
     body: JSON.stringify({
       origin: {
-        name: "DuelVault",
-        company: "DuelVault",
+        ...DEFAULT_ORIGIN,
         email: "soporte@duelvault.com",
         phone: "+5491168401039",
-        ...DEFAULT_ORIGIN,
-        street: "Showroom DuelVault",
-        number: "S/N",
       },
       destination: {
         name: order.customerName || "Cliente",
         email: order.customerEmail || "",
         phone: order.customerPhone || "",
-        street: order.shippingAddress,
+        street: order.shippingAddress || "Calle",
         number: "S/N",
-        city: order.shippingCity || "",
-        state: order.shippingProvince || "",
-        postal_code: order.shippingPostalCode,
+        city: order.shippingCity || "Buenos Aires",
+        state: order.shippingProvince || inferStateFromPostalCode(order.shippingPostalCode),
+        postalCode: order.shippingPostalCode,
         country: "AR",
       },
       packages: [{
@@ -265,6 +313,26 @@ function carrierDisplayName(carrier) {
     "andreani": "Andreani",
   };
   return names[String(carrier).toLowerCase()] || carrier;
+}
+
+/** Infer Argentine province code from postal code prefix */
+function inferStateFromPostalCode(postalCode) {
+  const cp = String(postalCode).trim();
+  if (!cp) return "BA";
+  const n = parseInt(cp, 10);
+  if (n >= 1000 && n <= 1499) return "CF";
+  if (n >= 1600 && n <= 1899) return "BA";
+  if (n >= 2000 && n <= 2999) return "SF";
+  if (n >= 3000 && n <= 3699) return "ER";
+  if (n >= 4000 && n <= 4699) return "TU";
+  if (n >= 5000 && n <= 5999) return "CO";
+  if (n >= 6000 && n <= 6699) return "BA";
+  if (n >= 7000 && n <= 7699) return "BA";
+  if (n >= 8000 && n <= 8499) return "RN";
+  if (n >= 8500 && n <= 8599) return "NQ";
+  if (n >= 9000 && n <= 9499) return "CH";
+  if (n >= 9400 && n <= 9999) return "SC";
+  return "BA";
 }
 
 /** @param {string} status */
