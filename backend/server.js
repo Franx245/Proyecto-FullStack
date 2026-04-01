@@ -2108,7 +2108,7 @@ async function listPublicCards(req, res, searchOverride, options = {}) {
     if (identities.length) {
       const counts = await prisma.card.groupBy({
         by: ["cardIdentity"],
-        where: { cardIdentity: { in: identities }, isVisible: true, stock: { gt: 0 } },
+        where: { cardIdentity: { in: identities }, isVisible: true },
         _count: { id: true },
       });
       for (const row of counts) {
@@ -2121,7 +2121,7 @@ async function listPublicCards(req, res, searchOverride, options = {}) {
     const publicCards = attachMetadata(cards).map((card, i) => {
       const identity = cards[i]?.cardIdentity;
       const count = identity ? (identityCountMap.get(identity) || 1) : 1;
-      return count > 1 ? { ...card, version_count: count } : card;
+      return { ...card, version_count: count };
     });
 
     return {
