@@ -5498,7 +5498,7 @@ app.post("/api/shipping/rates", requireAuth, async (req, res) => {
   }
 });
 
-app.post("/api/admin/shipping/create", requireAuth, requireAdmin, async (req, res) => {
+app.post("/api/admin/shipping/create", requireAdminAuth, async (req, res) => {
   try {
     const orderId = Number(req.body?.order_id || req.body?.orderId);
     const carrier = String(req.body?.carrier || "").trim().toLowerCase();
