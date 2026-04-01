@@ -4089,6 +4089,14 @@ async function handlePublicCatalogDetail(req, res) {
             id: { not: card.id },
             isVisible: true,
           },
+          select: {
+            id: true, name: true, ygoproId: true, image: true,
+            price: true, stock: true, rarity: true, setName: true,
+            setCode: true, cardType: true, race: true, attribute: true,
+            atk: true, def: true, level: true, description: true,
+            lowStockThreshold: true, isVisible: true, isFeatured: true,
+            isNewArrival: true, salesCount: true, updatedAt: true,
+          },
           orderBy: [{ price: "asc" }],
           take: 30,
         })
@@ -4157,31 +4165,51 @@ async function handlePublicCatalogDetail(req, res) {
     const uniqueRelated = relatedCards.filter((r) => r.id !== card.id && !siblingIdSet.has(r.id));
 
     const normalizeForScore = (s) =>
-      (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9 ]/g, "");
     const baseName = normalizeForScore(card.name);
     const basePrefix = archPrefix ? normalizeForScore(archPrefix) : "";
+
+    /** Jaccard-like word overlap ratio (0..1) */
+    function wordOverlap(a, b) {
+      const setA = new Set(a.split(/\s+/).filter(Boolean));
+      const setB = new Set(b.split(/\s+/).filter(Boolean));
+      if (!setA.size || !setB.size) return 0;
+      let intersection = 0;
+      for (const w of setA) { if (setB.has(w)) intersection++; }
+      return intersection / Math.max(setA.size, setB.size);
+    }
 
     const relatedMapped = uniqueRelated
       .map((r) => {
         const pub = toPublicCard(r);
         const otherName = normalizeForScore(r.name);
         let score = 0;
-        if (baseName === otherName) score += 100;
-        else if (basePrefix && otherName.startsWith(basePrefix)) score += 60;
-        else if (basePrefix && otherName.includes(basePrefix)) score += 40;
-        if (r.stock > 0) score += 20;
-        score += Math.max(0, 10 - (r.price || 0) / 10000);
+
+        // 1. RELEVANCE — exact name match (same card, different set)
+        if (baseName === otherName) score += 1000;
+        // 2. RELEVANCE — same archetype prefix
+        else if (basePrefix && otherName.startsWith(basePrefix)) score += 500;
+        // 3. RELEVANCE — contains prefix
+        else if (basePrefix && otherName.includes(basePrefix)) score += 300;
+
+        // 4. RELEVANCE — fuzzy word overlap
+        score += Math.round(wordOverlap(baseName, otherName) * 200);
+
+        // 5. CONVERSION — stock boost (mild, never overrides relevance)
+        if (r.stock > 0) score += 50;
+
+        // 6. CONVERSION — price accessibility (mild)
+        score += Math.max(0, Math.round(20 - (r.price || 0) / 5000));
+
         return {
           id: r.id,
           ygopro_id: pub.ygopro_id,
           name: pub.name,
           image: pub.image,
           set_name: pub.set_name,
-          set_code: pub.set_code,
           rarity: detectRarity(r),
           price: pub.price,
           stock: pub.stock,
-          condition: pub.condition,
           language: detectLanguage(r.name),
           score,
         };
