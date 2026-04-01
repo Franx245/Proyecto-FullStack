@@ -183,8 +183,8 @@ export default function LotesPage() {
     <div className="relative min-h-screen">
       {/* Background effects */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute left-1/4 top-0 h-[600px] w-[600px] rounded-full bg-emerald-500/[0.04] blur-[120px]" />
-        <div className="absolute right-1/4 top-1/3 h-[500px] w-[500px] rounded-full bg-violet-500/[0.04] blur-[120px]" />
+        <div className="absolute left-1/4 top-0 h-[600px] w-[600px] rounded-full bg-emerald-500/[0.05] blur-[120px]" />
+        <div className="absolute right-1/4 top-1/3 h-[500px] w-[500px] rounded-full bg-emerald-400/[0.03] blur-[120px]" />
         <div className="absolute bottom-0 left-1/2 h-[400px] w-[800px] -translate-x-1/2 rounded-full bg-amber-500/[0.03] blur-[120px]" />
       </div>
 
@@ -201,7 +201,7 @@ export default function LotesPage() {
           </div>
           <h1 className="mt-6 font-display text-4xl font-black text-white md:text-5xl lg:text-6xl">
             Descubrí tu próxima{" "}
-            <span className="bg-gradient-to-r from-amber-300 via-emerald-300 to-violet-300 bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-emerald-300 via-teal-200 to-amber-300 bg-clip-text text-transparent">
               carta épica
             </span>
           </h1>
@@ -221,7 +221,7 @@ export default function LotesPage() {
             <span>Rareza garantizada</span>
           </div>
           <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-violet-400" />
+            <Sparkles className="h-4 w-4 text-emerald-400" />
             <span>Cartas Near Mint</span>
           </div>
         </div>
@@ -264,7 +264,7 @@ export default function LotesPage() {
               <p className="mt-2 text-sm text-slate-400">Seleccionamos cartas reales de nuestro inventario respetando las probabilidades.</p>
             </div>
             <div className="text-center">
-              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-violet-400/20 bg-violet-400/10 text-2xl">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-emerald-400/20 bg-emerald-400/10 text-2xl">
                 🎉
               </div>
               <h3 className="mt-4 font-bold text-white">Recibí y descubrí</h3>

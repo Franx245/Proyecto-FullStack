@@ -251,8 +251,8 @@ export default function DecksPage() {
     <div className="relative min-h-screen">
       {/* Background */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute left-1/3 top-0 h-[600px] w-[600px] rounded-full bg-violet-500/[0.04] blur-[120px]" />
-        <div className="absolute right-1/4 top-1/2 h-[500px] w-[500px] rounded-full bg-blue-500/[0.04] blur-[120px]" />
+        <div className="absolute left-1/3 top-0 h-[600px] w-[600px] rounded-full bg-emerald-500/[0.04] blur-[120px]" />
+        <div className="absolute right-1/4 top-1/2 h-[500px] w-[500px] rounded-full bg-emerald-400/[0.03] blur-[120px]" />
       </div>
 
       <div className="relative mx-auto max-w-[1200px] px-4 py-10 md:px-6">
@@ -268,7 +268,7 @@ export default function DecksPage() {
           </div>
           <h1 className="mt-6 font-display text-4xl font-black text-white md:text-5xl lg:text-6xl">
             Jugá como un pro{" "}
-            <span className="bg-gradient-to-r from-blue-300 via-violet-300 to-emerald-300 bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-emerald-300 via-teal-200 to-blue-300 bg-clip-text text-transparent">
               desde el primer turno
             </span>
           </h1>
@@ -335,7 +335,7 @@ export default function DecksPage() {
               <p className="mt-2 text-sm text-slate-400">Cada deck viene testeado con sinergias reales y combos verificados.</p>
             </div>
             <div className="text-center">
-              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-violet-400/20 bg-violet-400/10 text-2xl">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-emerald-400/20 bg-emerald-400/10 text-2xl">
                 💰
               </div>
               <h3 className="mt-4 font-bold text-white">Mejor precio</h3>
