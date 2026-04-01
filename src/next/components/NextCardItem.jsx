@@ -124,10 +124,15 @@ export default function NextCardItem({ card, priorityImage = false, sizes }) {
           </div>
         )}
 
-        <div className="absolute right-2 top-2 flex items-start justify-end sm:right-3 sm:top-3">
+        <div className="absolute right-2 top-2 flex flex-col items-end gap-1.5 sm:right-3 sm:top-3">
           <div className={`max-w-[9.25rem] rounded-[1.4rem] border border-white/10 bg-slate-950/78 px-3 py-1.5 text-center text-[0.68rem] font-semibold uppercase leading-[1.15] tracking-[0.14em] backdrop-blur-xl sm:max-w-[10.5rem] sm:px-3.5 sm:py-1.5 sm:text-[0.72rem] sm:tracking-[0.17em] ${rarityClass}`}>
             {card?.rarity ?? "Common"}
           </div>
+          {Number(card?.version_count || 0) > 1 ? (
+            <div className="rounded-full border border-emerald-400/20 bg-emerald-950/80 px-2.5 py-1 text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-emerald-300 backdrop-blur-xl">
+              {card.version_count} versiones
+            </div>
+          ) : null}
         </div>
 
         {!isMobile ? (

@@ -3,6 +3,15 @@ import { fetchAllMetadata } from "./ygoprodeck.js";
 
 const DEFAULT_BATCH_SIZE = 200;
 
+/** @param {string} name */
+function normalizeName(name) {
+  return String(name || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
 export function buildDefaultPrice(metadata) {
   const rarity = String(metadata?.rarity || "").toLowerCase();
 
@@ -25,9 +34,10 @@ function chunk(items, size = DEFAULT_BATCH_SIZE) {
 }
 
 function buildCatalogCardData(metadata, existingCard) {
+  const ygoproId = metadata.ygoproId;
   return {
     name: metadata.name,
-    ygoproId: metadata.ygoproId,
+    ygoproId,
     description: metadata.description || "",
     image: metadata.image || null,
     cardType: metadata.cardType || "Unknown",
@@ -39,7 +49,7 @@ function buildCatalogCardData(metadata, existingCard) {
     level: metadata.level ?? null,
     rarity: metadata.rarity || "Unknown",
     setName: metadata.setName || "YGOPRODeck",
-    setCode: metadata.setCode || `YGO-${metadata.ygoproId}`,
+    setCode: metadata.setCode || `YGO-${ygoproId}`,
     price: existingCard?.price ?? buildDefaultPrice(metadata),
     stock: existingCard?.stock ?? 5,
     lowStockThreshold: existingCard?.lowStockThreshold ?? 2,
@@ -47,6 +57,8 @@ function buildCatalogCardData(metadata, existingCard) {
     isFeatured: existingCard?.isFeatured ?? false,
     isNewArrival: existingCard?.isNewArrival ?? false,
     salesCount: existingCard?.salesCount ?? 0,
+    cardIdentity: ygoproId ? String(ygoproId) : normalizeName(metadata.name),
+    externalId: ygoproId ? String(ygoproId) : null,
   };
 }
 

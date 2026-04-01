@@ -397,6 +397,37 @@ function toStatus(card) {
   return "in_stock";
 }
 
+/* ── Card identity / detection helpers ── */
+
+/** @param {string} name */
+function detectLanguage(name) {
+  const text = String(name || "");
+  if (/[\u3040-\u30ff\u4e00-\u9faf]/.test(text)) return "JP";
+  if (/[ñáéíóúü]/i.test(text)) return "ES";
+  if (/[àâçèêëîïôùûü]/i.test(text)) return "FR";
+  if (/[äöüß]/i.test(text)) return "DE";
+  if (/[àèìòù]/i.test(text)) return "IT";
+  if (/[ãõ]/i.test(text)) return "PT";
+  if (/[\uac00-\ud7af]/i.test(text)) return "KR";
+  return "EN";
+}
+
+/** @param {{ setName?: string | null, rarity?: string | null, name?: string | null }} card */
+function detectRarity(card) {
+  if (card.rarity && card.rarity !== "Unknown") return card.rarity;
+
+  const text = `${card.setName || ""} ${card.name || ""}`.toLowerCase();
+  if (text.includes("starlight")) return "Starlight Rare";
+  if (text.includes("collector")) return "Collector's Rare";
+  if (text.includes("secret")) return "Secret Rare";
+  if (text.includes("ultra")) return "Ultra Rare";
+  if (text.includes("super rare")) return "Super Rare";
+  if (text.includes("gold")) return "Gold Rare";
+  if (text.includes("rare")) return "Rare";
+  if (text.includes("common")) return "Common";
+  return "Unknown";
+}
+
 function getAdminCardImageUrl(imageUrl) {
   const normalizedImageUrl = typeof imageUrl === "string" ? imageUrl.trim() : "";
 
@@ -473,6 +504,7 @@ const PUBLIC_CARD_LIST_SELECT = {
   isNewArrival: true,
   salesCount: true,
   updatedAt: true,
+  cardIdentity: true,
 };
 
 const ADMIN_USER_RESPONSE_SELECT = {
@@ -2069,8 +2101,31 @@ async function listPublicCards(req, res, searchOverride, options = {}) {
       }),
     ]);
 
+    // Compute version_count for cards that have a cardIdentity (grouping siblings)
+    const identities = cards.map((c) => c.cardIdentity).filter(Boolean);
+    /** @type {Map<string, number>} */
+    const identityCountMap = new Map();
+    if (identities.length) {
+      const counts = await prisma.card.groupBy({
+        by: ["cardIdentity"],
+        where: { cardIdentity: { in: identities }, isVisible: true, stock: { gt: 0 } },
+        _count: { id: true },
+      });
+      for (const row of counts) {
+        if (row.cardIdentity) {
+          identityCountMap.set(row.cardIdentity, row._count.id);
+        }
+      }
+    }
+
+    const publicCards = attachMetadata(cards).map((card, i) => {
+      const identity = cards[i]?.cardIdentity;
+      const count = identity ? (identityCountMap.get(identity) || 1) : 1;
+      return count > 1 ? { ...card, version_count: count } : card;
+    });
+
     return {
-      cards: attachMetadata(cards),
+      cards: publicCards,
       total,
       page,
       pageSize,
@@ -4012,12 +4067,12 @@ async function handlePublicCatalogDetail(req, res) {
       image: publicCard.image,
       set_name: publicCard.set_name,
       set_code: publicCard.set_code,
-      rarity: publicCard.rarity,
+      rarity: detectRarity(card),
       price: publicCard.price,
       stock: publicCard.stock,
       condition: publicCard.condition,
       edition: "",
-      language: "en",
+      language: detectLanguage(card.name),
     };
 
     const extraVersions = dbVersions.map((v) => ({
@@ -4027,12 +4082,12 @@ async function handlePublicCatalogDetail(req, res) {
       image: v.image || publicCard.image,
       set_name: v.setName || publicCard.set_name,
       set_code: v.setCode || publicCard.set_code,
-      rarity: v.rarity,
+      rarity: detectRarity({ rarity: v.rarity, setName: v.setName, name: card.name }),
       price: v.price,
       stock: v.stock,
       condition: v.condition,
       edition: v.edition,
-      language: v.language,
+      language: v.language || detectLanguage(card.name),
     }));
 
     const siblingVersions = siblingCards.map((s) => {
@@ -4044,19 +4099,28 @@ async function handlePublicCatalogDetail(req, res) {
         image: pub.image,
         set_name: pub.set_name,
         set_code: pub.set_code,
-        rarity: pub.rarity,
+        rarity: detectRarity(s),
         price: pub.price,
         stock: pub.stock,
         condition: pub.condition,
         edition: "",
-        language: "en",
+        language: detectLanguage(s.name),
         is_sibling: true,
       };
     });
 
+    const allVersions = [baseVersion, ...extraVersions, ...siblingVersions]
+      .sort((a, b) => {
+        const aStock = Number(a.stock || 0);
+        const bStock = Number(b.stock || 0);
+        if (aStock > 0 && bStock === 0) return -1;
+        if (aStock === 0 && bStock > 0) return 1;
+        return Number(a.price || 0) - Number(b.price || 0);
+      });
+
     return {
-      card: publicCard,
-      versions: [baseVersion, ...extraVersions, ...siblingVersions],
+      card: { ...publicCard, version_count: allVersions.length },
+      versions: allVersions,
       ygoproData: {
         description: publicCard.description,
         image: publicCard.image,

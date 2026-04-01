@@ -202,9 +202,16 @@ export default function CardVersionsTable({ versions = [], isLoading, onOpenDeta
 
               {/* Info */}
               <div className="min-w-0 flex-1 md:hidden">
-                <p className="text-sm font-semibold leading-5 text-white">
-                  {version.set_name || "—"}
-                </p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-semibold leading-5 text-white">
+                    {version.set_name || "—"}
+                  </p>
+                  {version.language && version.language !== "EN" ? (
+                    <span className="inline-flex items-center rounded-md border border-white/10 bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-300">
+                      {version.language}
+                    </span>
+                  ) : null}
+                </div>
                 <p className="text-xs text-muted-foreground">
                   {version.set_code || "—"}
                 </p>
@@ -234,9 +241,16 @@ export default function CardVersionsTable({ versions = [], isLoading, onOpenDeta
               </div>
 
               <div className="hidden md:block">
-                <p className="font-semibold text-sm">
-                  {version.set_name || "—"}
-                </p>
+                <div className="flex items-center gap-2">
+                  <p className="font-semibold text-sm">
+                    {version.set_name || "—"}
+                  </p>
+                  {version.language && version.language !== "EN" ? (
+                    <span className="inline-flex items-center rounded-md border border-white/10 bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-300">
+                      {version.language}
+                    </span>
+                  ) : null}
+                </div>
                 <p className="text-xs text-muted-foreground">
                   {version.set_code || "—"}
                 </p>
