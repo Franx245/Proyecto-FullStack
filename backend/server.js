@@ -4088,10 +4088,9 @@ async function handlePublicCatalogDetail(req, res) {
               : { name: { startsWith: archPrefix, mode: "insensitive" } }),
             id: { not: card.id },
             isVisible: true,
-            stock: { gt: 0 },
           },
           orderBy: [{ price: "asc" }],
-          take: 20,
+          take: 30,
         })
       : [];
 
@@ -4157,21 +4156,38 @@ async function handlePublicCatalogDetail(req, res) {
     const siblingIdSet = new Set(siblingCards.map((s) => s.id));
     const uniqueRelated = relatedCards.filter((r) => r.id !== card.id && !siblingIdSet.has(r.id));
 
-    const relatedMapped = uniqueRelated.map((r) => {
-      const pub = toPublicCard(r);
-      return {
-        id: r.id,
-        name: pub.name,
-        image: pub.image,
-        set_name: pub.set_name,
-        set_code: pub.set_code,
-        rarity: detectRarity(r),
-        price: pub.price,
-        stock: pub.stock,
-        condition: pub.condition,
-        language: detectLanguage(r.name),
-      };
-    });
+    const normalizeForScore = (s) =>
+      (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const baseName = normalizeForScore(card.name);
+    const basePrefix = archPrefix ? normalizeForScore(archPrefix) : "";
+
+    const relatedMapped = uniqueRelated
+      .map((r) => {
+        const pub = toPublicCard(r);
+        const otherName = normalizeForScore(r.name);
+        let score = 0;
+        if (baseName === otherName) score += 100;
+        else if (basePrefix && otherName.startsWith(basePrefix)) score += 60;
+        else if (basePrefix && otherName.includes(basePrefix)) score += 40;
+        if (r.stock > 0) score += 20;
+        score += Math.max(0, 10 - (r.price || 0) / 10000);
+        return {
+          id: r.id,
+          ygopro_id: pub.ygopro_id,
+          name: pub.name,
+          image: pub.image,
+          set_name: pub.set_name,
+          set_code: pub.set_code,
+          rarity: detectRarity(r),
+          price: pub.price,
+          stock: pub.stock,
+          condition: pub.condition,
+          language: detectLanguage(r.name),
+          score,
+        };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 16);
 
     return {
       card: { ...publicCard, version_count: allVersions.length },
