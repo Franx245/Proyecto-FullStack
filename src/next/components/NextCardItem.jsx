@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useCallback, useMemo, useState } from "react";
+import { memo, startTransition, useCallback, useMemo, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { Sparkles } from "lucide-react";
@@ -16,7 +16,7 @@ import { buildCardPath } from "@/lib/seo";
 import { formatPrice } from "@/utils/currency";
 
 /** @param {{ card: *, priorityImage?: boolean, sizes?: string }} props */
-export default function NextCardItem({ card, priorityImage = false, sizes }) {
+function NextCardItemInner({ card, priorityImage = false, sizes }) {
   const queryClient = useQueryClient();
   const router = useRouter();
   const pathname = usePathname();
@@ -189,3 +189,5 @@ export default function NextCardItem({ card, priorityImage = false, sizes }) {
     </article>
   );
 }
+
+export default memo(NextCardItemInner);
