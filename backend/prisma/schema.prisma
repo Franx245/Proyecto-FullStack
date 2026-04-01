@@ -44,6 +44,9 @@ model Card {
   @@index([cardType])
   @@index([rarity])
   @@index([cardIdentity])
+  @@index([stock])
+  @@index([price])
+  @@index([isVisible, stock])
 }
 
 model CardVersion {

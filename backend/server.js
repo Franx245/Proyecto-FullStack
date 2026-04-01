@@ -4078,7 +4078,7 @@ async function handlePublicCatalogDetail(req, res) {
         })
       : [];
 
-    // Related cards from the same archetype/family
+    // Related cards from the same archetype/family — ONLY real inventory with stock
     const archPrefix = card.archetype || extractArchetypePrefix(card.name);
     const relatedCards = archPrefix
       ? await prisma.card.findMany({
@@ -4088,17 +4088,15 @@ async function handlePublicCatalogDetail(req, res) {
               : { name: { startsWith: archPrefix, mode: "insensitive" } }),
             id: { not: card.id },
             isVisible: true,
+            stock: { gt: 0 },
           },
           select: {
             id: true, name: true, ygoproId: true, image: true,
             price: true, stock: true, rarity: true, setName: true,
-            setCode: true, cardType: true, race: true, attribute: true,
-            atk: true, def: true, level: true, description: true,
-            lowStockThreshold: true, isVisible: true, isFeatured: true,
-            isNewArrival: true, salesCount: true, updatedAt: true,
+            setCode: true, cardType: true,
           },
-          orderBy: [{ price: "asc" }],
-          take: 30,
+          orderBy: [{ stock: "desc" }, { price: "asc" }],
+          take: 24,
         })
       : [];
 
@@ -4179,43 +4177,51 @@ async function handlePublicCatalogDetail(req, res) {
       return intersection / Math.max(setA.size, setB.size);
     }
 
-    const relatedMapped = uniqueRelated
-      .map((r) => {
-        const pub = toPublicCard(r);
-        const otherName = normalizeForScore(r.name);
-        let score = 0;
+    // --- Phased ranking: exact → prefix → fuzzy ---
+    const groups = { exact: [], prefix: [], fuzzy: [] };
+    for (const r of uniqueRelated) {
+      const otherName = normalizeForScore(r.name);
+      if (baseName === otherName) groups.exact.push(r);
+      else if (basePrefix && otherName.startsWith(basePrefix)) groups.prefix.push(r);
+      else groups.fuzzy.push(r);
+    }
 
-        // 1. RELEVANCE — exact name match (same card, different set)
-        if (baseName === otherName) score += 1000;
-        // 2. RELEVANCE — same archetype prefix
-        else if (basePrefix && otherName.startsWith(basePrefix)) score += 500;
-        // 3. RELEVANCE — contains prefix
-        else if (basePrefix && otherName.includes(basePrefix)) score += 300;
+    const sortByBusiness = (arr) =>
+      [...arr].sort((a, b) => {
+        if (b.stock !== a.stock) { if (b.stock > 0 && a.stock === 0) return 1; if (a.stock > 0 && b.stock === 0) return -1; }
+        return (a.price || 0) - (b.price || 0);
+      });
 
-        // 4. RELEVANCE — fuzzy word overlap
-        score += Math.round(wordOverlap(baseName, otherName) * 200);
+    const phased = [
+      ...sortByBusiness(groups.exact),
+      ...sortByBusiness(groups.prefix),
+      ...sortByBusiness(groups.fuzzy),
+    ].slice(0, 16);
 
-        // 5. CONVERSION — stock boost (mild, never overrides relevance)
-        if (r.stock > 0) score += 50;
+    const relatedMapped = phased.map((r) => {
+      const pub = toPublicCard(r);
+      const otherName = normalizeForScore(r.name);
+      let score = 0;
+      if (baseName === otherName) score += 1000;
+      else if (basePrefix && otherName.startsWith(basePrefix)) score += 500;
+      else if (basePrefix && otherName.includes(basePrefix)) score += 300;
+      score += Math.round(wordOverlap(baseName, otherName) * 200);
+      if (r.stock > 0) score += 50;
+      score += Math.max(0, Math.round(20 - (r.price || 0) / 5000));
 
-        // 6. CONVERSION — price accessibility (mild)
-        score += Math.max(0, Math.round(20 - (r.price || 0) / 5000));
-
-        return {
-          id: r.id,
-          ygopro_id: pub.ygopro_id,
-          name: pub.name,
-          image: pub.image,
-          set_name: pub.set_name,
-          rarity: detectRarity(r),
-          price: pub.price,
-          stock: pub.stock,
-          language: detectLanguage(r.name),
-          score,
-        };
-      })
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 16);
+      return {
+        id: r.id,
+        ygopro_id: pub.ygopro_id,
+        name: pub.name,
+        image: pub.image,
+        set_name: pub.set_name,
+        rarity: detectRarity(r),
+        price: pub.price,
+        stock: pub.stock,
+        language: detectLanguage(r.name),
+        score,
+      };
+    });
 
     return {
       card: { ...publicCard, version_count: allVersions.length },
