@@ -5485,7 +5485,7 @@ app.post("/api/shipping/rates", requireAuth, async (req, res) => {
     const state = String(req.body?.state || "").trim();
     const itemCount = Number(req.body?.item_count || req.body?.itemCount || 1);
 
-    const cacheKey = `shipping-rates:${postalCode}`;
+    const cacheKey = `shipping-rates:${postalCode}:${itemCount}`;
     const rates = await cacheGetOrFetch(
       cacheKey,
       () => getShippingRates({ postalCode, city, state }, { itemCount }),

@@ -297,6 +297,14 @@ function getFallbackRates() {
       estimatedDays: "2-3 días",
       currency: "ARS",
     },
+    {
+      carrier: "showroom",
+      carrierLabel: "Retiro en showroom",
+      service: "Retiro",
+      price: 0,
+      estimatedDays: "Coordinar",
+      currency: "ARS",
+    },
   ];
 }
 

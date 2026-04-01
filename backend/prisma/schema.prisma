@@ -184,6 +184,7 @@ model Order {
   @@index([addressId])
   @@index([status])
   @@index([shippingZone])
+  @@index([createdAt])
 }
 
 model OrderItem {
