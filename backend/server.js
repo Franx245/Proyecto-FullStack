@@ -38,6 +38,7 @@ import { handleRecomputePrices } from "./src/lib/jobs/recompute-prices.js";
 import { handleComputeCardRankings } from "./src/lib/jobs/compute-card-rankings.js";
 import { handleWarmPublicCache } from "./src/lib/jobs/warm-public-cache.js";
 import { getRedisBackendName, probeRedisConnection } from "./src/lib/redis.js";
+import { getShippingRates, createShipment, getTracking, verifyEnviaWebhookSignature, normalizeEnviaWebhookStatus, isEnviaConfigured } from "./src/lib/envia.js";
 import { invalidateOrderRelatedCache } from "./src/lib/cache-invalidation.js";
 import { recordApiMetric, recordCatalogSearchMetric } from "./src/lib/metrics.js";
 import {
@@ -1411,6 +1412,10 @@ function sanitizeOrderForAudit(order) {
     shippingLabel: order.shippingLabel,
     trackingCode: order.trackingCode || null,
     trackingVisibleToUser: Boolean(order.trackingVisibleToUser),
+    shipmentId: order.shipmentId || null,
+    carrier: order.carrier || null,
+    shipmentStatus: order.shipmentStatus || null,
+    estimatedDelivery: order.estimatedDelivery || null,
     customerName: order.customerName || null,
     customerEmail: order.customerEmail || null,
     customerPhone: order.customerPhone || null,
@@ -1596,6 +1601,9 @@ function toOrderResponse(order, cardsById, options = {}) {
     is_shipping_order: order.shippingZone !== ShippingZone.PICKUP,
     tracking_code: includeAdminFields ? order.trackingCode || null : trackingVisibleToUser ? order.trackingCode : null,
     tracking_visible_to_user: includeAdminFields ? Boolean(order.trackingVisibleToUser) : trackingVisibleToUser,
+    carrier: order.carrier || null,
+    shipment_status: order.shipmentStatus || null,
+    estimated_delivery: order.estimatedDelivery || null,
     customer_name: order.customerName || null,
     customer_email: order.customerEmail || null,
     customer_phone: order.customerPhone || null,
@@ -5459,6 +5467,195 @@ app.post(MERCADOPAGO_WEBHOOK_PATHS, async (req, res) => {
       error: error?.message || "Webhook processing failed",
       code: error?.code || "WEBHOOK_PROCESSING_FAILED",
     });
+  }
+});
+
+/* ── Shipping (Envia.com) ── */
+
+app.post("/api/shipping/rates", requireAuth, async (req, res) => {
+  try {
+    const postalCode = String(req.body?.postal_code || req.body?.postalCode || "").trim();
+    if (!postalCode) {
+      res.status(400).json({ error: "Código postal requerido" });
+      return;
+    }
+
+    const city = String(req.body?.city || "").trim();
+    const state = String(req.body?.state || "").trim();
+    const itemCount = Number(req.body?.item_count || req.body?.itemCount || 1);
+
+    const cacheKey = `shipping-rates:${postalCode}`;
+    const rates = await cacheGetOrFetch(
+      cacheKey,
+      () => getShippingRates({ postalCode, city, state }, { itemCount }),
+      300,
+    );
+
+    res.json({ rates });
+  } catch (error) {
+    console.error("Shipping rates failed", error);
+    res.status(500).json({ error: error.message || "No se pudieron obtener las tarifas de envío" });
+  }
+});
+
+app.post("/api/admin/shipping/create", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const orderId = Number(req.body?.order_id || req.body?.orderId);
+    const carrier = String(req.body?.carrier || "").trim().toLowerCase();
+    const service = String(req.body?.service || "Estándar").trim();
+
+    if (!Number.isFinite(orderId) || orderId <= 0) {
+      res.status(400).json({ error: "order_id inválido" });
+      return;
+    }
+
+    if (!carrier) {
+      res.status(400).json({ error: "carrier requerido (correo-argentino o andreani)" });
+      return;
+    }
+
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true },
+    });
+
+    if (!order) {
+      res.status(404).json({ error: "Orden no encontrada" });
+      return;
+    }
+
+    if (order.status !== OrderStatus.PAID) {
+      res.status(400).json({ error: "Solo se pueden crear envíos para órdenes pagadas" });
+      return;
+    }
+
+    if (order.shippingZone === ShippingZone.PICKUP) {
+      res.status(400).json({ error: "Esta orden es para retiro en showroom" });
+      return;
+    }
+
+    if (order.shipmentId) {
+      res.status(409).json({ error: "Ya existe un envío para esta orden", shipment_id: order.shipmentId });
+      return;
+    }
+
+    const shipment = await createShipment({ order, carrier, service });
+
+    const updatedOrder = await prisma.order.update({
+      where: { id: orderId },
+      data: {
+        shipmentId: shipment.shipmentId,
+        trackingCode: shipment.trackingNumber,
+        carrier,
+        shipmentStatus: "created",
+        estimatedDelivery: null,
+        trackingVisibleToUser: true,
+      },
+      include: { items: true, user: true, address: true },
+    });
+
+    publishEvent("admin", { type: "order-update", orderId, status: updatedOrder.status });
+    publishEvent("public", { type: "order-update", orderId, status: updatedOrder.status });
+
+    res.json({
+      shipment_id: shipment.shipmentId,
+      tracking_number: shipment.trackingNumber,
+      carrier,
+      label: shipment.label,
+    });
+  } catch (error) {
+    console.error("Create shipment failed", error);
+    res.status(500).json({ error: error.message || "No se pudo crear el envío" });
+  }
+});
+
+app.get("/api/shipping/tracking/:code", requireAuth, async (req, res) => {
+  try {
+    const trackingCode = String(req.params.code || "").trim();
+    if (!trackingCode) {
+      res.status(400).json({ error: "Código de tracking requerido" });
+      return;
+    }
+
+    const userId = Number(req.user.sub);
+    const order = await prisma.order.findFirst({
+      where: {
+        trackingCode,
+        userId,
+        trackingVisibleToUser: true,
+      },
+    });
+
+    if (!order) {
+      res.status(404).json({ error: "No se encontró envío con ese código" });
+      return;
+    }
+
+    const tracking = await getTracking(trackingCode, order.carrier || "correo-argentino");
+    res.json(tracking);
+  } catch (error) {
+    console.error("Tracking lookup failed", error);
+    res.status(500).json({ error: error.message || "No se pudo obtener el tracking" });
+  }
+});
+
+app.post("/api/webhooks/envia", express.raw({ type: "*/*" }), async (req, res) => {
+  try {
+    const rawBody = typeof req.body === "string" ? req.body : req.body?.toString?.("utf8") || "";
+    const signature = String(req.headers["x-envia-signature"] || req.headers["x-webhook-signature"] || "");
+
+    if (!verifyEnviaWebhookSignature(rawBody, signature)) {
+      console.warn("Envia webhook: invalid signature");
+      res.sendStatus(401);
+      return;
+    }
+
+    const payload = JSON.parse(rawBody);
+    const trackingNumber = String(payload?.tracking_number || payload?.data?.tracking_number || "").trim();
+    const newStatus = normalizeEnviaWebhookStatus(String(payload?.status || payload?.data?.status || ""));
+
+    if (!trackingNumber) {
+      res.status(200).json({ received: true, ignored: true, reason: "missing_tracking" });
+      return;
+    }
+
+    const order = await prisma.order.findFirst({
+      where: { trackingCode: trackingNumber },
+    });
+
+    if (!order) {
+      res.status(200).json({ received: true, ignored: true, reason: "order_not_found" });
+      return;
+    }
+
+    if (order.shipmentStatus === newStatus) {
+      res.status(200).json({ received: true, duplicate: true });
+      return;
+    }
+
+    const updateData = { shipmentStatus: newStatus };
+
+    if (newStatus === "delivered" && order.status === OrderStatus.SHIPPED) {
+      updateData.status = OrderStatus.COMPLETED;
+    }
+
+    if (newStatus === "in_transit" && order.status === OrderStatus.PAID) {
+      updateData.status = OrderStatus.SHIPPED;
+    }
+
+    await prisma.order.update({
+      where: { id: order.id },
+      data: updateData,
+    });
+
+    publishEvent("admin", { type: "order-update", orderId: order.id, status: updateData.status || order.status, shipmentStatus: newStatus });
+    publishEvent("public", { type: "order-update", orderId: order.id, status: updateData.status || order.status, shipmentStatus: newStatus });
+
+    console.info("Envia webhook processed", { trackingNumber, newStatus, orderId: order.id });
+    res.status(200).json({ received: true });
+  } catch (error) {
+    console.error("Envia webhook failed", error);
+    if (!res.headersSent) res.status(500).json({ error: "Webhook processing failed" });
   }
 });
 

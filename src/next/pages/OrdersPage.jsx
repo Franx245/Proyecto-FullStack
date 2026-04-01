@@ -7,6 +7,8 @@ import { CheckCircle, ClipboardList, Clock3, Copy, Loader2, MapPin, MessageCircl
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
+import { Package, Truck } from "lucide-react";
+
 import { fetchMyOrders, fetchOrdersByIds, fetchStorefrontConfig } from "@/api/store";
 import CardImage from "@/components/marketplace/CardImage";
 import { useAuth } from "@/lib/auth";
@@ -16,6 +18,39 @@ import { getOrderProgress, getShippingOption, orderStatusLabel } from "@/lib/shi
 
 const NON_RETRYABLE_PAYMENT_STATUSES = new Set(["approved", "pending", "in_process", "authorized", "in_mediation"]);
 const PENDING_PAYMENT_FEEDBACK_KEY = "duelvault_pending_payment_feedback";
+
+const SHIPMENT_STEPS = [
+  { key: "created", label: "Preparando", Icon: Package },
+  { key: "picked_up", label: "Retirado", Icon: ClipboardList },
+  { key: "in_transit", label: "En tránsito", Icon: Truck },
+  { key: "delivered", label: "Entregado", Icon: CheckCircle },
+];
+
+/** @param {{ status: string }} props */
+function ShipmentTimeline({ status }) {
+  const s = String(status || "").toLowerCase();
+  const activeIndex = SHIPMENT_STEPS.findIndex((step) => step.key === s);
+  const resolvedIndex = activeIndex >= 0 ? activeIndex : (s === "shipped" ? 2 : s === "completed" ? 3 : 0);
+
+  return (
+    <div className="flex items-center gap-1 pt-1">
+      {SHIPMENT_STEPS.map((step, i) => {
+        const done = i <= resolvedIndex;
+        return (
+          <div key={step.key} className="flex items-center gap-1">
+            <div className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition-colors ${done ? "bg-primary/20 text-primary" : "bg-secondary text-muted-foreground"}`}>
+              <step.Icon className="h-3 w-3" />
+              <span className="hidden sm:inline">{step.label}</span>
+            </div>
+            {i < SHIPMENT_STEPS.length - 1 ? (
+              <div className={`h-px w-3 ${done ? "bg-primary/50" : "bg-border"}`} />
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 /** @param {*} order */
 function hasProcessingPaymentAttempt(order) {
@@ -307,7 +342,13 @@ export default function OrdersPage() {
                       <div>
                         <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Seguimiento</p>
                         <p className="mt-1 text-sm font-semibold">{order.shipping_label || getShippingOption(order.shipping_zone).label}</p>
-                        {order.tracking_code ? <p className="mt-2 text-sm text-primary">Tracking: {order.tracking_code}</p> : null}
+                        {order.tracking_code ? (
+                          <div className="mt-2 space-y-2">
+                            <p className="text-sm text-primary">Tracking: {order.tracking_code}</p>
+                            {order.carrier ? <p className="text-xs text-muted-foreground">Carrier: {order.carrier === "correo-argentino" ? "Correo Argentino" : order.carrier === "andreani" ? "Andreani" : order.carrier}</p> : null}
+                            <ShipmentTimeline status={order.shipment_status || order.status} />
+                          </div>
+                        ) : null}
                         {order.total_ars ? <p className="mt-2 text-sm text-slate-400">Cobro Mercado Pago: {formatPrice(order.total_ars)} {order.currency || "ARS"}</p> : null}
                         {isPaymentPendingConfirmation ? (
                           <p className="mt-2 inline-flex items-center gap-2 text-sm text-amber-300">

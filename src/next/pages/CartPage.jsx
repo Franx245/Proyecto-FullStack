@@ -18,7 +18,7 @@ import {
 import { toast } from "sonner";
 
 import { useCart } from "@/lib/cartStore";
-import { checkoutCart, createStoreMutationId, fetchMyAddresses } from "@/api/store";
+import { checkoutCart, createStoreMutationId, fetchMyAddresses, fetchShippingRates } from "@/api/store";
 import { trackOrderId } from "@/lib/orderTracking";
 import { useAuth } from "@/lib/auth";
 import { SHIPPING_OPTIONS, getShippingOption } from "@/lib/shipping";
@@ -217,6 +217,23 @@ export default function CartPage() {
   const [notes, setNotes] = useState("");
   const [accepted, setAccepted] = useState(false);
   const [errors, setErrors] = useState(/** @type {CheckoutErrors} */ ({}));
+  const [shippingPostalCode, setShippingPostalCode] = useState("");
+  const [selectedCarrier, setSelectedCarrier] = useState(/** @type {string | null} */ (null));
+
+  const shippingRatesQuery = useQuery({
+    queryKey: ["shipping-rates", shippingPostalCode],
+    queryFn: () => fetchShippingRates({ postalCode: shippingPostalCode, itemCount: totalItems }),
+    enabled: isAuthenticated && shippingPostalCode.length >= 4 && shippingZone !== "pickup",
+    staleTime: 1000 * 60 * 5,
+    retry: 1,
+  });
+
+  const shippingRates = /** @type {Array<{ carrier: string, carrierLabel: string, service: string, price: number, estimatedDays: string }>} */ (
+    shippingRatesQuery.data?.rates ?? []
+  );
+
+  const selectedRate = shippingRates.find((r) => r.carrier === selectedCarrier) || null;
+  const effectiveShippingCost = selectedRate ? selectedRate.price : shippingOption.cost;
 
   /** @param {CartItem} item */
   const handleOpenDetail = (item) => {
@@ -263,6 +280,14 @@ export default function CartPage() {
   ));
 
   useEffect(() => {
+    if (deliveryMode === "saved" && selectedAddress?.postal_code) {
+      setShippingPostalCode(selectedAddress.postal_code);
+    } else if (deliveryMode === "new" && newAddress.postal_code?.length >= 4) {
+      setShippingPostalCode(newAddress.postal_code);
+    }
+  }, [deliveryMode, selectedAddress?.postal_code, newAddress.postal_code]);
+
+  useEffect(() => {
     if (!isAuthenticated || deliveryMode !== "saved" || shippingZone === "pickup") {
       return;
     }
@@ -287,7 +312,7 @@ export default function CartPage() {
 
   const effectiveZone = selectedAddress?.zone || shippingZone;
   const shippingOption = getShippingOption(effectiveZone);
-  const totalWithShipping = totalPrice + shippingOption.cost;
+  const totalWithShipping = totalPrice + effectiveShippingCost;
   const requiresManualAddress = isAuthenticated && effectiveZone !== "pickup" && (deliveryMode === "new" || !selectedAddress);
 
   const checkoutMutation = useMutation({
@@ -505,8 +530,35 @@ export default function CartPage() {
 
                       <div className="rounded-2xl border border-border bg-secondary/60 px-4 py-3 text-sm">
                         <p className="font-semibold">Costo estimado</p>
-                        <p className="mt-1 text-muted-foreground">{shippingOption.label}</p>
-                        <p className="mt-2 text-lg font-black text-primary">{formatPrice(shippingOption.cost)}</p>
+                        {effectiveZone === "pickup" ? (
+                          <p className="mt-2 text-lg font-black text-primary">Gratis</p>
+                        ) : shippingRates.length > 0 ? (
+                          <div className="mt-2 space-y-2">
+                            {shippingRates.map((rate) => (
+                              <button
+                                key={rate.carrier}
+                                type="button"
+                                onClick={() => setSelectedCarrier(rate.carrier)}
+                                className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left transition ${selectedCarrier === rate.carrier ? "border-primary bg-primary/10" : "border-border hover:border-primary/30"}`}
+                              >
+                                <div>
+                                  <p className="font-semibold text-foreground">{rate.carrierLabel}</p>
+                                  <p className="text-xs text-muted-foreground">{rate.service} · {rate.estimatedDays}</p>
+                                </div>
+                                <p className="font-bold text-primary">{formatPrice(rate.price)}</p>
+                              </button>
+                            ))}
+                          </div>
+                        ) : shippingRatesQuery.isLoading ? (
+                          <div className="mt-2 flex items-center gap-2 text-muted-foreground">
+                            <Loader2 className="h-4 w-4 animate-spin" /> Cotizando...
+                          </div>
+                        ) : (
+                          <>
+                            <p className="mt-1 text-muted-foreground">{shippingOption.label}</p>
+                            <p className="mt-2 text-lg font-black text-primary">{formatPrice(shippingOption.cost)}</p>
+                          </>
+                        )}
                       </div>
                     </div>
 

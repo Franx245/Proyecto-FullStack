@@ -672,6 +672,23 @@ export async function fetchMyOrders({ page = 1, limit = 10 } = {}) {
   return authRequest(`/api/auth/orders?page=${page}&limit=${limit}`);
 }
 
+/**
+ * @param {{ postalCode: string, city?: string, state?: string, itemCount?: number }} params
+ */
+export async function fetchShippingRates({ postalCode, city, state, itemCount }) {
+  return authRequest("/api/shipping/rates", {
+    method: "POST",
+    body: { postal_code: postalCode, city, state, item_count: itemCount },
+  });
+}
+
+/**
+ * @param {string} trackingCode
+ */
+export async function fetchShippingTracking(trackingCode) {
+  return authRequest(`/api/shipping/tracking/${encodeURIComponent(trackingCode)}`);
+}
+
 export async function fetchMyActivity() {
   return authRequest("/api/auth/activity");
 }

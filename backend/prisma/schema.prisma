@@ -162,6 +162,10 @@ model Order {
   shippingLabel      String       @default("Retiro en persona")
   trackingCode       String?
   trackingVisibleToUser Boolean   @default(false)
+  shipmentId         String?
+  carrier            String?
+  shipmentStatus     String?
+  estimatedDelivery  String?
   customerName       String?
   customerEmail      String?
   customerPhone      String?
