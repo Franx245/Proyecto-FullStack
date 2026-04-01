@@ -3992,6 +3992,19 @@ async function handlePublicCatalogDetail(req, res) {
       orderBy: [{ createdAt: "desc" }],
     });
 
+    // Sibling cards sharing the same card_identity (same logical card, different editions)
+    const siblingCards = card.cardIdentity
+      ? await prisma.card.findMany({
+          where: {
+            cardIdentity: card.cardIdentity,
+            id: { not: card.id },
+            isVisible: true,
+            stock: { gt: 0 },
+          },
+          orderBy: [{ price: "asc" }],
+        })
+      : [];
+
     const baseVersion = {
       version_id: String(card.id),
       card_id: String(card.id),
@@ -4022,9 +4035,28 @@ async function handlePublicCatalogDetail(req, res) {
       language: v.language,
     }));
 
+    const siblingVersions = siblingCards.map((s) => {
+      const pub = toPublicCard(s);
+      return {
+        version_id: String(s.id),
+        card_id: String(s.id),
+        name: pub.name,
+        image: pub.image,
+        set_name: pub.set_name,
+        set_code: pub.set_code,
+        rarity: pub.rarity,
+        price: pub.price,
+        stock: pub.stock,
+        condition: pub.condition,
+        edition: "",
+        language: "en",
+        is_sibling: true,
+      };
+    });
+
     return {
       card: publicCard,
-      versions: [baseVersion, ...extraVersions],
+      versions: [baseVersion, ...extraVersions, ...siblingVersions],
       ygoproData: {
         description: publicCard.description,
         image: publicCard.image,
@@ -5331,6 +5363,19 @@ app.get("/api/internal/warm-cache", async (req, res) => {
       code: error?.code || "WARM_CACHE_FAILED",
       requestId: req.requestContext?.requestId || null,
     });
+  }
+});
+
+app.post("/api/internal/backfill-card-identity", async (req, res) => {
+  try {
+    assertCronAuthorized(req);
+    const result = await prisma.$executeRawUnsafe(
+      "UPDATE cards SET card_identity = CAST(ygopro_id AS TEXT), external_id = CAST(ygopro_id AS TEXT) WHERE ygopro_id IS NOT NULL AND (card_identity IS NULL OR card_identity != CAST(ygopro_id AS TEXT))"
+    );
+    res.json({ ok: true, updated: result });
+  } catch (error) {
+    if (res.headersSent) return;
+    res.status(500).json({ error: error?.message || "Backfill failed" });
   }
 });
 
@@ -6944,6 +6989,50 @@ app.delete("/api/admin/versions/:id", requireAdminAuth, requireAdminRole([UserRo
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Failed to delete version" });
+  }
+});
+
+// ── Temporary backfill endpoint (remove after use) ──────────────────────
+app.post("/api/admin/backfill-card-identity", async (req, res) => {
+  try {
+    assertCronAuthorized(req);
+
+    const dryRun = req.query.dry === "true";
+
+    const result = await prisma.$executeRawUnsafe(`
+      UPDATE cards
+      SET card_identity = CAST(ygopro_id AS TEXT),
+          external_id   = CAST(ygopro_id AS TEXT)
+      WHERE ygopro_id IS NOT NULL
+        AND (card_identity IS NULL OR card_identity = '')
+    `);
+
+    if (dryRun) {
+      const preview = await prisma.$queryRawUnsafe(`
+        SELECT id, name, ygopro_id
+        FROM cards
+        WHERE ygopro_id IS NOT NULL
+        LIMIT 10
+      `);
+      res.json({ dryRun: true, preview, message: "No changes applied" });
+      return;
+    }
+
+    const nameFallback = await prisma.$executeRawUnsafe(`
+      UPDATE cards
+      SET card_identity = LOWER(REGEXP_REPLACE(TRIM(name), '[^a-zA-Z0-9]', '', 'g'))
+      WHERE (card_identity IS NULL OR card_identity = '')
+        AND name IS NOT NULL AND TRIM(name) != ''
+    `);
+
+    res.json({
+      backfilled_from_ygopro: result,
+      backfilled_from_name: nameFallback,
+      message: "Backfill complete"
+    });
+  } catch (error) {
+    console.error("[backfill-card-identity]", error);
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
