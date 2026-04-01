@@ -14,6 +14,11 @@ import {
   ShoppingCart,
   ArrowLeft,
   Loader2,
+  Package,
+  Store,
+  Truck,
+  CreditCard,
+  Shield,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -107,16 +112,16 @@ function CartRow({ item, onOpenDetail }) {
       }}
       role="button"
       tabIndex={0}
-      className="flex cursor-pointer gap-4 rounded-xl border border-border bg-card p-4 transition hover:border-border/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      className="group flex cursor-pointer gap-3 sm:gap-4 rounded-2xl border border-border/60 bg-card/80 backdrop-blur-sm p-3 sm:p-4 transition-all duration-200 hover:border-primary/30 hover:shadow-[0_0_20px_rgba(16,185,129,0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
     >
-      <div className="w-16 h-[84px] rounded-lg bg-secondary overflow-hidden shrink-0">
+      <div className="w-14 h-[74px] sm:w-16 sm:h-[84px] rounded-xl bg-secondary/80 overflow-hidden shrink-0 ring-1 ring-border/40">
         {item.image ? (
           <CardImage
             id={item.ygopro_id}
             name={item.name}
             fallbackSrc={item.image}
             sizes="64px"
-            className="h-full w-full object-cover"
+            className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
@@ -126,54 +131,62 @@ function CartRow({ item, onOpenDetail }) {
       </div>
 
       <div className="flex-1 min-w-0">
-        <h3 className="font-semibold text-sm">{item.name}</h3>
-        <p className="text-xs text-muted-foreground">
+        <h3 className="font-bold text-sm leading-tight line-clamp-2">{item.name}</h3>
+        <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
           {item.rarity}
           {item.set_name ? ` · ${item.set_name}` : ""}
         </p>
 
-        <p className="text-base font-bold text-primary mt-2">
-          {formatPrice(item.price * item.quantity)}
-        </p>
-        <p className="text-[11px] text-muted-foreground">
-          {formatPrice(item.price)} c/u
-        </p>
-      </div>
+        <div className="flex items-end justify-between mt-2">
+          <div>
+            <p className="text-base font-black text-primary">
+              {formatPrice(item.price * item.quantity)}
+            </p>
+            {item.quantity > 1 && (
+              <p className="text-[10px] text-muted-foreground">
+                {formatPrice(item.price)} c/u
+              </p>
+            )}
+          </div>
 
-      <div className="flex flex-col items-end justify-between">
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            removeItem(String(item.version_id));
-          }}
-          className="p-1 text-muted-foreground hover:text-destructive transition"
-        >
-          <Trash2 className="w-4 h-4" />
-        </button>
+          <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1.5 bg-secondary/80 rounded-xl px-2 py-1 ring-1 ring-border/30">
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  updateQuantity(String(item.version_id), item.quantity - 1);
+                }}
+                className="p-0.5 rounded-md hover:bg-background/60 transition"
+              >
+                <Minus className="w-3 h-3" />
+              </button>
 
-        <div className="flex items-center gap-2 bg-secondary rounded-lg px-2 py-1">
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              updateQuantity(String(item.version_id), item.quantity - 1);
-            }}
-          >
-            <Minus className="w-3.5 h-3.5" />
-          </button>
+              <span className="text-sm font-bold w-5 text-center tabular-nums">{item.quantity}</span>
 
-          <span className="text-sm font-bold w-5 text-center">{item.quantity}</span>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  updateQuantity(String(item.version_id), item.quantity + 1);
+                }}
+                className="p-0.5 rounded-md hover:bg-background/60 transition"
+              >
+                <Plus className="w-3 h-3" />
+              </button>
+            </div>
 
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              updateQuantity(String(item.version_id), item.quantity + 1);
-            }}
-          >
-            <Plus className="w-3.5 h-3.5" />
-          </button>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                removeItem(String(item.version_id));
+              }}
+              className="p-1.5 rounded-xl text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       </div>
     </motion.div>
@@ -313,7 +326,7 @@ export default function CartPage() {
   const shippingOption = getShippingOption(effectiveZone);
   const effectiveShippingCost = effectiveZone === "pickup"
     ? 0
-    : selectedRate
+    : selectedRate?.carrier === selectedCarrier
       ? selectedRate.price
       : selectedCarrier === "andreani"
         ? 6000
@@ -429,35 +442,44 @@ export default function CartPage() {
   };
 
   return (
-    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="max-w-[1100px] mx-auto px-4 py-6">
-        <Link href="/singles" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-6">
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="max-w-[1100px] mx-auto px-3 sm:px-4 py-4 sm:py-6">
+        <Link href="/singles" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-4 sm:mb-6 transition-colors">
           <ArrowLeft className="w-4 h-4" />
           Seguir comprando
         </Link>
 
-        <h1 className="text-2xl font-black mb-6 flex items-center gap-3">
-          <ShoppingCart className="w-6 h-6 text-primary" />
-          Tu Carrito
-          <span className="text-sm text-muted-foreground">({totalItems} items)</span>
-        </h1>
+        <div className="flex items-center gap-3 mb-5 sm:mb-6">
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/20">
+            <ShoppingCart className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-xl sm:text-2xl font-black leading-tight">Tu Carrito</h1>
+            <p className="text-xs text-muted-foreground">{totalItems} {totalItems === 1 ? "carta" : "cartas"}</p>
+          </div>
+        </div>
 
         {!isHydrated ? (
-          <div className="grid lg:grid-cols-[1fr_360px] gap-6">
+          <div className="grid lg:grid-cols-[1fr_380px] gap-5 sm:gap-6">
             <div className="space-y-3">
               {Array.from({ length: 2 }).map((_, index) => (
-                <div key={index} className="h-28 rounded-xl border border-border bg-card animate-pulse" />
+                <div key={index} className="h-24 sm:h-28 rounded-2xl border border-border/60 bg-card/60 animate-pulse" />
               ))}
             </div>
-            <div className="h-80 rounded-3xl border border-border bg-card animate-pulse" />
+            <div className="h-80 rounded-3xl border border-border/60 bg-card/60 animate-pulse" />
           </div>
         ) : items.length === 0 ? (
-          <div className="text-center py-20 text-muted-foreground">
-            <ShoppingCart className="w-14 h-14 mx-auto mb-4 opacity-20" />
-            <p>Tu carrito está vacío.</p>
-            <Link href="/singles" className="text-primary hover:underline">Ver cartas →</Link>
+          <div className="text-center py-16 sm:py-20">
+            <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-3xl bg-secondary/60 ring-1 ring-border/40">
+              <ShoppingCart className="w-10 h-10 text-muted-foreground/20" />
+            </div>
+            <p className="text-lg font-semibold text-muted-foreground">Tu carrito está vacío</p>
+            <p className="mt-1 text-sm text-muted-foreground/70">Explorá el catálogo y sumá cartas</p>
+            <Link href="/singles" className="mt-5 inline-flex h-11 items-center gap-2 rounded-2xl bg-primary px-6 text-sm font-bold text-primary-foreground shadow-lg shadow-primary/20 transition hover:brightness-110">
+              Ver cartas <ArrowLeft className="w-4 h-4 rotate-180" />
+            </Link>
           </div>
         ) : (
-          <div className="grid lg:grid-cols-[1fr_360px] gap-6">
+          <div className="grid lg:grid-cols-[1fr_380px] gap-5 sm:gap-6">
             <div className="space-y-3">
               <AnimatePresence>
                 {items.map((item) => (
@@ -465,9 +487,11 @@ export default function CartPage() {
                 ))}
               </AnimatePresence>
 
-              <div className="rounded-3xl border border-border bg-card p-5 space-y-4">
+              <div className="rounded-3xl border border-border/60 bg-card/80 backdrop-blur-sm p-4 sm:p-5 space-y-4">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Checkout autenticado</p>
+                  <div className="inline-flex items-center gap-2 rounded-xl bg-primary/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] font-semibold text-primary">
+                    <Shield className="w-3 h-3" /> Checkout seguro
+                  </div>
                   <h2 className="mt-2 text-lg font-black">Datos de entrega</h2>
                 </div>
 
@@ -515,10 +539,10 @@ export default function CartPage() {
 
                     <div className="space-y-3">
                       <p className="flex items-center gap-2 text-sm font-bold">
-                        <span className="text-lg">🚚</span> Elegí cómo recibir tu pedido
+                        <Truck className="w-4 h-4 text-primary" /> Elegí cómo recibir tu pedido
                       </p>
 
-                      <div className="grid gap-3 sm:grid-cols-3">
+                      <div className="grid gap-2.5 sm:gap-3 grid-cols-3">
                         {/* Retiro en showroom */}
                         <button
                           type="button"
@@ -527,21 +551,21 @@ export default function CartPage() {
                             setSelectedCarrier("showroom");
                             setSelectedAddressId("");
                           }}
-                          className={`group relative flex flex-col items-center gap-2 rounded-2xl border-2 px-4 py-5 text-center transition-all duration-200 ${
+                          className={`group relative flex flex-col items-center gap-1 sm:gap-2 rounded-2xl border-2 px-2 sm:px-4 py-3 sm:py-5 text-center transition-all duration-200 ${
                             effectiveZone === "pickup"
-                              ? "border-emerald-400 bg-emerald-400/10 shadow-[0_0_20px_rgba(52,211,153,0.15)]"
-                              : "border-border hover:border-emerald-400/40 hover:bg-emerald-400/5"
+                              ? "border-emerald-400 bg-emerald-400/10 shadow-[0_0_24px_rgba(52,211,153,0.12)]"
+                              : "border-border/60 hover:border-emerald-400/40 hover:bg-emerald-400/5"
                           }`}
                         >
                           {effectiveZone === "pickup" ? (
-                            <div className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-400">
+                            <div className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-400 shadow-lg shadow-emerald-400/30">
                               <Check className="h-3 w-3 text-background" />
                             </div>
                           ) : null}
-                          <span className="text-2xl">🏪</span>
-                          <p className="text-sm font-bold text-foreground">Retiro en showroom</p>
-                          <p className="text-lg font-black text-emerald-400">GRATIS</p>
-                          <p className="text-[11px] text-muted-foreground">Inmediato</p>
+                          <Store className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-400" />
+                          <p className="text-[11px] sm:text-sm font-bold text-foreground leading-tight">Showroom</p>
+                          <p className="text-sm sm:text-lg font-black text-emerald-400">GRATIS</p>
+                          <p className="text-[10px] sm:text-[11px] text-muted-foreground">A coordinar</p>
                         </button>
 
                         {/* Correo Argentino */}
@@ -557,28 +581,28 @@ export default function CartPage() {
                               }
                             }
                           }}
-                          className={`group relative flex flex-col items-center gap-2 rounded-2xl border-2 px-4 py-5 text-center transition-all duration-200 ${
+                          className={`group relative flex flex-col items-center gap-1 sm:gap-2 rounded-2xl border-2 px-2 sm:px-4 py-3 sm:py-5 text-center transition-all duration-200 ${
                             selectedCarrier === "correoargentino" && effectiveZone !== "pickup"
-                              ? "border-sky-400 bg-sky-400/10 shadow-[0_0_20px_rgba(56,189,248,0.15)]"
-                              : "border-border hover:border-sky-400/40 hover:bg-sky-400/5"
+                              ? "border-sky-400 bg-sky-400/10 shadow-[0_0_24px_rgba(56,189,248,0.12)]"
+                              : "border-border/60 hover:border-sky-400/40 hover:bg-sky-400/5"
                           }`}
                         >
                           {selectedCarrier === "correoargentino" && effectiveZone !== "pickup" ? (
-                            <div className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-sky-400">
+                            <div className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-sky-400 shadow-lg shadow-sky-400/30">
                               <Check className="h-3 w-3 text-background" />
                             </div>
                           ) : null}
-                          <span className="text-2xl">📦</span>
-                          <p className="text-sm font-bold text-foreground">Correo Argentino</p>
+                          <Package className="w-5 h-5 sm:w-6 sm:h-6 text-sky-400" />
+                          <p className="text-[11px] sm:text-sm font-bold text-foreground leading-tight">Correo Arg.</p>
                           {selectedRate?.carrier === "correoargentino" ? (
                             <>
-                              <p className="text-lg font-black text-sky-400">{formatPrice(selectedRate.price)}</p>
-                              <p className="text-[11px] text-muted-foreground">{selectedRate.estimatedDays}</p>
+                              <p className="text-sm sm:text-lg font-black text-sky-400">{formatPrice(selectedRate.price)}</p>
+                              <p className="text-[10px] sm:text-[11px] text-muted-foreground">{selectedRate.estimatedDays}</p>
                             </>
                           ) : (
                             <>
-                              <p className="text-lg font-black text-sky-400">{formatPrice(shippingOption.cost)}</p>
-                              <p className="text-[11px] text-muted-foreground">3 – 6 días hábiles</p>
+                              <p className="text-sm sm:text-lg font-black text-sky-400">{formatPrice(shippingOption.cost)}</p>
+                              <p className="text-[10px] sm:text-[11px] text-muted-foreground">3–6 días</p>
                             </>
                           )}
                         </button>
@@ -596,28 +620,28 @@ export default function CartPage() {
                               }
                             }
                           }}
-                          className={`group relative flex flex-col items-center gap-2 rounded-2xl border-2 px-4 py-5 text-center transition-all duration-200 ${
+                          className={`group relative flex flex-col items-center gap-1 sm:gap-2 rounded-2xl border-2 px-2 sm:px-4 py-3 sm:py-5 text-center transition-all duration-200 ${
                             selectedCarrier === "andreani" && effectiveZone !== "pickup"
-                              ? "border-violet-400 bg-violet-400/10 shadow-[0_0_20px_rgba(167,139,250,0.15)]"
-                              : "border-border hover:border-violet-400/40 hover:bg-violet-400/5"
+                              ? "border-violet-400 bg-violet-400/10 shadow-[0_0_24px_rgba(167,139,250,0.12)]"
+                              : "border-border/60 hover:border-violet-400/40 hover:bg-violet-400/5"
                           }`}
                         >
                           {selectedCarrier === "andreani" && effectiveZone !== "pickup" ? (
-                            <div className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-violet-400">
+                            <div className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-violet-400 shadow-lg shadow-violet-400/30">
                               <Check className="h-3 w-3 text-background" />
                             </div>
                           ) : null}
-                          <span className="text-2xl">🚛</span>
-                          <p className="text-sm font-bold text-foreground">Andreani</p>
+                          <Truck className="w-5 h-5 sm:w-6 sm:h-6 text-violet-400" />
+                          <p className="text-[11px] sm:text-sm font-bold text-foreground leading-tight">Andreani</p>
                           {selectedRate?.carrier === "andreani" ? (
                             <>
-                              <p className="text-lg font-black text-violet-400">{formatPrice(selectedRate.price)}</p>
-                              <p className="text-[11px] text-muted-foreground">{selectedRate.estimatedDays}</p>
+                              <p className="text-sm sm:text-lg font-black text-violet-400">{formatPrice(selectedRate.price)}</p>
+                              <p className="text-[10px] sm:text-[11px] text-muted-foreground">{selectedRate.estimatedDays}</p>
                             </>
                           ) : (
                             <>
-                              <p className="text-lg font-black text-violet-400">{formatPrice(6000)}</p>
-                              <p className="text-[11px] text-muted-foreground">2 – 4 días hábiles</p>
+                              <p className="text-sm sm:text-lg font-black text-violet-400">{formatPrice(6000)}</p>
+                              <p className="text-[10px] sm:text-[11px] text-muted-foreground">2–4 días</p>
                             </>
                           )}
                         </button>
@@ -773,37 +797,43 @@ export default function CartPage() {
               </div>
             </div>
 
-            <div className="bg-card border border-border rounded-3xl p-6 space-y-4 sticky top-20 shadow-[0_20px_40px_rgba(0,0,0,0.18)]">
-              <h2 className="font-bold text-lg">Resumen</h2>
+            <div className="bg-card/80 backdrop-blur-sm border border-border/60 rounded-3xl p-5 sm:p-6 space-y-4 lg:sticky lg:top-20 shadow-[0_20px_50px_rgba(0,0,0,0.2)]">
+              <h2 className="font-black text-lg flex items-center gap-2">
+                <CreditCard className="w-4 h-4 text-primary" />
+                Resumen
+              </h2>
 
-              <div className="text-sm space-y-1">
+              <div className="text-sm space-y-1.5 max-h-40 overflow-y-auto pr-1 scrollbar-thin">
                 {items.map((item) => (
-                  <div key={item.version_id} className="flex justify-between text-muted-foreground">
-                    <span>{item.name} x{item.quantity}</span>
-                    <span>{formatPrice(item.price * item.quantity)}</span>
+                  <div key={item.version_id} className="flex justify-between gap-2 text-muted-foreground">
+                    <span className="truncate">{item.name} <span className="text-foreground/50">×{item.quantity}</span></span>
+                    <span className="shrink-0 tabular-nums">{formatPrice(item.price * item.quantity)}</span>
                   </div>
                 ))}
               </div>
 
-              <div className="border-t pt-3 text-sm space-y-1">
+              <div className="border-t border-border/50 pt-3 text-sm space-y-1.5">
                 <div className="flex justify-between">
-                  <span>Subtotal</span>
-                  <span>{formatPrice(totalPrice)}</span>
+                  <span className="text-muted-foreground">Subtotal</span>
+                  <span className="tabular-nums">{formatPrice(totalPrice)}</span>
                 </div>
                 <div className="flex justify-between text-yellow-400">
-                  <span>Envío ({effectiveCarrierLabel})</span>
-                  <span>{effectiveShippingCost === 0 ? "GRATIS" : formatPrice(effectiveShippingCost)}</span>
+                  <span className="flex items-center gap-1.5">
+                    <Truck className="w-3 h-3" />
+                    {effectiveCarrierLabel}
+                  </span>
+                  <span className="tabular-nums font-semibold">{effectiveShippingCost === 0 ? "GRATIS" : formatPrice(effectiveShippingCost)}</span>
                 </div>
-                <div className="flex justify-between font-bold text-base">
+                <div className="flex justify-between items-baseline font-black text-base pt-1">
                   <span>Total</span>
-                  <span className="text-primary">{formatPrice(totalWithShipping)}</span>
+                  <span className="text-lg text-primary">{formatPrice(totalWithShipping)}</span>
                 </div>
               </div>
 
-              <div className="space-y-3 border-t pt-4">
+              <div className="space-y-3 border-t border-border/50 pt-4">
                 {errors.auth ? <p className="text-xs text-destructive">{errors.auth}</p> : null}
 
-                <label className="flex gap-2 text-xs">
+                <label className="flex gap-2 text-xs cursor-pointer">
                   <input
                     type="checkbox"
                     checked={accepted}
@@ -811,15 +841,18 @@ export default function CartPage() {
                       setAccepted(e.target.checked);
                       setErrors((prev) => ({ ...prev, accepted: "" }));
                     }}
+                    className="mt-0.5 accent-primary"
                   />
-                  Acepto la <Link href="/privacy" className="text-primary underline">política</Link> y los <Link href="/terms" className="text-primary underline">términos</Link>
+                  <span>
+                    Acepto la <Link href="/privacy" className="text-primary underline">política</Link> y los <Link href="/terms" className="text-primary underline">términos</Link>
+                  </span>
                 </label>
                 {errors.accepted ? <p className="text-xs text-destructive">{errors.accepted}</p> : null}
 
                 <button
                   onClick={handleConfirm}
                   disabled={checkoutMutation.isPending || isBootstrapping || addressesQuery.isLoading || items.length === 0}
-                  className="w-full h-11 rounded-xl bg-primary font-bold text-primary-foreground flex items-center justify-center gap-2 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="w-full h-12 rounded-2xl bg-primary font-bold text-primary-foreground flex items-center justify-center gap-2 transition-all duration-200 hover:brightness-110 hover:shadow-lg hover:shadow-primary/20 disabled:cursor-not-allowed disabled:opacity-40 active:scale-[0.98]"
                 >
                   {checkoutMutation.isPending ? (
                     <>
@@ -827,11 +860,14 @@ export default function CartPage() {
                       Procesando...
                     </>
                   ) : (
-                    "Pagar con Mercado Pago"
+                    <>
+                      <CreditCard className="w-4 h-4" />
+                      Pagar con Mercado Pago
+                    </>
                   )}
                 </button>
-                <p className="text-[11px] text-muted-foreground">
-                  La orden se crea en el backend, el stock queda reservado y la confirmación final entra por webhook de Mercado Pago.
+                <p className="text-[10px] text-center text-muted-foreground/70 leading-relaxed">
+                  Stock reservado al confirmar · Pago seguro vía Mercado Pago
                 </p>
               </div>
             </div>

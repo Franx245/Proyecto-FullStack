@@ -200,7 +200,7 @@ export async function getShippingRates(destination, options = {}) {
       carrierLabel: "Retiro en showroom",
       service: "Retiro presencial",
       price: 0,
-      estimatedDays: "Inmediato",
+      estimatedDays: "A coordinar",
       currency: "ARS",
     });
 
@@ -370,7 +370,7 @@ function getFallbackRates() {
       carrierLabel: "Retiro en showroom",
       service: "Retiro",
       price: 0,
-      estimatedDays: "Coordinar",
+      estimatedDays: "A coordinar",
       currency: "ARS",
     },
   ];

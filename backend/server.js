@@ -5488,8 +5488,8 @@ app.post("/api/shipping/rates", requireAuth, async (req, res) => {
     const cacheKey = `shipping-rates:${postalCode}:${itemCount}`;
     const rates = await cacheGetOrFetch(
       cacheKey,
-      () => getShippingRates({ postalCode, city, state }, { itemCount }),
       300,
+      () => getShippingRates({ postalCode, city, state }, { itemCount }),
     );
 
     res.json({ rates });
