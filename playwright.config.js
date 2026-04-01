@@ -23,7 +23,11 @@ export default defineConfig({
       name: "production",
       use: {
         browserName: "chromium",
-        baseURL: process.env.PRODUCTION_URL || "https://duelvault.com",
+        baseURL: process.env.PRODUCTION_URL || "https://duelvault-store-api.vercel.app",
+        extraHTTPHeaders: {
+          "Cache-Control": "no-cache",
+          Pragma: "no-cache",
+        },
       },
     },
   ],

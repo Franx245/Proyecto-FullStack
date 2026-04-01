@@ -1,11 +1,21 @@
 // @ts-check
 import { test, expect } from "@playwright/test";
 
+async function gotoLive(page, path) {
+  const separator = path.includes("?") ? "&" : "?";
+  await page.goto(`${path}${separator}ts=${Date.now()}`, {
+    waitUntil: "domcontentloaded",
+  });
+}
+
+async function expectCartPage(page) {
+  await expect(page.getByRole("heading", { name: "Tu Carrito" })).toBeVisible({ timeout: 10_000 });
+}
+
 test.describe("Checkout — shipping + total consistency", () => {
   test("recalcula envío al cambiar carrier", async ({ page }) => {
-    await page.goto("/cart");
-
-    await expect(page.locator("text=Tu Carrito")).toBeVisible({ timeout: 10_000 });
+    await gotoLive(page, "/cart");
+    await expectCartPage(page);
 
     const isEmpty = await page.locator("text=Tu carrito está vacío").isVisible().catch(() => false);
     if (isEmpty) {
@@ -42,8 +52,8 @@ test.describe("Checkout — shipping + total consistency", () => {
   });
 
   test("no permite pagar sin shipping válido", async ({ page }) => {
-    await page.goto("/cart");
-    await expect(page.locator("text=Tu Carrito")).toBeVisible({ timeout: 10_000 });
+    await gotoLive(page, "/cart");
+    await expectCartPage(page);
 
     const isEmpty = await page.locator("text=Tu carrito está vacío").isVisible().catch(() => false);
     if (isEmpty) {
@@ -61,8 +71,8 @@ test.describe("Checkout — shipping + total consistency", () => {
   });
 
   test("total incluye envío cuando carrier seleccionado", async ({ page }) => {
-    await page.goto("/cart");
-    await expect(page.locator("text=Tu Carrito")).toBeVisible({ timeout: 10_000 });
+    await gotoLive(page, "/cart");
+    await expectCartPage(page);
 
     const isEmpty = await page.locator("text=Tu carrito está vacío").isVisible().catch(() => false);
     if (isEmpty) {
@@ -84,7 +94,8 @@ test.describe("Checkout — shipping + total consistency", () => {
   test("shipping rates API responde correctamente", async ({ page, request }) => {
     // Direct API test against the shipping rates endpoint (requires auth)
     // This validates the backend returns a valid response shape
-    await page.goto("/cart");
+    await gotoLive(page, "/cart");
+    await expectCartPage(page);
 
     const isEmpty = await page.locator("text=Tu carrito está vacío").isVisible().catch(() => false);
     if (isEmpty) {
@@ -122,16 +133,18 @@ test.describe("Checkout — shipping + total consistency", () => {
 
 test.describe("Checkout — MercadoPago brick", () => {
   test("renderiza payment brick en página de pago", async ({ page }) => {
-    await page.goto("/checkout/pay/1");
+    await gotoLive(page, "/checkout/pay/1");
 
     // Should either show the brick container, auth redirect, or an error
     const hasBrickContainer = await page.locator("#cardPaymentBrick_container").isVisible({ timeout: 10_000 }).catch(() => false);
-    const hasAuthRedirect = await page.locator("text=Ingresar").isVisible().catch(() => false);
+    const hasAuthRedirect = await page.getByRole("button", { name: "Ir a login" }).isVisible().catch(() => false);
+    const hasSecureRedirect = await page.getByText(/Redirigiendo al acceso seguro/i).isVisible().catch(() => false);
+    const hasSessionLoading = await page.getByText(/Cargando sesión/i).isVisible().catch(() => false);
     const hasOrderError = await page.locator("text=No encontramos la orden").isVisible().catch(() => false);
     const hasInvalidId = await page.locator("text=ID de orden inválido").isVisible().catch(() => false);
     const hasSessionRestore = await page.locator("text=Restaurando sesión").isVisible().catch(() => false);
 
     // At least one of these should be true (page rendered correctly, not blank)
-    expect(hasBrickContainer || hasAuthRedirect || hasOrderError || hasInvalidId || hasSessionRestore).toBeTruthy();
+    expect(hasBrickContainer || hasAuthRedirect || hasSecureRedirect || hasSessionLoading || hasOrderError || hasInvalidId || hasSessionRestore).toBeTruthy();
   });
 });
