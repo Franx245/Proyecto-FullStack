@@ -233,7 +233,6 @@ export default function CartPage() {
   );
 
   const selectedRate = shippingRates.find((r) => r.carrier === selectedCarrier) || null;
-  const effectiveShippingCost = selectedRate ? selectedRate.price : shippingOption.cost;
 
   /** @param {CartItem} item */
   const handleOpenDetail = (item) => {
@@ -312,6 +311,7 @@ export default function CartPage() {
 
   const effectiveZone = selectedAddress?.zone || shippingZone;
   const shippingOption = getShippingOption(effectiveZone);
+  const effectiveShippingCost = selectedRate ? selectedRate.price : shippingOption.cost;
   const totalWithShipping = totalPrice + effectiveShippingCost;
   const requiresManualAddress = isAuthenticated && effectiveZone !== "pickup" && (deliveryMode === "new" || !selectedAddress);
 
@@ -358,6 +358,8 @@ export default function CartPage() {
       customer_name: customerName.trim(),
       phone,
       shipping_zone: effectiveZone,
+      shipping_carrier: selectedRate?.carrier || null,
+      shipping_cost: effectiveShippingCost,
       notes: notes.trim(),
       accepted,
       mutation_id: checkoutMutationId,
@@ -719,8 +721,8 @@ export default function CartPage() {
                   <span>{formatPrice(totalPrice)}</span>
                 </div>
                 <div className="flex justify-between text-yellow-400">
-                  <span>Envío</span>
-                  <span>{formatPrice(shippingOption.cost)}</span>
+                  <span>Envío{selectedRate ? ` (${selectedRate.carrierLabel})` : ""}</span>
+                  <span>{formatPrice(effectiveShippingCost)}</span>
                 </div>
                 <div className="flex justify-between font-bold text-base">
                   <span>Total</span>
