@@ -1,9 +1,12 @@
 # Frontend source (not needed for backend)
-src/
-app/
-public/
-frontend-admin/src/
-frontend-admin/public/
+/src/
+/app/
+/public/
+/frontend-admin/
+artifacts/
+scripts/
+test-results/
+docs/
 
 # Build artifacts
 .next/
