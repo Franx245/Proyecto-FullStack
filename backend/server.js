@@ -7000,18 +7000,18 @@ app.post("/api/admin/backfill-card-identity", async (req, res) => {
     const dryRun = req.query.dry === "true";
 
     const result = await prisma.$executeRawUnsafe(`
-      UPDATE cards
-      SET card_identity = CAST(ygopro_id AS TEXT),
-          external_id   = CAST(ygopro_id AS TEXT)
-      WHERE ygopro_id IS NOT NULL
-        AND (card_identity IS NULL OR card_identity = '')
+      UPDATE "Card"
+      SET "card_identity" = CAST("ygoproId" AS TEXT),
+          "external_id"   = CAST("ygoproId" AS TEXT)
+      WHERE "ygoproId" IS NOT NULL
+        AND ("card_identity" IS NULL OR "card_identity" = '')
     `);
 
     if (dryRun) {
       const preview = await prisma.$queryRawUnsafe(`
-        SELECT id, name, ygopro_id
-        FROM cards
-        WHERE ygopro_id IS NOT NULL
+        SELECT "id", "name", "ygoproId"
+        FROM "Card"
+        WHERE "ygoproId" IS NOT NULL
         LIMIT 10
       `);
       res.json({ dryRun: true, preview, message: "No changes applied" });
@@ -7019,10 +7019,10 @@ app.post("/api/admin/backfill-card-identity", async (req, res) => {
     }
 
     const nameFallback = await prisma.$executeRawUnsafe(`
-      UPDATE cards
-      SET card_identity = LOWER(REGEXP_REPLACE(TRIM(name), '[^a-zA-Z0-9]', '', 'g'))
-      WHERE (card_identity IS NULL OR card_identity = '')
-        AND name IS NOT NULL AND TRIM(name) != ''
+      UPDATE "Card"
+      SET "card_identity" = LOWER(REGEXP_REPLACE(TRIM("name"), '[^a-zA-Z0-9]', '', 'g'))
+      WHERE ("card_identity" IS NULL OR "card_identity" = '')
+        AND "name" IS NOT NULL AND TRIM("name") != ''
     `);
 
     res.json({
