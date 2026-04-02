@@ -20,7 +20,18 @@ const JOB_HANDLERS = {
   "expire-pending-orders": async (data) => {
     // Dynamic import to keep job handlers lazy-loaded
     const { expirePendingOrdersJob } = await import("./order-jobs.js");
-    return expirePendingOrdersJob(data);
+    logEvent("EXPIRE_ORDERS_JOB_START", "Expire pending orders job started", {
+      data,
+    });
+
+    const result = await expirePendingOrdersJob(data);
+
+    logEvent("EXPIRE_ORDERS_JOB_DONE", "Expire pending orders job finished", {
+      data,
+      result,
+    });
+
+    return result;
   },
   "recompute-prices": async (data) => handleRecomputePrices(data),
   "compute-rankings": async () => handleComputeCardRankings(),

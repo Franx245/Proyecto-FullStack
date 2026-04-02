@@ -12,7 +12,9 @@ import { fileURLToPath } from "url";
 import { prisma, withDatabaseConnection, startDatabaseKeepalive, stopDatabaseKeepalive, withRetry } from "./src/lib/prisma.js";
 import { syncCatalogFromScope } from "./src/lib/catalogSync.js";
 import {
+  cacheGet,
   cacheGetOrFetch,
+  cacheSet,
   invalidatePublicCatalogCache,
   DASHBOARD_CACHE_KEY,
   DASHBOARD_CACHE_TTL_SECONDS,
@@ -138,6 +140,7 @@ const SHIPPING_TRACKING_SYNC_BATCH_SIZE = Math.max(
   1,
   Number(process.env.SHIPPING_TRACKING_SYNC_BATCH_SIZE || 20)
 );
+const SHIPPING_SNAPSHOT_TTL_SECONDS = 5 * 60;
 const ENABLE_SHIPPING_TRACKING_SYNC_LOOP = String(process.env.ENABLE_SHIPPING_TRACKING_SYNC_LOOP || "true")
   .trim()
   .toLowerCase() !== "false";
@@ -746,12 +749,92 @@ function getCheckoutCarrierLabel(carrier) {
   return null;
 }
 
-async function resolveCheckoutShippingQuote(payload, delivery, items) {
+function normalizeShippingSnapshotText(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function buildShippingSnapshotCartHash({ itemCount, weight }) {
+  return createHash("sha1")
+    .update(JSON.stringify({
+      itemCount: Number(itemCount || 0),
+      weight: Math.round(Number(weight || 0) * 100),
+    }))
+    .digest("hex");
+}
+
+function buildShippingSnapshotId({ userId, postalCode, city, state, itemCount, weight }) {
+  return createHash("sha1")
+    .update(JSON.stringify({
+      userId: Number(userId || 0),
+      postalCode: String(postalCode || "").trim(),
+      city: normalizeShippingSnapshotText(city),
+      state: normalizeShippingSnapshotText(state),
+      cartHash: buildShippingSnapshotCartHash({ itemCount, weight }),
+    }))
+    .digest("hex");
+}
+
+function getShippingSnapshotCacheKey(snapshotId) {
+  return `shipping-snapshot:${snapshotId}`;
+}
+
+function buildShippingSnapshot({ userId, postalCode, city, state, itemCount, weight, rates }) {
+  const snapshotId = buildShippingSnapshotId({ userId, postalCode, city, state, itemCount, weight });
+
+  return {
+    snapshotId,
+    userId: Number(userId || 0),
+    postalCode: String(postalCode || "").trim(),
+    city: normalizeShippingSnapshotText(city),
+    state: normalizeShippingSnapshotText(state),
+    cartHash: buildShippingSnapshotCartHash({ itemCount, weight }),
+    itemCount: Number(itemCount || 0),
+    weight: Math.round(Number(weight || 0) * 100),
+    createdAt: Date.now(),
+    rates: Array.isArray(rates) ? rates : [],
+  };
+}
+
+function validateShippingSnapshot(snapshot, { userId, postalCode, city, state, itemCount, weight }) {
+  if (!snapshot) {
+    return "missing";
+  }
+
+  if (!Number.isFinite(Number(snapshot.createdAt)) || (Date.now() - Number(snapshot.createdAt)) > (SHIPPING_SNAPSHOT_TTL_SECONDS * 1000)) {
+    return "expired";
+  }
+
+  if (Number(snapshot.userId || 0) !== Number(userId || 0)) {
+    return "user_mismatch";
+  }
+
+  if (String(snapshot.postalCode || "").trim() !== String(postalCode || "").trim()) {
+    return "postal_code_mismatch";
+  }
+
+  if (normalizeShippingSnapshotText(snapshot.city) !== normalizeShippingSnapshotText(city)) {
+    return "city_mismatch";
+  }
+
+  if (normalizeShippingSnapshotText(snapshot.state) !== normalizeShippingSnapshotText(state)) {
+    return "state_mismatch";
+  }
+
+  if (String(snapshot.cartHash || "") !== buildShippingSnapshotCartHash({ itemCount, weight })) {
+    return "cart_mismatch";
+  }
+
+  return null;
+}
+
+async function resolveCheckoutShippingQuote({ userId, payload, delivery, items, requestId = null }) {
   if (delivery.shippingZone === ShippingZone.PICKUP) {
     return {
       carrier: "showroom",
       cost: 0,
       label: getShippingInfo(ShippingZone.PICKUP).label,
+      snapshotId: null,
+      snapshotSource: "pickup",
     };
   }
 
@@ -775,6 +858,63 @@ async function resolveCheckoutShippingQuote(payload, delivery, items) {
 
   const itemCount = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
   const weight = items.reduce((sum, item) => sum + (0.6 * Number(item.quantity || 0)), 0);
+  const computedSnapshotId = buildShippingSnapshotId({
+    userId,
+    postalCode,
+    city: shippingCity,
+    state: shippingProvince,
+    itemCount,
+    weight,
+  });
+  const requestedSnapshotId = String(
+    payload.shipping_snapshot_id
+      || payload.shippingSnapshotId
+      || payload.snapshot_id
+      || payload.snapshotId
+      || computedSnapshotId,
+  ).trim();
+
+  if (requestedSnapshotId) {
+    const snapshot = await cacheGet(getShippingSnapshotCacheKey(requestedSnapshotId));
+    const invalidReason = validateShippingSnapshot(snapshot, {
+      userId,
+      postalCode,
+      city: shippingCity,
+      state: shippingProvince,
+      itemCount,
+      weight,
+    });
+
+    if (!invalidReason) {
+      const selectedRate = Array.isArray(snapshot?.rates)
+        ? snapshot.rates.find((rate) => normalizeCheckoutCarrier(rate?.carrier) === selectedCarrier)
+        : null;
+
+      if (selectedRate && Number.isFinite(Number(selectedRate.price)) && Number(selectedRate.price) >= 0) {
+        return {
+          carrier: selectedCarrier,
+          cost: formatCurrency(Number(selectedRate.price)),
+          label: buildCheckoutShippingLabel(selectedRate, delivery.shippingZone),
+          snapshotId: requestedSnapshotId,
+          snapshotSource: "snapshot",
+        };
+      }
+
+      logEvent("SHIPPING_SNAPSHOT_INVALID", "Shipping snapshot invalid", {
+        requestId,
+        snapshotId: requestedSnapshotId,
+        reason: "rate_unavailable",
+        carrier: selectedCarrier,
+      });
+    } else {
+      logEvent("SHIPPING_SNAPSHOT_INVALID", "Shipping snapshot invalid", {
+        requestId,
+        snapshotId: requestedSnapshotId,
+        reason: invalidReason,
+        carrier: selectedCarrier,
+      });
+    }
+  }
 
   try {
     const rates = await cacheGetOrFetch(
@@ -805,6 +945,8 @@ async function resolveCheckoutShippingQuote(payload, delivery, items) {
       carrier: selectedCarrier,
       cost: formatCurrency(Number(selectedRate.price)),
       label: buildCheckoutShippingLabel(selectedRate, delivery.shippingZone),
+      snapshotId: requestedSnapshotId || computedSnapshotId,
+      snapshotSource: "live",
     };
   } catch (error) {
     if (error?.statusCode) {
@@ -3722,7 +3864,7 @@ function isPrismaTransactionStartTimeout(error) {
   return error?.code === "P2028";
 }
 
-async function expirePendingOrdersBestEffort(options = {}) {
+async function _expirePendingOrdersBestEffort(options = {}) {
   try {
     return await expirePendingOrders(options);
   } catch (error) {
@@ -6071,11 +6213,6 @@ app.get("/api/auth/orders", requireAuth, async (req, res) => {
     const skip = (page - 1) * limit;
     const userId = Number(req.user.sub);
 
-    await expirePendingOrdersBestEffort({
-      source: "auth_orders_list",
-      requestId: req.requestContext?.requestId || null,
-    });
-
     const [orders, total] = await Promise.all([
       prisma.order.findMany({
         where: { userId },
@@ -6211,7 +6348,13 @@ app.post("/api/checkout", requireAuth, checkoutRateLimit, async (req, res) => {
       }
 
       const delivery = await buildCheckoutAddress(tx, userId, req.body || {}, fallbackPhone);
-      const shippingQuote = await resolveCheckoutShippingQuote(req.body || {}, delivery, normalizedItems);
+      const shippingQuote = await resolveCheckoutShippingQuote({
+        userId,
+        payload: req.body || {},
+        delivery,
+        items: normalizedItems,
+        requestId: req.requestContext?.requestId || null,
+      });
       const total = formatCurrency(subtotal + shippingQuote.cost);
       const expiresAt = buildCheckoutExpirationDate();
 
@@ -6254,7 +6397,7 @@ app.post("/api/checkout", requireAuth, checkoutRateLimit, async (req, res) => {
         include: { items: true, user: true, address: true },
       });
 
-      return { order, cardsById };
+      return { order, cardsById, shippingQuote };
     }), { maxWaitMs: 5000 });
 
     const responseOrder = toOrderResponse(result.order, result.cardsById);
@@ -6267,6 +6410,14 @@ app.post("/api/checkout", requireAuth, checkoutRateLimit, async (req, res) => {
       expires_at: responseOrder.expires_at ?? null,
       payment_redirect_available: false,
     };
+
+    if (result.shippingQuote?.snapshotSource === "snapshot") {
+      logEvent("SHIPPING_SNAPSHOT_USED", "Shipping snapshot used for checkout", {
+        requestId: req.requestContext?.requestId || null,
+        orderId: result.order.id,
+        snapshotId: result.shippingQuote.snapshotId || null,
+      });
+    }
 
     try {
       await recordActivity(userId, "CHECKOUT_CREATED", req, {
@@ -6986,6 +7137,7 @@ app.post(MERCADOPAGO_WEBHOOK_PATHS, async (req, res) => {
 
 app.post("/api/shipping/rates", requireAuth, async (req, res) => {
   try {
+    const userId = Number(req.user.sub);
     const postalCode = String(req.body?.postal_code || req.body?.postalCode || "").trim();
     if (!postalCode) {
       res.status(400).json({ error: "Código postal requerido" });
@@ -7018,7 +7170,23 @@ app.post("/api/shipping/rates", requireAuth, async (req, res) => {
       return;
     }
 
-    res.json({ rates });
+    const shippingSnapshot = buildShippingSnapshot({
+      userId,
+      postalCode,
+      city,
+      state,
+      itemCount,
+      weight,
+      rates,
+    });
+
+    await cacheSet(
+      getShippingSnapshotCacheKey(shippingSnapshot.snapshotId),
+      shippingSnapshot,
+      SHIPPING_SNAPSHOT_TTL_SECONDS,
+    );
+
+    res.json({ rates, snapshotId: shippingSnapshot.snapshotId });
   } catch (error) {
     logEvent("SHIPPING_ERROR", "Shipping rates failed", {
       requestId: req.requestContext?.requestId || null,
@@ -7356,11 +7524,6 @@ app.get("/api/orders", requireAuth, async (req, res) => {
   try {
     const currentUserId = Number(req.user.sub);
 
-    await expirePendingOrdersBestEffort({
-      source: "public_orders_list",
-      requestId: req.requestContext?.requestId || null,
-    });
-
     const ids = typeof req.query.ids === "string"
       ? req.query.ids.split(",").map((value) => Number(value)).filter(Number.isFinite)
       : [];
@@ -7419,11 +7582,6 @@ app.post("/api/admin/refresh", adminAuthRateLimit, validateBody(refreshTokenBody
 
 app.get("/api/admin/dashboard", requireAdminAuth, async (_req, res) => {
   try {
-    await expirePendingOrdersBestEffort({
-      source: "admin_dashboard",
-      requestId: _req.requestContext?.requestId || null,
-    });
-
     const dashboardData = await cacheGetOrFetch(DASHBOARD_CACHE_KEY, DASHBOARD_CACHE_TTL_SECONDS, async () => {
       const scopeSettings = await getCatalogScopeSettings();
       const scopeWhere = await resolveCatalogScopeWhere(scopeSettings);
@@ -9357,11 +9515,6 @@ app.put("/api/admin/users/:id/role", requireAdminAuth, requireAdminRole([UserRol
 
 app.get("/api/admin/orders", requireAdminAuth, async (req, res) => {
   try {
-    await expirePendingOrdersBestEffort({
-      source: "admin_orders_list",
-      requestId: req.requestContext?.requestId || null,
-      batchSize: 5,
-    });
     assertRequestActive(req);
 
     const page = parsePositiveInteger(req.query.page, 1, { min: 1, max: 10000 });
@@ -9417,11 +9570,6 @@ app.get("/api/admin/orders", requireAdminAuth, async (req, res) => {
 
 app.get("/api/admin/export/orders", requireAdminAuth, async (_req, res) => {
   try {
-    await expirePendingOrdersBestEffort({
-      source: "admin_orders_export",
-      requestId: _req.requestContext?.requestId || null,
-    });
-
     const orders = await prisma.order.findMany({
       include: { items: { include: { card: true } }, user: true, address: true },
       orderBy: { createdAt: "desc" },

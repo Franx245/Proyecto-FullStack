@@ -11,10 +11,67 @@
 import "./src/lib/load-env.js";
 import { isRedisTcpConfigured, pingRedisTcp, shutdownRedisTcp } from "./src/lib/redis-tcp.js";
 import { startWorker, shutdownWorker } from "./src/lib/jobs/worker.js";
-import { shutdownQueue } from "./src/lib/jobs/queue.js";
+import { enqueueJob, shutdownQueue } from "./src/lib/jobs/queue.js";
 import { probeRedisConnection } from "./src/lib/redis.js";
 import { stopEventBus } from "./src/lib/events.js";
 import { logEvent } from "./src/lib/logger.js";
+
+const EXPIRE_PENDING_ORDERS_INTERVAL_MS = 5 * 60 * 1000;
+
+/** @type {NodeJS.Timeout | null} */
+let expirePendingOrdersInterval = null;
+
+async function scheduleExpirePendingOrdersJob(source) {
+  const scheduleSlot = Math.floor(Date.now() / EXPIRE_PENDING_ORDERS_INTERVAL_MS);
+  const jobId = `expire-pending-orders-${scheduleSlot}`;
+
+  try {
+    const job = await enqueueJob(
+      "expire-pending-orders",
+      { source },
+      { jobId },
+    );
+
+    logEvent("EXPIRE_ORDERS_JOB_ENQUEUED", "Expire pending orders job enqueued", {
+      source,
+      jobId: job?.id || jobId,
+    });
+  } catch (error) {
+    logEvent("JOB_FAILED", "Failed to enqueue expire pending orders job", {
+      source,
+      jobId,
+      error,
+    });
+  }
+}
+
+function startExpirePendingOrdersLoop() {
+  if (expirePendingOrdersInterval) {
+    return;
+  }
+
+  void scheduleExpirePendingOrdersJob("worker_startup");
+
+  expirePendingOrdersInterval = setInterval(() => {
+    void scheduleExpirePendingOrdersJob("worker_interval");
+  }, EXPIRE_PENDING_ORDERS_INTERVAL_MS);
+  expirePendingOrdersInterval.unref?.();
+
+  logEvent("EXPIRE_ORDERS_LOOP_START", "Expire pending orders loop started", {
+    intervalMs: EXPIRE_PENDING_ORDERS_INTERVAL_MS,
+  });
+}
+
+function stopExpirePendingOrdersLoop() {
+  if (!expirePendingOrdersInterval) {
+    return;
+  }
+
+  clearInterval(expirePendingOrdersInterval);
+  expirePendingOrdersInterval = null;
+
+  logEvent("EXPIRE_ORDERS_LOOP_STOP", "Expire pending orders loop stopped");
+}
 
 async function main() {
   logEvent("WORKER_START", "Worker started", {
@@ -50,6 +107,7 @@ async function main() {
   logEvent("WORKER_READY", "Connected to Redis", {
     entry: "backend/worker.js",
   });
+  startExpirePendingOrdersLoop();
   logEvent("WORKER_RUNNING", "Worker running and waiting for jobs", {});
 
   /* ── Graceful shutdown ── */
@@ -57,6 +115,8 @@ async function main() {
     logEvent("WORKER_SHUTDOWN", "Worker shutting down", {
       signal,
     });
+
+    stopExpirePendingOrdersLoop();
 
     await Promise.allSettled([
       shutdownWorker(),
