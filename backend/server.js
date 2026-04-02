@@ -640,6 +640,19 @@ const DASHBOARD_ORDER_SUMMARY_SELECT = {
   },
 };
 
+const ORDER_HISTORY_CARD_SELECT = {
+  id: true,
+  ygoproId: true,
+  name: true,
+  image: true,
+  setCode: true,
+  rarity: true,
+  price: true,
+  stock: true,
+  lowStockThreshold: true,
+  updatedAt: true,
+};
+
 const ORDER_HISTORY_ITEM_SELECT = {
   id: true,
   cardId: true,
@@ -685,19 +698,6 @@ const ORDER_HISTORY_SELECT = {
   createdAt: true,
   updatedAt: true,
   items: { select: ORDER_HISTORY_ITEM_SELECT },
-};
-
-const ORDER_HISTORY_CARD_SELECT = {
-  id: true,
-  ygoproId: true,
-  name: true,
-  image: true,
-  setCode: true,
-  rarity: true,
-  price: true,
-  stock: true,
-  lowStockThreshold: true,
-  updatedAt: true,
 };
 
 const CATALOG_SCOPE_MODE = {
