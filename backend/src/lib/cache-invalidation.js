@@ -10,9 +10,11 @@
  * Uses existing Upstash REST cache layer for read/write.
  */
 import {
+  PUBLIC_CARD_DETAIL_CACHE_PREFIX,
   PUBLIC_CARD_LIST_CACHE_PREFIX,
   PUBLIC_CARD_FILTERS_CACHE_KEY,
 } from "./cache.js";
+import { logEvent } from "./logger.js";
 import { isRedisEnabled, redis } from "./redis.js";
 
 const PREFIX_SCAN_COUNT = 200;
@@ -97,7 +99,7 @@ async function invalidateCardDetailKeys(cardIds) {
   const detailKeys = cardIds
     .map((value) => Number(value))
     .filter(Number.isFinite)
-    .map((cardId) => `card:${cardId}`);
+    .map((cardId) => `${PUBLIC_CARD_DETAIL_CACHE_PREFIX}:stock:${cardId}`);
 
   return deleteKeys(detailKeys);
 }
@@ -123,9 +125,9 @@ export async function invalidateCardsCache(cardIds) {
       invalidateListCachesForCardIds(cardIds),
     ]);
   } catch (error) {
-    console.error("[cache-invalidation] multi-card invalidation failed", {
+    logEvent("SERVER_ERROR", "Multi-card cache invalidation failed", {
       count: cardIds.length,
-      error: error.message,
+      error,
     });
   }
 }
@@ -139,7 +141,9 @@ export async function invalidateFiltersCache() {
   try {
     await redis.del(PUBLIC_CARD_FILTERS_CACHE_KEY);
   } catch (error) {
-    console.error("[cache-invalidation] filters invalidation failed", error.message);
+    logEvent("SERVER_ERROR", "Filters cache invalidation failed", {
+      error,
+    });
   }
 }
 

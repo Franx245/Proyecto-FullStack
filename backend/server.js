@@ -31,7 +31,6 @@ import { publicSSEHandler, adminSSEHandler, getSSEClientCount } from "./src/lib/
 /* ── Redis TCP + BullMQ ── */
 import { isRedisTcpConfigured, pingRedisTcp, shutdownRedisTcp } from "./src/lib/redis-tcp.js";
 import { enqueueJob, shutdownQueue } from "./src/lib/jobs/queue.js";
-import { startWorker, shutdownWorker } from "./src/lib/jobs/worker.js";
 import { stopEventBus } from "./src/lib/events.js";
 /* ── Cron job handlers ── */
 import { handleRecomputePrices } from "./src/lib/jobs/recompute-prices.js";
@@ -3765,7 +3764,7 @@ async function expirePendingOrders({ orderIds = null, source = "system", request
   }
 
   if (expired.length > 0) {
-    console.info("Expired pending orders updated", {
+    logEvent("JOB_DONE", "Expired pending orders updated", {
       requestId,
       source,
       orderIds: expired,
@@ -3791,7 +3790,7 @@ async function expirePendingOrdersBestEffort(options = {}) {
       throw error;
     }
 
-    console.warn("Skipping pending-order expiration after transaction timeout", {
+    logEvent("JOB_FAILED", "Skipping pending-order expiration after transaction timeout", {
       requestId: options.requestId || null,
       source: options.source || "system",
       orderIds: Array.isArray(options.orderIds) ? options.orderIds : null,
@@ -6639,10 +6638,14 @@ app.post("/api/checkout", requireAuth, checkoutRateLimit, async (req, res) => {
         paymentFlow: "checkout_api",
       });
     } catch (activityError) {
-      console.error("Failed to record checkout activity", activityError);
+      logEvent("SERVER_ERROR", "Failed to record checkout activity", {
+        requestId: req.requestContext?.requestId || null,
+        orderId: result.order.id,
+        error: activityError,
+      });
     }
 
-    console.info("CHECKOUT_FLOW", {
+    logEvent("CHECKOUT_FLOW", "Checkout created", {
       requestId: req.requestContext?.requestId || null,
       orderId: result.order.id,
       subtotal: result.order.subtotal,
@@ -6662,7 +6665,11 @@ app.post("/api/checkout", requireAuth, checkoutRateLimit, async (req, res) => {
       orderId: result.order.id,
       items: normalizedItems,
     }, { jobId: `post-checkout-${result.order.id}` }).catch((postResponseError) => {
-      console.error("[checkout] failed to enqueue post-checkout job", postResponseError);
+      logEvent("JOB_FAILED", "Failed to enqueue post-checkout job", {
+        requestId: req.requestContext?.requestId || null,
+        orderId: result.order.id,
+        error: postResponseError,
+      });
     });
     return;
   } catch (error) {
@@ -6750,10 +6757,14 @@ app.post("/api/checkout/create-preference", requireAuth, checkoutRateLimit, asyn
         totalArs: preferenceResult.totalArs,
       });
     } catch (activityError) {
-      console.error("Failed to record checkout preference activity", activityError);
+      logEvent("SERVER_ERROR", "Failed to record checkout preference activity", {
+        requestId: req.requestContext?.requestId || null,
+        orderId: preferenceResult.order.id,
+        error: activityError,
+      });
     }
 
-    console.info("Checkout preference created", {
+    logEvent("PAYMENT_FLOW", "Checkout preference created", {
       requestId: req.requestContext?.requestId || null,
       orderId: preferenceResult.order.id,
       preferenceId: preferenceResult.order.preference_id,
@@ -9984,7 +9995,11 @@ app.put("/api/admin/orders/:id/shipping", requireAdminAuth, async (req, res) => 
         trackingVisibleToUser: updatedOrder.trackingVisibleToUser,
       });
     } catch (activityError) {
-      console.error("Failed to record order shipping activity", activityError);
+      logEvent("SERVER_ERROR", "Failed to record order shipping activity", {
+        requestId,
+        orderId,
+        error: activityError,
+      });
     }
     await finalizeIdempotentMutation(idempotency, 200, responsePayload);
     return res.json(responsePayload);
@@ -10135,7 +10150,11 @@ app.patch("/api/admin/orders/:id/shipment-status", requireAdminAuth, async (req,
           shipmentStatus: result.order?.shipmentStatus || null,
         });
       } catch (activityError) {
-        console.error("Failed to record shipment status activity", activityError);
+        logEvent("SERVER_ERROR", "Failed to record shipment status activity", {
+          requestId,
+          orderId,
+          error: activityError,
+        });
       }
     }
 
@@ -10564,7 +10583,9 @@ if (isDirectExecution) {
           logEvent("INFRA_STATUS", "Redis TCP probed", { ready: tcpOk });
 
           if (tcpOk) {
-            startWorker();
+            logEvent("USING_BULLMQ", "Redis TCP configured; BullMQ worker must run in dedicated process", {
+              process: "api",
+            });
           }
         } catch { /* non-critical */ }
       } else {
@@ -10589,7 +10610,6 @@ if (isDirectExecution) {
     stopDatabaseKeepalive();
 
     await Promise.allSettled([
-      shutdownWorker(),
       shutdownQueue(),
       stopEventBus(),
       shutdownRedisTcp(),

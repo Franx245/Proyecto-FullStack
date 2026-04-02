@@ -7,6 +7,7 @@ import { prisma, withDatabaseConnection } from "../prisma.js";
 import { invalidateOrderRelatedCache } from "../cache-invalidation.js";
 import { publishEvent } from "../events.js";
 import { logEvent } from "../logger.js";
+import { processQueuedMercadoPagoPayment as processQueuedMercadoPagoPaymentThroughSharedModule } from "../payments/queued-reconciliation.js";
 
 /**
  * Expire pending orders whose `expires_at` has passed.
@@ -33,7 +34,7 @@ export async function expirePendingOrdersJob(data = {}) {
   let expiredCount = 0;
   for (const order of orders) {
     try {
-      const didExpire = await withDatabaseConnection(() =>
+      const expireResult = await withDatabaseConnection(() =>
         prisma.$transaction(async (tx) => {
           // Row-level lock to prevent race with webhook / other expiry paths
           await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${order.id} FOR UPDATE`;
@@ -43,7 +44,7 @@ export async function expirePendingOrdersJob(data = {}) {
             select: { status: true, items: { select: { cardId: true, quantity: true } } },
           });
           if (!fresh || !["PENDING_PAYMENT", "FAILED"].includes(fresh.status)) {
-            return false;
+            return null;
           }
 
           for (const item of fresh.items) {
@@ -58,29 +59,36 @@ export async function expirePendingOrdersJob(data = {}) {
             data: { status: "EXPIRED" },
           });
 
-          return true;
+          return {
+            orderId: order.id,
+            previousStatus: fresh.status,
+            items: fresh.items,
+          };
         }),
       );
 
-      if (!didExpire) continue;
+      if (!expireResult) continue;
       expiredCount++;
 
-      await invalidateOrderRelatedCache(order.items);
+      await invalidateOrderRelatedCache(expireResult.items);
       publishEvent("order-update", {
-        orderId: order.id,
-        previousStatus: "PENDING_PAYMENT",
+        orderId: expireResult.orderId,
+        previousStatus: expireResult.previousStatus,
         newStatus: "EXPIRED",
       });
 
-      for (const item of order.items) {
+      for (const item of expireResult.items) {
         publishEvent("stock-update", {
           cardId: item.cardId,
           reason: "order_expired",
-          orderId: order.id,
+          orderId: expireResult.orderId,
         });
       }
     } catch (err) {
-      console.error(`[order-jobs] failed to expire order ${order.id}:`, err.message);
+      logEvent("JOB_FAILED", "Failed to expire pending order", {
+        orderId: order.id,
+        error: err,
+      });
     }
   }
 
@@ -119,25 +127,7 @@ export async function processOrderPostCheckout(data) {
  * @param {{ payment: any, paymentIdOverride?: string | null, providerRequestId?: string | null, requestId?: string | null, source?: string | null, headers?: Record<string, string | null> }} data
  */
 export async function processQueuedMercadoPagoPayment(data) {
-  logEvent("JOB_PAYMENT_RECONCILIATION_START", "Processing queued Mercado Pago reconciliation", {
-    orderId: Number(data?.payment?.metadata?.order_id || data?.payment?.external_reference || 0) || null,
-    paymentId: String(data?.paymentIdOverride || data?.payment?.id || "").trim() || null,
-    source: data?.source || "bullmq",
-    requestId: data?.requestId || null,
-  });
-
-  const { processQueuedMercadoPagoReconciliation } = await import("../../../server.js");
-  const result = await processQueuedMercadoPagoReconciliation(data);
-
-  logEvent("JOB_PAYMENT_RECONCILIATION_DONE", "Queued Mercado Pago reconciliation completed", {
-    orderId: result?.order?.id || null,
-    paymentId: String(data?.paymentIdOverride || data?.payment?.id || "").trim() || null,
-    source: data?.source || "bullmq",
-    requestId: data?.requestId || null,
-    ignored: Boolean(result?.ignored),
-  });
-
-  return result;
+  return processQueuedMercadoPagoPaymentThroughSharedModule(data);
 }
 
 /**
