@@ -144,7 +144,7 @@ const SHIPPING_SNAPSHOT_TTL_SECONDS = 5 * 60;
 const ENABLE_SHIPPING_TRACKING_SYNC_LOOP = String(process.env.ENABLE_SHIPPING_TRACKING_SYNC_LOOP || "true")
   .trim()
   .toLowerCase() !== "false";
-const ORDER_SCHEMA_CACHE_TTL_MS = 1000 * 60;
+const ORDER_SCHEMA_CACHE_TTL_MS = 1000 * 60 * 15;
 const MERCADOPAGO_ACCOUNT_CACHE_TTL_MS = 1000 * 60 * 10;
 const MERCADOPAGO_WEBHOOK_PATHS = ["/api/checkout/webhook", "/api/webhook/mercadopago"];
 const ENVIA_WEBHOOK_PATH = "/api/webhooks/envia";
@@ -386,7 +386,21 @@ app.use([
   "/api/internal/warm-cache",
 ], async (req, res, next) => {
   try {
+    const schemaCheckStart = Date.now();
+    if (req.path === "/api/auth/orders") {
+      logger.info("ORDERS_SCHEMA_CHECK_START", {
+        requestId: req.requestContext?.requestId || null,
+        ms: Date.now() - (req.requestContext?.startedAt || Date.now()),
+      });
+    }
     await ensureOrderSchemaReady();
+    if (req.path === "/api/auth/orders") {
+      logger.info("ORDERS_SCHEMA_CHECK_DONE", {
+        requestId: req.requestContext?.requestId || null,
+        ms: Date.now() - (req.requestContext?.startedAt || Date.now()),
+        durationMs: Date.now() - schemaCheckStart,
+      });
+    }
     next();
   } catch (error) {
     const isDatabaseUnavailable = isDatabaseUnavailableError(error);
@@ -6269,10 +6283,42 @@ app.delete("/api/auth/addresses/:id", requireAuth, async (req, res) => {
 
 app.get("/api/auth/orders", requireAuth, async (req, res) => {
   try {
+    const requestStart = req.requestContext?.startedAt || Date.now();
+    logger.info("ORDERS_REQUEST_START", {
+      requestId: req.requestContext?.requestId || null,
+      ms: Date.now() - requestStart,
+    });
+
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
     const skip = (page - 1) * limit;
     const userId = Number(req.user.sub);
+
+    logger.info("ORDERS_HANDLER_ENTER", {
+      requestId: req.requestContext?.requestId || null,
+      userId,
+      ms: Date.now() - requestStart,
+    });
+
+    logger.info("BEFORE_PREPROCESS", {
+      requestId: req.requestContext?.requestId || null,
+      userId,
+      ms: Date.now() - requestStart,
+    });
+
+    logger.info("AFTER_AUTH", {
+      requestId: req.requestContext?.requestId || null,
+      userId,
+      ms: Date.now() - requestStart,
+    });
+
+    logger.info("BEFORE_DB_QUERY", {
+      requestId: req.requestContext?.requestId || null,
+      userId,
+      page,
+      limit,
+      ms: Date.now() - requestStart,
+    });
 
     const queryStart = Date.now();
     const [orders, total] = await Promise.all([
@@ -6292,6 +6338,13 @@ app.get("/api/auth/orders", requireAuth, async (req, res) => {
       ms: Date.now() - queryStart,
       count: orders.length,
       total,
+    });
+    logger.info("AFTER_DB_QUERY", {
+      requestId: req.requestContext?.requestId || null,
+      userId,
+      page,
+      limit,
+      ms: Date.now() - requestStart,
     });
 
     const cardsMapStart = Date.now();
@@ -6322,6 +6375,14 @@ app.get("/api/auth/orders", requireAuth, async (req, res) => {
       limit,
       ms: Date.now() - serializeStart,
       count: responseOrders.length,
+    });
+
+    logger.info("BEFORE_RESPONSE", {
+      requestId: req.requestContext?.requestId || null,
+      userId,
+      page,
+      limit,
+      ms: Date.now() - requestStart,
     });
 
     res.json({
@@ -10507,6 +10568,17 @@ if (isDirectExecution) {
           new Promise((_, r) => setTimeout(() => r(new Error("timeout")), 5000)),
         ]);
         logEvent("DB_STATUS", "Database connected");
+        void ensureOrderSchemaReady()
+          .then(() => {
+            logEvent("DB_SCHEMA", "Order schema compatibility warmed", {
+              ttlMs: ORDER_SCHEMA_CACHE_TTL_MS,
+            });
+          })
+          .catch((error) => {
+            logEvent("DB_SCHEMA", "Order schema compatibility warmup failed", {
+              error: error?.message || String(error),
+            });
+          });
         startDatabaseKeepalive();
         logEvent("DB_KEEPALIVE", "Database keepalive started", { intervalMinutes: 4 });
       } catch (err) {
