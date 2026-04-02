@@ -24,6 +24,10 @@ import {
   PUBLIC_CARD_LIST_CACHE_TTL_SECONDS,
 } from "./src/lib/cache.js";
 import { createMercadoPagoDirectPayment } from "./src/lib/mercadopagoPayments.js";
+import {
+  reconcileMercadoPagoPayment as reconcileMercadoPagoPaymentShared,
+  processQueuedMercadoPagoReconciliation as processQueuedMercadoPagoReconciliationShared,
+} from "./src/lib/services/payment-reconciliation.js";
 import { createRateLimitMiddleware, getRequestIp, validateBody } from "./src/lib/requestGuards.js";
 /* ── Realtime ── */
 import { publishEvent } from "./src/lib/events.js";
@@ -257,10 +261,6 @@ const ORDER_TRANSITIONS = {
   [OrderStatus.CANCELLED]: [],
 };
 const BILLABLE_ORDER_STATUSES = [OrderStatus.PAID, OrderStatus.SHIPPED, OrderStatus.COMPLETED];
-const ORDER_PAYMENT_RECONCILIATION_FAILURE_DETAILS = new Set([
-  "amount_mismatch",
-  "stock_conflict_after_approval",
-]);
 const DEFAULT_ADMIN_USERS_PAGE_SIZE = 8;
 const DEFAULT_ADMIN_ORDERS_PAGE_SIZE = 10;
 const MAX_ADMIN_PAGE_SIZE = 50;
@@ -837,31 +837,6 @@ function hasMercadoPagoPaymentAttempt(order) {
 function hasApprovedMercadoPagoPayment(order) {
   return hasMercadoPagoPaymentAttempt(order)
     && normalizeMercadoPagoPaymentStatus(order?.payment_status) === "approved";
-}
-
-function isApprovedPaymentReconciliationFailure(order) {
-  return order?.status === OrderStatus.FAILED
-    && hasApprovedMercadoPagoPayment(order)
-    && ORDER_PAYMENT_RECONCILIATION_FAILURE_DETAILS.has(
-      normalizeMercadoPagoPaymentStatusDetail(order?.payment_status_detail) || ""
-    );
-}
-
-function resolveMercadoPagoPaymentAmount(payment) {
-  const candidates = [
-    payment?.transaction_amount,
-    payment?.transaction_details?.total_paid_amount,
-    payment?.transaction_details?.net_received_amount,
-  ];
-
-  for (const candidate of candidates) {
-    const amount = Number(candidate);
-    if (Number.isFinite(amount) && amount > 0) {
-      return formatCurrency(amount);
-    }
-  }
-
-  return null;
 }
 
 function canCancelOrder(role) {
@@ -1446,47 +1421,6 @@ function extractMercadoPagoPaymentId(payload, query) {
   }
 
   return "";
-}
-
-function resolveMercadoPagoOrderId(payment) {
-  const candidates = [payment?.metadata?.order_id, payment?.external_reference];
-
-  for (const candidate of candidates) {
-    const normalized = Number(candidate);
-    if (Number.isFinite(normalized)) {
-      return normalized;
-    }
-  }
-
-  return null;
-}
-
-function resolveWebhookOrderStatus(currentStatus, paymentStatus) {
-  if (!paymentStatus) {
-    return null;
-  }
-
-  if ([OrderStatus.EXPIRED, OrderStatus.PAID, OrderStatus.SHIPPED, OrderStatus.COMPLETED, OrderStatus.CANCELLED].includes(currentStatus)) {
-    return null;
-  }
-
-  if (paymentStatus === "approved") {
-    return OrderStatus.PAID;
-  }
-
-  if (["pending", "in_process", "in_mediation", "authorized"].includes(paymentStatus)) {
-    return OrderStatus.PENDING_PAYMENT;
-  }
-
-  if (paymentStatus === "expired") {
-    return OrderStatus.EXPIRED;
-  }
-
-  if (["rejected", "cancelled", "refunded", "charged_back"].includes(paymentStatus)) {
-    return OrderStatus.FAILED;
-  }
-
-  return null;
 }
 
 function resolveOrderShipmentService(order, explicitService = null) {
@@ -4161,317 +4095,21 @@ async function persistDirectPaymentProviderFailure(req, { orderId, userId, payme
   return result.order;
 }
 
-async function reconcileMercadoPagoPayment(req, { payment, paymentIdOverride = null, providerRequestId = null } = {}) {
-  const paymentId = String(paymentIdOverride || payment?.id || "").trim();
-  const paymentStatus = normalizeMercadoPagoPaymentStatus(payment?.status);
-  const orderId = resolveMercadoPagoOrderId(payment);
-  const paymentAmount = resolveMercadoPagoPaymentAmount(payment);
-
-  if (!paymentId) {
-    return {
-      received: true,
-      ignored: true,
-      reason: "missing_payment_id",
-      order: null,
-      outcome: null,
-    };
-  }
-
-  if (!Number.isFinite(orderId)) {
-    logEvent("MERCADOPAGO_WEBHOOK_IGNORED", "Payment without valid external_reference", {
-      paymentId,
-      paymentStatus,
-      providerRequestId: providerRequestId || null,
-    });
-
-    return {
-      received: true,
-      ignored: true,
-      reason: "missing_external_reference",
-      order: null,
-      outcome: null,
-    };
-  }
-
-  const outcome = await prisma.$transaction(async (tx) => {
-    await lockOrderForUpdate(tx, orderId);
-    const order = await tx.order.findUnique({
-      where: { id: orderId },
-      include: { items: true, user: true, address: true },
-    });
-
-    if (!order) {
-      return null;
-    }
-
-    if (order.status === OrderStatus.PENDING_PAYMENT && order.expires_at && order.expires_at <= new Date()) {
-      const expiredOrder = await updateOrderStatusWithEffects(tx, order, OrderStatus.EXPIRED, {
-        payment_status: order.payment_status || "expired",
-        payment_status_detail: order.payment_status_detail || "expired_order",
-      });
-      return {
-        order: expiredOrder,
-        duplicate: false,
-        appliedStatus: OrderStatus.EXPIRED,
-        paymentStatus,
-        postCommitEffect: buildOrderStatusPostCommitEffect(order, OrderStatus.EXPIRED),
-      };
-    }
-
-    const nextStatus = resolveWebhookOrderStatus(order.status, paymentStatus);
-    const paymentData = {
-      payment_id: String(payment?.id || paymentId),
-      payment_status: paymentStatus || order.payment_status || null,
-      payment_status_detail: normalizeMercadoPagoPaymentStatusDetail(payment?.status_detail) || order.payment_status_detail || null,
-      payment_approved_at: paymentStatus === "approved"
-        ? order.payment_approved_at || new Date()
-        : order.payment_approved_at,
-    };
-    const staleWebhook = order.payment_id && order.payment_id !== paymentData.payment_id;
-    const expectedAmount = formatCurrency(order.total_ars ?? order.total);
-
-    if (staleWebhook) {
-      return {
-        order,
-        duplicate: false,
-        ignored: true,
-        appliedStatus: order.status,
-        paymentStatus,
-        ignoreReason: "stale_payment_id",
-      };
-    }
-
-    if (paymentStatus === "approved" && isApprovedPaymentReconciliationFailure(order)) {
-      return {
-        order,
-        duplicate: false,
-        ignored: true,
-        appliedStatus: order.status,
-        paymentStatus,
-        ignoreReason: "approved_payment_already_reconciled",
-      };
-    }
-
-    if (paymentStatus === "approved" && paymentAmount !== expectedAmount) {
-      const mismatchData = {
-        ...paymentData,
-        payment_status_detail: "amount_mismatch",
-      };
-      const mismatchOrder = order.status === OrderStatus.FAILED
-        ? await tx.order.update({
-          where: { id: order.id },
-          data: mismatchData,
-          include: { items: true, user: true, address: true },
-        })
-        : await updateOrderStatusWithEffects(tx, order, OrderStatus.FAILED, mismatchData);
-
-      return {
-        order: mismatchOrder,
-        duplicate: false,
-        appliedStatus: order.status === OrderStatus.FAILED ? order.status : OrderStatus.FAILED,
-        paymentStatus,
-        paymentAmount,
-        expectedAmount,
-        amountMismatch: true,
-        postCommitEffect: order.status === OrderStatus.FAILED
-          ? null
-          : buildOrderStatusPostCommitEffect(order, OrderStatus.FAILED),
-      };
-    }
-
-    const isDuplicate = order.payment_id === paymentData.payment_id
-      && order.payment_status === paymentData.payment_status
-      && order.payment_status_detail === paymentData.payment_status_detail
-      && (!nextStatus || order.status === nextStatus);
-
-    if (isDuplicate) {
-      return {
-        order,
-        duplicate: true,
-        appliedStatus: order.status,
-        paymentStatus,
-        postCommitEffect: null,
-      };
-    }
-
-    if (nextStatus && order.status !== nextStatus) {
-      try {
-        const updatedOrder = await updateOrderStatusWithEffects(tx, order, nextStatus, paymentData);
-        return {
-          order: updatedOrder,
-          duplicate: false,
-          appliedStatus: nextStatus,
-          paymentStatus,
-          paymentAmount,
-          expectedAmount,
-          postCommitEffect: buildOrderStatusPostCommitEffect(order, nextStatus),
-        };
-      } catch (transitionError) {
-        if (paymentStatus === "approved" && transitionError?.code === "INSUFFICIENT_STOCK") {
-          const stockConflictData = {
-            ...paymentData,
-            payment_status_detail: "stock_conflict_after_approval",
-          };
-          const conflictOrder = order.status === OrderStatus.FAILED
-            ? await tx.order.update({
-              where: { id: order.id },
-              data: stockConflictData,
-              include: { items: true, user: true, address: true },
-            })
-            : await updateOrderStatusWithEffects(tx, order, OrderStatus.FAILED, stockConflictData);
-
-          return {
-            order: conflictOrder,
-            duplicate: false,
-            appliedStatus: order.status === OrderStatus.FAILED ? order.status : OrderStatus.FAILED,
-            paymentStatus,
-            paymentAmount,
-            expectedAmount,
-            stockConflict: true,
-            unavailableCardIds: transitionError.unavailableCardIds || [],
-            postCommitEffect: order.status === OrderStatus.FAILED
-              ? null
-              : buildOrderStatusPostCommitEffect(order, OrderStatus.FAILED),
-          };
-        }
-
-        throw transitionError;
-      }
-    }
-
-    const updatedOrder = await tx.order.update({
-      where: { id: order.id },
-      data: paymentData,
-      include: { items: true, user: true, address: true },
-    });
-
-    return {
-      order: updatedOrder,
-      duplicate: false,
-      appliedStatus: order.status,
-      paymentStatus,
-      paymentAmount,
-      expectedAmount,
-      postCommitEffect: null,
-    };
-  });
-
-  if (!outcome?.order) {
-    logEvent("MERCADOPAGO_WEBHOOK_IGNORED", "Webhook for unknown order", {
-      paymentId,
-      orderId,
-      paymentStatus,
-      providerRequestId: providerRequestId || null,
-    });
-
-    return {
-      received: true,
-      ignored: true,
-      reason: "order_not_found",
-      order: null,
-      outcome: null,
-    };
-  }
-
-  await applyOrderStatusPostCommitEffect(outcome.postCommitEffect);
-
-  let shipmentResult = null;
-  if (outcome.paymentStatus === "approved" && !outcome.ignored && outcome.order.status === OrderStatus.PAID) {
-    shipmentResult = await createOrderShipmentWithEffects(outcome.order, {
-      requestId: req.requestContext?.requestId || null,
-      source: "mercadopago_webhook",
-    });
-
-    if (shipmentResult?.order) {
-      outcome.order = shipmentResult.order;
-    }
-  }
-
-  const activityAction = outcome.duplicate
-    ? "CHECKOUT_WEBHOOK_DUPLICATE"
-    : outcome.ignored
-      ? "CHECKOUT_WEBHOOK_IGNORED"
-      : outcome.amountMismatch
-        ? "CHECKOUT_PAYMENT_AMOUNT_MISMATCH"
-        : outcome.stockConflict
-          ? "CHECKOUT_PAYMENT_STOCK_CONFLICT"
-          : outcome.paymentStatus === "approved" && outcome.appliedStatus === OrderStatus.PAID
-            ? "CHECKOUT_PAYMENT_APPROVED"
-            : outcome.appliedStatus === OrderStatus.EXPIRED
-              ? "CHECKOUT_PAYMENT_EXPIRED"
-              : outcome.paymentStatus === "pending" || outcome.paymentStatus === "in_process"
-                ? "CHECKOUT_PAYMENT_PENDING"
-                : "CHECKOUT_PAYMENT_FAILED";
-
-  try {
-    await recordActivity(outcome.order.userId ?? null, activityAction, req, {
-      orderId: outcome.order.id,
-      paymentId: outcome.order.payment_id,
-      paymentStatus: outcome.paymentStatus,
-      paymentStatusDetail: outcome.order.payment_status_detail || null,
-      appliedStatus: outcome.appliedStatus,
-      duplicate: outcome.duplicate,
-      ignored: Boolean(outcome.ignored),
-      ignoreReason: outcome.ignoreReason || null,
-      paymentAmount: outcome.paymentAmount || null,
-      expectedAmount: outcome.expectedAmount || null,
-      amountMismatch: Boolean(outcome.amountMismatch),
-      stockConflict: Boolean(outcome.stockConflict),
-      unavailableCardIds: outcome.unavailableCardIds || [],
-      providerRequestId: providerRequestId || null,
-      shipmentCreated: Boolean(shipmentResult && !shipmentResult.skipped),
-      shipmentSkippedReason: shipmentResult?.reason || null,
-    });
-  } catch (activityError) {
-    logEvent("SERVER_ERROR", "Failed to record Mercado Pago webhook activity", {
-      requestId: req.requestContext?.requestId || null,
-      orderId: outcome.order.id,
-      error: activityError,
-    });
-  }
-
-  logEvent("MERCADOPAGO_WEBHOOK_PROCESSED", "Mercado Pago webhook processed", {
-    requestId: req.requestContext?.requestId || null,
-    providerRequestId: providerRequestId || null,
-    orderId: outcome.order.id,
-    paymentId: outcome.order.payment_id,
-    paymentStatus: outcome.paymentStatus,
-    appliedStatus: outcome.appliedStatus,
-    duplicate: outcome.duplicate,
-    ignored: Boolean(outcome.ignored),
-    ignoreReason: outcome.ignoreReason || null,
-    paymentAmount: outcome.paymentAmount || null,
-    expectedAmount: outcome.expectedAmount || null,
-    amountMismatch: Boolean(outcome.amountMismatch),
-    stockConflict: Boolean(outcome.stockConflict),
-    shipmentCreated: Boolean(shipmentResult && !shipmentResult.skipped),
-    shipmentSkippedReason: shipmentResult?.reason || null,
-  });
-
-  invalidatePublicCatalogCaches();
-
+function buildPaymentReconciliationRequestContext(req) {
   return {
-    received: true,
-    ignored: false,
-    reason: null,
-    order: outcome.order,
-    outcome,
+    requestId: req?.requestContext?.requestId || null,
+    ipAddress: extractIp(req),
+    userAgent: req?.headers?.["user-agent"] || null,
   };
 }
 
-function buildBackgroundJobRequest({ requestId = null, source = "bullmq", headers = {} } = {}) {
-  return {
-    method: "JOB",
-    path: `/jobs/${source}`,
-    body: null,
-    headers: {
-      "user-agent": headers?.["user-agent"] || `bullmq/${source}`,
-    },
-    requestContext: {
-      requestId: requestId || `job_${randomUUID()}`,
-      signal: null,
-    },
-  };
+async function reconcileMercadoPagoPayment(req, { payment, paymentIdOverride = null, providerRequestId = null } = {}) {
+  return reconcileMercadoPagoPaymentShared({
+    requestContext: buildPaymentReconciliationRequestContext(req),
+    payment,
+    paymentIdOverride,
+    providerRequestId,
+  });
 }
 
 async function scheduleMercadoPagoReconciliation(req, { payment, paymentIdOverride = null, providerRequestId = null, source = "payments_create" } = {}) {
@@ -4520,17 +4158,7 @@ async function scheduleMercadoPagoReconciliation(req, { payment, paymentIdOverri
 }
 
 export async function processQueuedMercadoPagoReconciliation(data = {}) {
-  const req = buildBackgroundJobRequest({
-    requestId: data?.requestId || null,
-    source: data?.source || "bullmq",
-    headers: data?.headers || {},
-  });
-
-  return reconcileMercadoPagoPayment(req, {
-    payment: data?.payment,
-    paymentIdOverride: data?.paymentIdOverride || null,
-    providerRequestId: data?.providerRequestId || null,
-  });
+  return processQueuedMercadoPagoReconciliationShared(data);
 }
 
 async function createCheckoutPreferenceForOrder(req, { orderId, userId }) {

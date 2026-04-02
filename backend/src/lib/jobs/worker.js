@@ -18,7 +18,7 @@ let worker = null;
 /** @type {Record<string, (data: unknown) => Promise<unknown>>} */
 const JOB_HANDLERS = {
   "expire-pending-orders": async (data) => {
-    // Dynamic import to avoid circular dependency with server.js
+    // Dynamic import to keep job handlers lazy-loaded
     const { expirePendingOrdersJob } = await import("./order-jobs.js");
     return expirePendingOrdersJob(data);
   },
