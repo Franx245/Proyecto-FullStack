@@ -8,7 +8,7 @@ import { motion } from "framer-motion";
 import { ArrowLeft, CheckCircle2, Clock3, Loader2, ShieldCheck, TriangleAlert, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
-import { createDirectPayment, createStoreMutationId, fetchMyOrders, fetchOrdersByIds } from "@/api/store";
+import { createDirectPayment, createStoreMutationId, fetchMyOrder } from "@/api/store";
 import { ENV } from "@/config/env";
 import { useAuth } from "@/lib/auth";
 import {
@@ -16,7 +16,6 @@ import {
   createMercadoPagoBrowserClient,
   createMercadoPagoBrickDarkStyle,
 } from "@/lib/mercadopago";
-import { getTrackedOrderIds } from "@/lib/orderTracking";
 import { orderStatusLabel } from "@/lib/shipping";
 import { getUsableStoredUserSession } from "@/lib/userSession";
 
@@ -136,49 +135,18 @@ export default function OrderPaymentPage({ orderId }) {
   const authRedirectHref = isValidOrderId ? buildAuthRedirectPath(`/checkout/pay/${numericOrderId}`) : buildAuthRedirectPath("/orders");
   const isRestoringSession = !isBootstrapping && !isAuthenticated && hasPersistedSession && isValidOrderId;
   const shouldRedirectToAuth = !isBootstrapping && !isAuthenticated && !hasPersistedSession && isValidOrderId;
-  const trackedOrderIds = useMemo(() => {
-    if (!isValidOrderId) {
-      return [];
-    }
-
-    const rawTrackedIds = /** @type {Array<string | number>} */ (getTrackedOrderIds());
-    const normalizedTrackedIds = rawTrackedIds
-      .map((id) => Number(id))
-      .filter((id) => Number.isInteger(id) && id > 0);
-
-    return normalizedTrackedIds.includes(numericOrderId) ? [numericOrderId] : [];
-  }, [isValidOrderId, numericOrderId]);
-
-  const trackedOrdersQuery = useQuery({
-    queryKey: ["public-orders", trackedOrderIds],
-    queryFn: () => fetchOrdersByIds(trackedOrderIds),
-    enabled: isAuthenticated && trackedOrderIds.length > 0,
+  const orderQuery = useQuery({
+    queryKey: ["my-order", numericOrderId],
+    queryFn: () => fetchMyOrder(numericOrderId),
+    enabled: !isBootstrapping && isAuthenticated && isValidOrderId,
     staleTime: 1000 * 30,
-  });
-
-  const ordersQuery = useQuery({
-    queryKey: ["my-orders"],
-    queryFn: () => fetchMyOrders({ page: 1, limit: 100 }),
-    enabled: !isBootstrapping && isAuthenticated,
   });
 
   const order = useMemo(
     /** @returns {OrderLike | null} */
-    () => {
-    const merged = new Map();
-    const trackedOrders = /** @type {OrderLike[]} */ (Array.isArray(trackedOrdersQuery.data?.orders) ? trackedOrdersQuery.data.orders : []);
-    const myOrders = /** @type {OrderLike[]} */ (Array.isArray(ordersQuery.data?.orders) ? ordersQuery.data.orders : []);
-
-    for (const entry of trackedOrders) {
-      merged.set(String(entry.id), entry);
-    }
-
-    for (const entry of myOrders) {
-      merged.set(String(entry.id), entry);
-    }
-
-    return merged.get(String(numericOrderId)) || null;
-  }, [numericOrderId, ordersQuery.data?.orders, trackedOrdersQuery.data?.orders]);
+    () => /** @type {OrderLike | null} */ (orderQuery.data?.order || null),
+    [orderQuery.data?.order]
+  );
 
   const ownsOrder = useMemo(() => {
     if (!order || !user) {
@@ -211,7 +179,7 @@ export default function OrderPaymentPage({ orderId }) {
     setLastAttempt(payload?.payment || null);
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["my-orders"] }),
-      queryClient.invalidateQueries({ queryKey: ["public-orders"] }),
+      queryClient.invalidateQueries({ queryKey: ["my-order", Number(payload?.order?.id || orderId)] }),
     ]);
 
     const paymentStatus = String(payload?.payment?.status || "").toLowerCase();
@@ -267,13 +235,13 @@ export default function OrderPaymentPage({ orderId }) {
     }
 
     const intervalId = window.setInterval(() => {
-      void ordersQuery.refetch();
+      void orderQuery.refetch();
     }, 4000);
 
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [ordersQuery, shouldPollOrder]);
+  }, [orderQuery, shouldPollOrder]);
 
   useEffect(() => {
     if (!isAuthenticated || !currentOrderId || !canPay || !ENV.MP_PUBLIC_KEY) {
@@ -470,7 +438,7 @@ export default function OrderPaymentPage({ orderId }) {
             <div className="group rounded-[32px] border border-violet-500/20 bg-card/60 backdrop-blur-xl p-6 shadow-[0_24px_80px_rgba(0,0,0,0.24),0_0_40px_rgba(139,92,246,0.08)] transition-all duration-300 hover:border-violet-500/35 hover:shadow-[0_24px_80px_rgba(0,0,0,0.24),0_0_60px_rgba(139,92,246,0.12)]">
               <h2 className="text-lg font-black text-foreground">Resumen de la orden</h2>
 
-              {ordersQuery.isLoading || trackedOrdersQuery.isLoading ? (
+              {orderQuery.isLoading ? (
                 <div className="mt-5 flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Cargando orden...
@@ -478,17 +446,17 @@ export default function OrderPaymentPage({ orderId }) {
               ) : !order ? (
                 <div className="mt-5 space-y-3">
                   <div className="rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm text-amber-100">
-                    {ordersQuery.isFetching
+                    {orderQuery.isFetching
                       ? "Buscando tu orden…"
                       : "No encontramos la orden solicitada en tu historial. Si acabás de comprar, puede tardar unos segundos."}
                   </div>
-                  {!ordersQuery.isFetching ? (
+                  {!orderQuery.isFetching ? (
                     <button
                       type="button"
-                      onClick={() => { void ordersQuery.refetch(); void trackedOrdersQuery.refetch(); }}
+                      onClick={() => { void orderQuery.refetch(); }}
                       className="inline-flex items-center gap-2 rounded-xl border border-border px-4 py-2 text-sm font-medium transition hover:bg-secondary"
                     >
-                      <Loader2 className={`h-3.5 w-3.5 ${ordersQuery.isFetching ? "animate-spin" : ""}`} />
+                      <Loader2 className={`h-3.5 w-3.5 ${orderQuery.isFetching ? "animate-spin" : ""}`} />
                       Reintentar
                     </button>
                   ) : null}

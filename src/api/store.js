@@ -353,34 +353,57 @@ async function authRequest(path, { method = "GET", body, retryOnAuthError = true
 
   const normalizedMethod = String(method || "GET").toUpperCase();
   const hasJsonBody = body != null && normalizedMethod !== "GET" && normalizedMethod !== "HEAD";
+  const controller = new AbortController();
+  const timeoutId = scheduleTimeout(() => controller.abort("timeout"), ENV.API_TIMEOUT);
+  const t0 = performance.now();
 
-  const response = await fetch(buildApiUrl(path), {
-    method: normalizedMethod,
-    headers: {
-      ...(hasJsonBody ? { "Content-Type": "application/json" } : {}),
-      ...(session?.accessToken ? { Authorization: `Bearer ${session.accessToken}` } : {}),
-      ...(idempotencyKey ? { "X-Idempotency-Key": idempotencyKey } : {}),
-    },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  });
+  try {
+    const response = await fetch(buildApiUrl(path), {
+      method: normalizedMethod,
+      headers: {
+        ...(hasJsonBody ? { "Content-Type": "application/json" } : {}),
+        ...(session?.accessToken ? { Authorization: `Bearer ${session.accessToken}` } : {}),
+        ...(idempotencyKey ? { "X-Idempotency-Key": idempotencyKey } : {}),
+      },
+      signal: controller.signal,
+      ...(hasJsonBody ? { body: JSON.stringify(body) } : {}),
+    });
 
-  if (response.status === 401 && retryOnAuthError && session?.refreshToken) {
-    try {
-      await refreshUserAccessToken();
-      return authRequest(path, { method, body, retryOnAuthError: false, idempotencyKey });
-    } catch {
-      clearStoredUserSession();
-      throw createSessionExpiredError();
+    const durationMs = Math.round(performance.now() - t0);
+    if (durationMs > 2000) {
+      console.warn(`[store-api] slow auth request: ${normalizedMethod} ${path} (${durationMs}ms, status=${response.status})`);
     }
+
+    if (response.status === 401 && retryOnAuthError && session?.refreshToken) {
+      try {
+        await refreshUserAccessToken();
+        return authRequest(path, { method, body, retryOnAuthError: false, idempotencyKey });
+      } catch {
+        clearStoredUserSession();
+        throw createSessionExpiredError();
+      }
+    }
+
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw createRequestError(payload, "Request failed", { status: response.status });
+    }
+
+    return payload;
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw createStoreTimeoutError();
+    }
+
+    if (error instanceof TypeError) {
+      throw createStoreNetworkError();
+    }
+
+    throw error;
+  } finally {
+    clearScheduledTimeout(timeoutId);
   }
-
-  const payload = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw createRequestError(payload, "Request failed", { status: response.status });
-  }
-
-  return payload;
 }
 
 /**
@@ -529,6 +552,16 @@ export async function fetchOrdersByIds(ids) {
   }
 
   return authRequest(`/api/orders?ids=${ids.join(",")}`);
+}
+
+/**
+ * @param {string|number} orderId
+ */
+export async function fetchMyOrder(orderId) {
+  const payload = await authRequest(`/api/orders?ids=${encodeURIComponent(String(orderId))}`);
+  return {
+    order: Array.isArray(payload?.orders) ? (payload.orders[0] ?? null) : null,
+  };
 }
 
 /**
