@@ -3,7 +3,7 @@ import { processQueuedMercadoPagoReconciliation as processQueuedMercadoPagoRecon
 
 export async function processQueuedMercadoPagoPayment(data = {}) {
   const orderId = Number(data?.payment?.metadata?.order_id || data?.payment?.external_reference || 0) || null;
-  const paymentId = String(data?.paymentIdOverride || data?.payment?.id || "").trim() || null;
+  const paymentId = String(data?.paymentId || data?.paymentIdOverride || data?.payment?.id || "").trim() || null;
   const source = data?.source || "bullmq";
   const requestId = data?.requestId || null;
 
@@ -15,6 +15,13 @@ export async function processQueuedMercadoPagoPayment(data = {}) {
   });
 
   logEvent("JOB_PAYMENT_RECONCILIATION_START", "Processing queued Mercado Pago reconciliation", {
+    orderId,
+    paymentId,
+    source,
+    requestId,
+  });
+
+  logger.info("PAYMENT_ID_IN_HANDLER", {
     orderId,
     paymentId,
     source,

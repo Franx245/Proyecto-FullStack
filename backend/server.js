@@ -4118,7 +4118,9 @@ async function scheduleMercadoPagoReconciliation(req, { payment, paymentIdOverri
 
   if (isRedisTcpConfigured()) {
     const job = await enqueueJob("reconcile-mercadopago-payment", {
+      orderId: Number(payment?.metadata?.order_id || payment?.external_reference || 0) || null,
       payment,
+      paymentId,
       paymentIdOverride,
       providerRequestId,
       requestId,
@@ -6682,6 +6684,12 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
       payment,
     });
 
+    logger.info("PAYMENT_ID_AT_API", {
+      requestId: req.requestContext?.requestId || null,
+      orderId: prepared.order.id,
+      paymentId: String(payment?.id || "").trim() || null,
+    });
+
     const paymentStatus = normalizeMercadoPagoPaymentStatus(payment?.status);
     const paymentStatusDetail = normalizeMercadoPagoPaymentStatusDetail(payment?.status_detail);
     let updatedOrder = await persistDirectPaymentAttempt(req, {
@@ -6748,6 +6756,7 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
       logger.info("ENQUEUE_PAYMENT_JOB", {
         requestId: req.requestContext?.requestId || null,
         orderId: updatedOrder.id,
+        paymentId: String(payment?.id || "").trim() || null,
         queued: reconciliationJob.queued,
         jobId: reconciliationJob.jobId || null,
       });

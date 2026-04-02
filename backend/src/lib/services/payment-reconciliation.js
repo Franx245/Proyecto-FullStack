@@ -1107,7 +1107,7 @@ export async function processQueuedMercadoPagoReconciliation(data = {}) {
   return reconcileMercadoPagoPayment({
     requestContext: buildQueuedRequestContext(data),
     payment: data?.payment,
-    paymentIdOverride: data?.paymentIdOverride || null,
+    paymentIdOverride: data?.paymentId || data?.paymentIdOverride || null,
     providerRequestId: data?.providerRequestId || null,
   });
 }

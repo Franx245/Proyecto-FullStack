@@ -6,7 +6,7 @@
  */
 import { Worker } from "bullmq";
 import { createBullMQConnection, isRedisTcpConfigured } from "../redis-tcp.js";
-import { logEvent } from "../logger.js";
+import { logEvent, logger } from "../logger.js";
 import { getQueueName } from "./queue.js";
 import { handleRecomputePrices } from "./recompute-prices.js";
 import { handleComputeCardRankings } from "./compute-card-rankings.js";
@@ -85,6 +85,14 @@ export function startWorker() {
       name: job.name,
       id: job.id,
       attempt: job.attemptsMade + 1,
+      data: job.data,
+    });
+
+    logger.info("JOB_DATA", {
+      jobId: job.id,
+      jobName: job.name,
+      orderId: Number(job.data?.orderId || job.data?.payment?.metadata?.order_id || job.data?.payment?.external_reference || 0) || null,
+      paymentId: String(job.data?.paymentId || job.data?.paymentIdOverride || job.data?.payment?.id || "").trim() || null,
       data: job.data,
     });
   });
