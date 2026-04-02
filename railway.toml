@@ -7,7 +7,7 @@ buildCmd = "npx prisma generate"
 
 [deploy]
 startCommand = "node ${START_FILE}"
-healthcheckPath = "${HEALTHCHECK_PATH}"
+healthcheckPath = "/api/health"
 healthcheckTimeout = 30
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
