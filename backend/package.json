@@ -1,0 +1,36 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "worker": "node worker.js",
+    "dev": "node --watch server.js",
+    "dev:worker": "node --watch worker.js",
+    "postinstall": "prisma generate --schema=prisma/schema.prisma",
+    "prisma:generate": "prisma generate --schema=prisma/schema.prisma",
+    "prisma:push": "prisma db push --schema=prisma/schema.prisma",
+    "prisma:deploy": "prisma migrate deploy --schema=prisma/schema.prisma",
+    "prisma:seed": "node prisma/seed.js"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.6.0",
+    "@upstash/redis": "^1.37.0",
+    "bcryptjs": "^2.4.3",
+    "bullmq": "^5.71.1",
+    "compression": "^1.8.1",
+    "cors": "^2.8.5",
+    "exceljs": "^4.4.0",
+    "express": "^5.1.0",
+    "ioredis": "^5.10.1",
+    "jsonwebtoken": "^9.0.2",
+    "mercadopago": "^2.12.0",
+    "prisma": "^6.6.0",
+    "zod": "^4.3.6"
+  }
+}

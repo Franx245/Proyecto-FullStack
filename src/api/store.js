@@ -242,6 +242,8 @@ const clearScheduledTimeout = typeof globalThis.clearTimeout === "function"
   ? globalThis.clearTimeout.bind(globalThis)
   : clearTimeout;
 
+const CHECKOUT_API_TIMEOUT_MS = Math.max(ENV.API_TIMEOUT, 70000);
+
 export function createStoreMutationId(prefix = "store") {
   const randomPart = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
     ? crypto.randomUUID()
@@ -255,8 +257,9 @@ export function createStoreMutationId(prefix = "store") {
  * @param {RequestInit} [options]
  */
 async function request(path, options = {}) {
+  const timeoutMs = Number(options.timeoutMs || ENV.API_TIMEOUT) || ENV.API_TIMEOUT;
   const controller = new AbortController();
-  const timeoutId = scheduleTimeout(() => controller.abort("timeout"), ENV.API_TIMEOUT);
+  const timeoutId = scheduleTimeout(() => controller.abort("timeout"), timeoutMs);
   const method = String(options.method || "GET").toUpperCase();
   const hasJsonBody = options.body != null && method !== "GET" && method !== "HEAD";
   const t0 = performance.now();
@@ -333,7 +336,7 @@ async function refreshUserAccessToken() {
  * @param {string} path
  * @param {{ method?: string, body?: any, retryOnAuthError?: boolean, idempotencyKey?: string | null }} [options]
  */
-async function authRequest(path, { method = "GET", body, retryOnAuthError = true, idempotencyKey = null } = {}) {
+async function authRequest(path, { method = "GET", body, retryOnAuthError = true, idempotencyKey = null, timeoutMs = ENV.API_TIMEOUT } = {}) {
   const session = getUsableStoredUserSession();
 
   if (!session?.accessToken) {
@@ -344,7 +347,7 @@ async function authRequest(path, { method = "GET", body, retryOnAuthError = true
   if (retryOnAuthError && session?.accessToken && isJwtExpired(session.accessToken) && session?.refreshToken) {
     try {
       await refreshUserAccessToken();
-      return authRequest(path, { method, body, retryOnAuthError: false, idempotencyKey });
+      return authRequest(path, { method, body, retryOnAuthError: false, idempotencyKey, timeoutMs });
     } catch {
       clearStoredUserSession();
       throw createSessionExpiredError();
@@ -354,7 +357,8 @@ async function authRequest(path, { method = "GET", body, retryOnAuthError = true
   const normalizedMethod = String(method || "GET").toUpperCase();
   const hasJsonBody = body != null && normalizedMethod !== "GET" && normalizedMethod !== "HEAD";
   const controller = new AbortController();
-  const timeoutId = scheduleTimeout(() => controller.abort("timeout"), ENV.API_TIMEOUT);
+  const effectiveTimeoutMs = Number(timeoutMs || ENV.API_TIMEOUT) || ENV.API_TIMEOUT;
+  const timeoutId = scheduleTimeout(() => controller.abort("timeout"), effectiveTimeoutMs);
   const t0 = performance.now();
 
   try {
@@ -377,7 +381,7 @@ async function authRequest(path, { method = "GET", body, retryOnAuthError = true
     if (response.status === 401 && retryOnAuthError && session?.refreshToken) {
       try {
         await refreshUserAccessToken();
-        return authRequest(path, { method, body, retryOnAuthError: false, idempotencyKey });
+        return authRequest(path, { method, body, retryOnAuthError: false, idempotencyKey, timeoutMs: effectiveTimeoutMs });
       } catch {
         clearStoredUserSession();
         throw createSessionExpiredError();
@@ -505,6 +509,7 @@ export async function checkoutCart(payload) {
     method: "POST",
     body: payload,
     idempotencyKey,
+    timeoutMs: CHECKOUT_API_TIMEOUT_MS,
   });
 }
 
@@ -520,6 +525,7 @@ export async function createCheckoutPreference(orderId, options = {}) {
       mutation_id: options.mutationId || null,
     },
     idempotencyKey: options.mutationId || null,
+    timeoutMs: CHECKOUT_API_TIMEOUT_MS,
   });
 }
 
@@ -540,6 +546,7 @@ export async function createDirectPayment(payload, options = {}) {
       mutation_id: mutationId,
     },
     idempotencyKey: mutationId,
+    timeoutMs: CHECKOUT_API_TIMEOUT_MS,
   });
 }
 
@@ -551,14 +558,18 @@ export async function fetchOrdersByIds(ids) {
     return { orders: [] };
   }
 
-  return authRequest(`/api/orders?ids=${ids.join(",")}`);
+  return authRequest(`/api/orders?ids=${ids.join(",")}`, {
+    timeoutMs: CHECKOUT_API_TIMEOUT_MS,
+  });
 }
 
 /**
  * @param {string|number} orderId
  */
 export async function fetchMyOrder(orderId) {
-  const payload = await authRequest(`/api/orders?ids=${encodeURIComponent(String(orderId))}`);
+  const payload = await authRequest(`/api/orders?ids=${encodeURIComponent(String(orderId))}`, {
+    timeoutMs: CHECKOUT_API_TIMEOUT_MS,
+  });
   return {
     order: Array.isArray(payload?.orders) ? (payload.orders[0] ?? null) : null,
   };

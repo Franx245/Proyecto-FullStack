@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { CheckCircle, ClipboardList, Clock3, Copy, Loader2, MapPin, MessageCircle, Wallet } from "lucide-react";
+import { CheckCircle, ClipboardList, Clock3, Copy, Loader2, MapPin, MessageCircle, Printer, Wallet } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
@@ -448,6 +448,16 @@ export default function OrdersPage() {
                       <button onClick={() => handlePayOrder(order)} disabled={payingOrderId === String(order.id)} className="flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-2 text-sm font-medium text-primary transition hover:bg-primary/20 disabled:opacity-50">
                         {payingOrderId === String(order.id) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wallet className="h-3.5 w-3.5" />}
                         {order.status === "pending_payment" ? "Continuar pago" : "Reintentar pago"}
+                      </button>
+                    ) : null}
+
+                    {order.shipping_label_url ? (
+                      <button
+                        onClick={() => window.open(order.shipping_label_url, "_blank", "noopener,noreferrer")}
+                        className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/10 px-3 py-2 text-sm font-medium text-primary transition hover:bg-primary/20"
+                      >
+                        <Printer className="h-3.5 w-3.5" />
+                        Descargar etiqueta
                       </button>
                     ) : null}
 

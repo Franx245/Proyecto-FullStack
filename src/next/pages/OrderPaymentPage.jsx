@@ -8,13 +8,15 @@ import { motion } from "framer-motion";
 import { ArrowLeft, CheckCircle2, Clock3, Loader2, ShieldCheck, TriangleAlert, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
-import { createDirectPayment, createStoreMutationId, fetchMyOrder } from "@/api/store";
+import { createCheckoutPreference, createDirectPayment, createStoreMutationId, fetchMyOrder } from "@/api/store";
 import { ENV } from "@/config/env";
 import { useAuth } from "@/lib/auth";
 import {
   createMercadoPagoBrickBuilder,
   createMercadoPagoBrowserClient,
   createMercadoPagoBrickDarkStyle,
+  openMercadoPagoCheckout,
+  resolveMercadoPagoPayerEmail,
 } from "@/lib/mercadopago";
 import { orderStatusLabel } from "@/lib/shipping";
 import { getUsableStoredUserSession } from "@/lib/userSession";
@@ -164,6 +166,11 @@ export default function OrderPaymentPage({ orderId }) {
   }, [order?.total, order?.total_ars]);
   const orderCustomerEmail = String(order?.customer_email || user?.email || "");
   const currentOrderId = Number(order?.id || 0);
+  const brickPayerEmail = resolveMercadoPagoPayerEmail({
+    publicKey: ENV.MP_PUBLIC_KEY,
+    preferredEmail: orderCustomerEmail,
+    orderId: currentOrderId,
+  });
   const brickContainerId = currentOrderId ? `cardPaymentBrick_container_${currentOrderId}` : "cardPaymentBrick_container";
 
   const canPay = ownsOrder && canRetryDirectPayment(order);
@@ -213,6 +220,34 @@ export default function OrderPaymentPage({ orderId }) {
     onError: handlePaymentError,
   }));
 
+  const checkoutPreferenceMutation = useMutation({
+    mutationFn: () => createCheckoutPreference(numericOrderId, {
+      mutationId: createStoreMutationId(`preference-${numericOrderId}`),
+    }),
+    onSuccess: (payload) => {
+      const initPoint = String(payload?.init_point || "").trim();
+      if (!initPoint) {
+        toast.error("No se pudo abrir Checkout Pro", {
+          description: "Mercado Pago no devolvió un checkout válido.",
+        });
+        return;
+      }
+
+      void queryClient.invalidateQueries({ queryKey: ["my-order", numericOrderId] });
+      const redirectMode = openMercadoPagoCheckout(initPoint);
+      toast.success("Checkout Pro listo", {
+        description: redirectMode === "popup"
+          ? "Mercado Pago se abrió en una nueva ventana."
+          : "Te redirigimos a Mercado Pago para completar el pago.",
+      });
+    },
+    onError: (error) => {
+      toast.error("No se pudo abrir Checkout Pro", {
+        description: error instanceof Error ? error.message : "Mercado Pago no devolvió un checkout válido.",
+      });
+    },
+  });
+
   useEffect(() => {
     paymentMutationRef.current = paymentMutation;
   }, [paymentMutation]);
@@ -250,6 +285,7 @@ export default function OrderPaymentPage({ orderId }) {
     }
 
     let cancelled = false;
+    let brickReady = false;
     /** @type {BrickControllerLike | null} */
     let localBrickController = null;
     setSdkError("");
@@ -320,7 +356,7 @@ export default function OrderPaymentPage({ orderId }) {
           initialization: {
             amount: Number(amount),
             payer: {
-              email: orderCustomerEmail,
+              email: brickPayerEmail,
             },
           },
           customization: {
@@ -339,6 +375,8 @@ export default function OrderPaymentPage({ orderId }) {
                 return;
               }
 
+              brickReady = true;
+              setSdkError("");
               setSdkReady(true);
             },
             onSubmit: handleBrickSubmit,
@@ -356,7 +394,7 @@ export default function OrderPaymentPage({ orderId }) {
 
     // Safety timeout: if the Brick never fires onReady/onError after 15s, show error
     const sdkTimeout = setTimeout(() => {
-      if (!cancelled) {
+      if (!cancelled && !brickReady) {
         setSdkReady((prev) => {
           if (!prev) {
             setSdkError("El formulario de pago tardó demasiado en cargar. Recargá la página para reintentar.");
@@ -364,7 +402,7 @@ export default function OrderPaymentPage({ orderId }) {
           return prev;
         });
       }
-    }, 15_000);
+    }, 30_000);
 
     return () => {
       cancelled = true;
@@ -377,7 +415,7 @@ export default function OrderPaymentPage({ orderId }) {
         // noop
       }
     };
-  }, [amount, brickContainerId, canPay, currentOrderId, isAuthenticated, orderCustomerEmail, ownsOrder]);
+  }, [amount, brickContainerId, brickPayerEmail, canPay, currentOrderId, isAuthenticated, ownsOrder]);
 
   if (isBootstrapping || isRestoringSession) {
     return (
@@ -526,6 +564,31 @@ export default function OrderPaymentPage({ orderId }) {
               ) : null}
 
               {sdkError ? <div className="mt-6 rounded-2xl border border-rose-400/25 bg-rose-400/10 p-4 text-sm text-rose-200">{sdkError}</div> : null}
+
+              {order && canPay ? (
+                <div className={`mt-6 rounded-2xl border p-4 ${sdkError || paymentMutation.isError ? "border-amber-400/25 bg-amber-400/10" : "border-violet-500/15 bg-violet-500/5"}`}>
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="font-semibold text-foreground">Fallback por Checkout Pro</p>
+                      <p className={`mt-1 text-sm ${sdkError || paymentMutation.isError ? "text-amber-100/90" : "text-muted-foreground"}`}>
+                        {sdkError || paymentMutation.isError
+                          ? "El cobro directo no quedó operativo en esta sesión. Podés continuar el pago desde la página hospedada de Mercado Pago."
+                          : "Si preferís pagar por redirección o el Brick no termina de cargar, podés continuar desde la página hospedada de Mercado Pago."}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => checkoutPreferenceMutation.mutate()}
+                      disabled={checkoutPreferenceMutation.isPending}
+                      className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-emerald-400 px-5 text-sm font-bold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {checkoutPreferenceMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                      Abrir Checkout Pro
+                    </button>
+                  </div>
+                </div>
+              ) : null}
 
               {order && !canPay ? (
                 <div className="mt-6 rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm text-amber-100">

@@ -4,6 +4,7 @@
  * Carriers: Correo Argentino, Andreani
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { logEvent } from "./logger.js";
 
 const ENVIA_BASE_URL = process.env.ENVIA_BASE_URL || "https://api-test.envia.com";
 const ENVIA_API_KEY = process.env.ENVIA_API_KEY || "";
@@ -177,7 +178,11 @@ async function enviaFetch(path, options = {}) {
     } catch (err) {
       lastError = err;
       if (attempt < ENVIA_MAX_RETRIES && (err.name === "AbortError" || /** @type {*} */ (err).statusCode >= 500)) {
-        console.warn(`ENVIA_RETRY attempt=${attempt} path=${path} error=${err.message}`);
+        logEvent("ENVIACOM_RETRY", "Retrying Envia request", {
+          attempt,
+          path,
+          error: err.message,
+        });
         continue;
       }
       throw err;
@@ -310,7 +315,12 @@ export async function getShippingRates(destination, options = {}) {
           })
           .filter(Boolean);
       } catch (err) {
-        console.warn(`Envia rate failed for ${carrier}:`, err.message);
+        logEvent("ENVIACOM_ERROR", "Envia rate failed for carrier", {
+          carrier,
+          error: err.message,
+          status: err?.statusCode || null,
+          body: err?.enviaBody || null,
+        });
         return [];
       }
     });
@@ -323,7 +333,11 @@ export async function getShippingRates(destination, options = {}) {
 
     return allRates.sort((a, b) => a.price - b.price);
   } catch (error) {
-    console.warn("Envia rate quote failed", error.message);
+    logEvent("ENVIACOM_ERROR", "Envia rate quote failed", {
+      error: error.message,
+      status: error?.statusCode || null,
+      body: error?.enviaBody || null,
+    });
     throw error;
   }
 }
@@ -390,11 +404,15 @@ export async function createShipment({ order, carrier, service }) {
   });
 
   const shipment = Array.isArray(body?.data) ? body.data[0] : body?.data;
+  const responseCarrier = normalizeEnviaCarrier(shipment?.carrier || carrier);
 
   return {
     shipmentId: String(shipment?.shipmentId || shipment?.shipment_id || shipment?.id || shipment?.carrier_tracking_number || ""),
     trackingNumber: String(shipment?.trackingNumber || shipment?.tracking || shipment?.carrier_tracking_number || ""),
-    label: shipment?.label || null,
+    carrier: responseCarrier || carrier || null,
+    labelUrl: shipment?.label_url || shipment?.label || null,
+    label: shipment?.label_url || shipment?.label || null,
+    status: String(shipment?.status || shipment?.shipment_status || "created").trim() || "created",
   };
 }
 
@@ -429,7 +447,13 @@ export async function getTracking(trackingNumber, carrier) {
       events,
     };
   } catch (error) {
-    console.warn("Envia tracking lookup failed", error.message);
+    logEvent("ENVIACOM_ERROR", "Envia tracking lookup failed", {
+      trackingNumber,
+      carrier,
+      error: error.message,
+      status: error?.statusCode || null,
+      body: error?.enviaBody || null,
+    });
     return { status: "unknown", events: [] };
   }
 }

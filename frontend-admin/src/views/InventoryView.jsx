@@ -726,6 +726,7 @@ export default memo(function InventoryView({
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [selectionMode, setSelectionMode] = useState("manual");
   const [bulkDraft, setBulkDraft] = useState({ price: "", stock: "", visibility: "visible" });
+  const [bulkError, setBulkError] = useState("");
   const [activeCardId, setActiveCardId] = useState(null);
   const [addInventoryState, setAddInventoryState] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
@@ -769,6 +770,10 @@ export default memo(function InventoryView({
     setSelectedIds(new Set());
     setActiveCardId(null);
   }, [filters.search, filters.rarity, filters.cardType, filters.stockStatus, filters.visibility, mode]);
+
+  useEffect(() => {
+    setBulkError((current) => (current ? "" : current));
+  }, [bulkDraft.price, bulkDraft.stock, bulkDraft.visibility]);
 
   useEffect(() => {
     if (selectionMode !== "all-filtered") {
@@ -885,12 +890,24 @@ export default memo(function InventoryView({
     const selection = buildSelectionPayload();
 
     if (kind === "price" && bulkDraft.price !== "") {
-      await onBulkUpdate(selection, { price: numberField(bulkDraft.price, 0) });
+      const nextPrice = parseLocalizedPrice(bulkDraft.price);
+      if (nextPrice === null) {
+        setBulkError("Precio inválido");
+        return;
+      }
+
+      await onBulkUpdate(selection, { price: nextPrice });
       return;
     }
 
     if (kind === "stock" && bulkDraft.stock !== "") {
-      await onBulkUpdate(selection, { stock: numberField(bulkDraft.stock, 0) });
+      const nextStock = parseNonNegativeInteger(bulkDraft.stock);
+      if (nextStock === null) {
+        setBulkError("Stock inválido");
+        return;
+      }
+
+      await onBulkUpdate(selection, { stock: nextStock });
       return;
     }
 
@@ -1204,7 +1221,7 @@ export default memo(function InventoryView({
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <input type="number" step="0.01" value={bulkDraft.price} onChange={(event) => setBulkDraft((current) => ({ ...current, price: event.target.value }))} placeholder="Precio" className="h-11 w-28 rounded-2xl border border-white/10 bg-slate-950/70 px-3 text-sm text-white outline-none transition focus:border-amber-400" />
+              <input type="text" inputMode="decimal" value={bulkDraft.price} onChange={(event) => setBulkDraft((current) => ({ ...current, price: event.target.value }))} placeholder="Precio" className="h-11 w-28 rounded-2xl border border-white/10 bg-slate-950/70 px-3 text-sm text-white outline-none transition focus:border-amber-400" />
               <button type="button" disabled={isBulkSaving || bulkDraft.price === ""} onClick={() => handleBulkApply("price")} className="rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-sm font-semibold text-amber-200 transition duration-200 hover:bg-amber-400/15 disabled:opacity-60">
                 Actualizar precio
               </button>
@@ -1231,6 +1248,8 @@ export default memo(function InventoryView({
                 Eliminar
               </button>
             </div>
+
+            {bulkError ? <p className="text-sm text-rose-300">{bulkError}</p> : null}
           </div>
         </div>
       ) : null}

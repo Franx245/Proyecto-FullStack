@@ -2,6 +2,8 @@ const MERCADOPAGO_SANDBOX_HOSTS = new Set([
   "sandbox.mercadopago.com.ar",
 ]);
 const MERCADOPAGO_SDK_URL = "https://sdk.mercadopago.com/js/v2";
+const MERCADOPAGO_TEST_PUBLIC_KEY_PREFIX = "TEST-";
+const MERCADOPAGO_TEST_PAYER_EMAIL_DOMAIN = "example.com";
 
 export function createMercadoPagoBrickDarkStyle() {
   return {
@@ -47,6 +49,28 @@ export const MERCADOPAGO_BRICK_DARK_STYLE = createMercadoPagoBrickDarkStyle();
 let mercadoPagoSdkPromise = null;
 
 export const MERCADOPAGO_SANDBOX_HINT = "Si Mercado Pago entra en challenge o muestra ERR_TOO_MANY_REDIRECTS, probalo en una ventana privada de Chrome o Edge, con cookies habilitadas y sin bloqueos de Brave Shields.";
+
+/** @param {string | null | undefined} value */
+export function isMercadoPagoTestPublicKey(value) {
+  return String(value || "").trim().toUpperCase().startsWith(MERCADOPAGO_TEST_PUBLIC_KEY_PREFIX);
+}
+
+/**
+ * @param {{ publicKey?: string | null, preferredEmail?: string | null, orderId?: string | number | null }} options
+ */
+export function resolveMercadoPagoPayerEmail(options = {}) {
+  const normalizedEmail = String(options.preferredEmail || "").trim().toLowerCase();
+  if (!isMercadoPagoTestPublicKey(options.publicKey)) {
+    return normalizedEmail;
+  }
+
+  const normalizedOrderId = Number(options.orderId);
+  if (Number.isInteger(normalizedOrderId) && normalizedOrderId > 0) {
+    return `checkout+order-${normalizedOrderId}@${MERCADOPAGO_TEST_PAYER_EMAIL_DOMAIN}`;
+  }
+
+  return `checkout@${MERCADOPAGO_TEST_PAYER_EMAIL_DOMAIN}`;
+}
 
 /** @param {string} value */
 export function isMercadoPagoSandboxUrl(value) {

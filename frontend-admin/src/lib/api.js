@@ -524,6 +524,16 @@ export async function updateOrderShipping(orderId, payload) {
   });
 }
 
+export async function updateOrderShipmentStatus(orderId, payload) {
+  return request(`/api/admin/orders/${orderId}/shipment-status`, {
+    method: "PATCH",
+    body: payload,
+    requestLabel: "update-order-shipment-status",
+    idempotencyKey: payload?.mutation_id,
+    dedupeKey: `${orderId}:${payload?.status || payload?.shipment_status || "shipment-status"}`,
+  });
+}
+
 export async function exportOrdersWorkbook() {
   const { blob, fileName } = await requestBlob("/api/admin/export/orders");
   const objectUrl = window.URL.createObjectURL(blob);
@@ -570,13 +580,14 @@ export async function deleteOrder(orderId, payload = {}) {
   });
 }
 
-export async function clearOrders(payload = {}) {
+export async function clearOrders(payload = {}, options = {}) {
   return request("/api/admin/orders", {
     method: "DELETE",
     body: payload,
     requestLabel: "clear-orders",
     idempotencyKey: payload?.mutation_id,
     dedupeKey: `clear-orders:${payload?.scope || "test"}`,
+    timeoutMs: options.timeoutMs || 70000,
   });
 }
 

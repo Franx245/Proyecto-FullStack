@@ -5,7 +5,7 @@ import cors from "cors";
 import ExcelJS from "exceljs";
 import express from "express";
 import { MercadoPagoConfig, Payment, Preference } from "mercadopago";
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import prismaPkg from "@prisma/client";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -38,8 +38,9 @@ import { handleRecomputePrices } from "./src/lib/jobs/recompute-prices.js";
 import { handleComputeCardRankings } from "./src/lib/jobs/compute-card-rankings.js";
 import { handleWarmPublicCache } from "./src/lib/jobs/warm-public-cache.js";
 import { getRedisBackendName, probeRedisConnection } from "./src/lib/redis.js";
-import { getShippingRates, createShipment, getTracking, verifyEnviaWebhookSignature, normalizeEnviaWebhookStatus, normalizeEnviaCarrier } from "./src/lib/envia.js";
+import { getShippingRates, createShipment as createEnviaShipment, getTracking, verifyEnviaWebhookSignature, normalizeEnviaWebhookStatus, normalizeEnviaCarrier } from "./src/lib/envia.js";
 import { invalidateOrderRelatedCache } from "./src/lib/cache-invalidation.js";
+import { logEvent } from "./src/lib/logger.js";
 import { recordApiMetric, recordCatalogSearchMetric } from "./src/lib/metrics.js";
 import {
   adminLoginBodySchema,
@@ -76,6 +77,10 @@ const REQUEST_TIMEOUT_MS = Number(process.env.API_REQUEST_TIMEOUT_MS || 15000);
 const CHECKOUT_REQUEST_TIMEOUT_MS = Math.max(
   REQUEST_TIMEOUT_MS,
   Number(process.env.CHECKOUT_REQUEST_TIMEOUT_MS || 45000)
+);
+const ADMIN_CLEAR_ORDERS_TIMEOUT_MS = Math.max(
+  REQUEST_TIMEOUT_MS,
+  Number(process.env.ADMIN_CLEAR_ORDERS_TIMEOUT_MS || 60000)
 );
 const MERCADOPAGO_WEBHOOK_TIMEOUT_MS = Math.max(
   REQUEST_TIMEOUT_MS,
@@ -122,11 +127,23 @@ const allowedVercelProjectNames = new Set(
 );
 const CRON_SECRET = String(process.env.CRON_SECRET || "").trim();
 const CHECKOUT_EXPIRATION_MINUTES = Math.max(5, Number(process.env.CHECKOUT_EXPIRATION_MINUTES || 30));
+const SHIPPING_TRACKING_SYNC_INTERVAL_MS = Math.max(
+  60_000,
+  Number(process.env.SHIPPING_TRACKING_SYNC_INTERVAL_MS || 10 * 60 * 1000)
+);
+const SHIPPING_TRACKING_SYNC_BATCH_SIZE = Math.max(
+  1,
+  Number(process.env.SHIPPING_TRACKING_SYNC_BATCH_SIZE || 20)
+);
+const ENABLE_SHIPPING_TRACKING_SYNC_LOOP = String(process.env.ENABLE_SHIPPING_TRACKING_SYNC_LOOP || "true")
+  .trim()
+  .toLowerCase() !== "false";
 const ORDER_SCHEMA_CACHE_TTL_MS = 1000 * 60;
 const MERCADOPAGO_ACCOUNT_CACHE_TTL_MS = 1000 * 60 * 10;
 const MERCADOPAGO_WEBHOOK_PATHS = ["/api/checkout/webhook", "/api/webhook/mercadopago"];
+const ENVIA_WEBHOOK_PATH = "/api/webhooks/envia";
 const MERCADOPAGO_TEST_ACCESS_TOKEN_PREFIX = "TEST-";
-const MERCADOPAGO_TEST_PAYER_EMAIL_DOMAIN = "example.com";
+const MP_TEST_BUYER_EMAIL = "test_user_3309000128@testuser.com";
 const mercadoPagoClient = MERCADOPAGO_ACCESS_TOKEN
   ? new MercadoPagoConfig({ accessToken: MERCADOPAGO_ACCESS_TOKEN })
   : null;
@@ -142,12 +159,38 @@ const mercadoPagoAccountState = {
   inflight: null,
   details: null,
 };
+let shippingTrackingSyncInterval = null;
+
+function buildRequestBodySnapshot(req) {
+  if (typeof req.rawBody === "string" && req.rawBody) {
+    return req.rawBody;
+  }
+
+  return req.body ?? null;
+}
+
+function logDbUpdate(entityType, entityId, fieldsUpdated, data = {}) {
+  logEvent("DB_UPDATE", `${entityType} updated`, {
+    entityType,
+    entityId,
+    fieldsUpdated,
+    ...data,
+  });
+}
 
 function resolveRequestTimeoutMs(req) {
   const requestPath = String(req.path || req.originalUrl || "");
 
-  if (requestPath === "/api/checkout" || requestPath === "/api/checkout/create-preference") {
+  if (
+    requestPath === "/api/checkout"
+    || requestPath === "/api/checkout/create-preference"
+    || requestPath === "/api/payments/create"
+  ) {
     return CHECKOUT_REQUEST_TIMEOUT_MS;
+  }
+
+  if (requestPath === "/api/admin/orders" && req.method === "DELETE") {
+    return ADMIN_CLEAR_ORDERS_TIMEOUT_MS;
   }
 
   if (MERCADOPAGO_WEBHOOK_PATHS.includes(requestPath)) {
@@ -222,6 +265,8 @@ const ORDER_PAYMENT_RECONCILIATION_FAILURE_DETAILS = new Set([
 const DEFAULT_ADMIN_USERS_PAGE_SIZE = 8;
 const DEFAULT_ADMIN_ORDERS_PAGE_SIZE = 10;
 const MAX_ADMIN_PAGE_SIZE = 50;
+const ADMIN_ORDER_CLEAR_BATCH_SIZE = 15;
+const ADMIN_ORDER_CLEAR_RESPONSE_GRACE_MS = 5000;
 
 app.use(cors({
   origin(origin, callback) {
@@ -232,9 +277,16 @@ app.use(cors({
 }));
 app.set("trust proxy", 1);
 app.use(compression());
-app.use(express.json({ limit: "256kb" }));
+app.use(express.json({
+  limit: "256kb",
+  verify(req, _res, buf) {
+    if (req.path === ENVIA_WEBHOOK_PATH) {
+      req.rawBody = buf.toString("utf8");
+    }
+  },
+}));
 app.use((req, res, next) => {
-  const requestId = String(req.headers["x-request-id"] || `srv_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`);
+  const requestId = String(req.headers["x-request-id"] || randomUUID());
   const controller = new AbortController();
   const timeoutMs = resolveRequestTimeoutMs(req);
 
@@ -246,6 +298,14 @@ app.use((req, res, next) => {
     startedAt: Date.now(),
     timeoutMs,
   };
+
+  logEvent("REQUEST_IN", "Incoming request", {
+    requestId,
+    method: req.method,
+    path: req.path,
+    query: req.query || {},
+    body: buildRequestBodySnapshot(req),
+  });
 
   const abortRequest = (reason) => {
     req.requestContext.isCancelled = true;
@@ -268,6 +328,12 @@ app.use((req, res, next) => {
 
   res.setTimeout(timeoutMs, () => {
     abortRequest("timeout");
+    logEvent("REQUEST_TIMEOUT", "Request timed out", {
+      requestId,
+      method: req.method,
+      path: req.path,
+      timeoutMs,
+    });
     if (!res.headersSent) {
       res.status(408).json({
         error: "Request timed out",
@@ -280,6 +346,13 @@ app.use((req, res, next) => {
 
   res.on("finish", () => {
     const durationMs = Date.now() - (req.requestContext?.startedAt || Date.now());
+    logEvent("REQUEST_OUT", "Response sent", {
+      requestId,
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      duration: durationMs,
+    });
     void recordApiMetric({
       method: req.method,
       route: req.route?.path || req.path,
@@ -1037,26 +1110,23 @@ function splitMercadoPagoFullName(fullName) {
   };
 }
 
-function buildMercadoPagoSandboxPayerEmail(order) {
-  const orderId = Number(order?.id);
-  if (Number.isInteger(orderId) && orderId > 0) {
-    return `checkout+order-${orderId}@${MERCADOPAGO_TEST_PAYER_EMAIL_DOMAIN}`;
-  }
-
-  return `checkout@${MERCADOPAGO_TEST_PAYER_EMAIL_DOMAIN}`;
-}
-
-function resolveMercadoPagoPayerEmail(order, accountDetails = null) {
+async function resolveMercadoPagoPayerEmail(order) {
   const email = String(order?.customerEmail || order?.user?.email || "").trim().toLowerCase();
-  if (!shouldUseMercadoPagoSandbox(accountDetails) && !MERCADOPAGO_ACCESS_TOKEN.startsWith(MERCADOPAGO_TEST_ACCESS_TOKEN_PREFIX)) {
+  const isSandbox = process.env.MP_ACCESS_TOKEN?.startsWith("TEST");
+
+  if (!isSandbox) {
     return email;
   }
 
-  return buildMercadoPagoSandboxPayerEmail(order);
+  return MP_TEST_BUYER_EMAIL;
 }
 
-function resolveMercadoPagoPayer(order, options = {}) {
-  const email = resolveMercadoPagoPayerEmail(order, options.accountDetails ?? null);
+async function resolveMercadoPagoPayer(order, options = {}) {
+  const email = await resolveMercadoPagoPayerEmail(order);
+  logEvent("PAYMENT_PAYER", "Final payer email resolved", {
+    orderId: order?.id || null,
+    payerEmail: email,
+  });
   const fullName = order?.customerName || order?.address?.recipientName || order?.user?.fullName || "";
   const { firstName, lastName } = splitMercadoPagoFullName(fullName);
 
@@ -1075,6 +1145,34 @@ function resolveMercadoPagoPayer(order, options = {}) {
   };
 
   return Object.keys(payer).length > 0 ? payer : undefined;
+}
+
+function resolvePaymentResult({ isSandbox, payload }) {
+  if (!isSandbox) {
+    return null;
+  }
+
+  // WARNING: Sandbox bypass. Remove or disable before production.
+  logEvent("PAYMENT_FLOW", "Sandbox mode forcing approved payment", {
+    paymentMethodId: payload?.payment_method_id ?? null,
+    amount: payload?.transaction_amount ?? null,
+  });
+
+  const paymentResult = {
+    id: `debug_${Date.now()}`,
+    status: "approved",
+    status_detail: "accredited",
+    transaction_amount: payload?.transaction_amount ?? null,
+    installments: payload?.installments ?? null,
+    payment_method_id: payload?.payment_method_id ?? null,
+  };
+
+  if (payload?.payer?.first_name === "REJECT") {
+    paymentResult.status = "rejected";
+    paymentResult.status_detail = "cc_rejected_other_reason";
+  }
+
+  return paymentResult;
 }
 
 function buildMercadoPagoPreferenceItems(order, cardsById, exchangeRate) {
@@ -1170,6 +1268,14 @@ function sendErrorResponse(error, req, res, fallbackMessage = "Internal server e
   const requestId = req.requestContext?.requestId || null;
 
   if (error?.statusCode) {
+    logEvent("REQUEST_ERROR", "Handled request error", {
+      requestId,
+      path: getRouteKey(req),
+      method: req.method,
+      body: buildRequestBodySnapshot(req),
+      error: toErrorLogDetails(error),
+      details: error.details || null,
+    });
     res.status(error.statusCode).json({
       error: error.message,
       code: error.code || "REQUEST_ERROR",
@@ -1180,10 +1286,12 @@ function sendErrorResponse(error, req, res, fallbackMessage = "Internal server e
   }
 
   if (error?.name === "PrismaClientInitializationError") {
-    console.error("[request-error] prisma init failed", {
+    logEvent("SERVER_ERROR", "Prisma initialization failed", {
       requestId,
       route: getRouteKey(req),
-      message: error.message,
+      method: req.method,
+      body: buildRequestBodySnapshot(req),
+      error: toErrorLogDetails(error),
     });
 
     res.status(503).json({
@@ -1194,11 +1302,13 @@ function sendErrorResponse(error, req, res, fallbackMessage = "Internal server e
     return;
   }
 
-  console.error("[request-error]", {
+  logEvent("SERVER_ERROR", "Unhandled error", {
     requestId,
     route: getRouteKey(req),
-    message: error instanceof Error ? error.message : String(error),
-    stack: error instanceof Error ? error.stack : null,
+    method: req.method,
+    path: req.path,
+    body: buildRequestBodySnapshot(req),
+    error: toErrorLogDetails(error),
   });
 
   res.status(500).json({
@@ -1372,6 +1482,801 @@ function resolveWebhookOrderStatus(currentStatus, paymentStatus) {
   }
 
   return null;
+}
+
+function resolveOrderShipmentService(order, explicitService = null) {
+  const requestedService = String(explicitService || "").trim();
+  if (requestedService) {
+    return requestedService;
+  }
+
+  const shippingLabel = String(order?.shippingLabel || "").trim();
+  if (shippingLabel.includes("·")) {
+    const service = shippingLabel.split("·").slice(1).join("·").trim();
+    if (service) {
+      return service;
+    }
+  }
+
+  return "Estándar";
+}
+
+function isMercadoPagoSandboxMode() {
+  return MERCADOPAGO_ACCESS_TOKEN.startsWith(MERCADOPAGO_TEST_ACCESS_TOKEN_PREFIX);
+}
+
+function buildSandboxShippingLabelUrl(orderId) {
+  const labelPath = `/api/shipping/label/${encodeURIComponent(String(orderId))}`;
+  return BACKEND_PUBLIC_URL ? `${BACKEND_PUBLIC_URL}${labelPath}` : labelPath;
+}
+
+const MANUAL_SHIPMENT_STATUS_OPTIONS = new Set([
+  "created",
+  "picked_up",
+  "in_transit",
+  "out_for_delivery",
+  "delivered",
+]);
+const SHIPMENT_STATUS_TERMINAL = new Set(["delivered", "cancelled", "returned"]);
+const SHIPMENT_STATUS_PROGRESS_RANK = {
+  created: 0,
+  picked_up: 1,
+  in_transit: 2,
+  out_for_delivery: 3,
+  delivered: 4,
+};
+
+function normalizeShipmentStatusToken(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_");
+}
+
+function mapShipmentLifecycleStatus(value) {
+  const normalized = normalizeShipmentStatusToken(value);
+  if (!normalized || normalized === "unknown") {
+    return null;
+  }
+
+  if (["created", "pending", "label_created", "label_generated", "ready", "ready_to_ship", "pre_transit", "processing"].includes(normalized)) {
+    return "created";
+  }
+
+  if (
+    ["pickup", "picked_up", "pickedup", "collected", "collection", "collection_successful", "recibido", "recibida", "colectado", "colectada"].includes(normalized)
+    || normalized.includes("picked_up")
+    || normalized.includes("pickup")
+    || normalized.includes("collect")
+    || normalized.includes("recib")
+  ) {
+    return "picked_up";
+  }
+
+  if (
+    ["in_transit", "transit", "en_transito", "transito", "on_the_way", "linehaul", "sorting_center"].includes(normalized)
+    || normalized.includes("transit")
+    || normalized.includes("transito")
+  ) {
+    return "in_transit";
+  }
+
+  if (
+    ["out_for_delivery", "delivery_route", "with_courier", "on_vehicle", "distribution", "en_reparto", "salio_a_reparto"].includes(normalized)
+    || normalized.includes("out_for_delivery")
+    || normalized.includes("delivery_route")
+    || normalized.includes("reparto")
+  ) {
+    return "out_for_delivery";
+  }
+
+  if (
+    ["delivered", "entregado", "delivery_completed", "delivered_to_customer"].includes(normalized)
+    || normalized.includes("deliver")
+    || normalized.includes("entreg")
+  ) {
+    return "delivered";
+  }
+
+  if (["cancelled", "canceled"].includes(normalized)) {
+    return "cancelled";
+  }
+
+  if (
+    ["returned", "return", "returned_to_sender", "devolucion", "devolucion_al_remitente", "returned_sender"].includes(normalized)
+    || normalized.includes("return")
+    || normalized.includes("devol")
+  ) {
+    return "returned";
+  }
+
+  return SHIPMENT_STATUS_PROGRESS_RANK[normalized] !== undefined ? normalized : null;
+}
+
+function getShipmentStatusRank(status) {
+  return SHIPMENT_STATUS_PROGRESS_RANK[normalizeShipmentStatusToken(status)] ?? -1;
+}
+
+function deriveOrderStatusFromShipmentStatus(currentOrderStatus, shipmentStatus) {
+  if (shipmentStatus === "delivered") {
+    if ([OrderStatus.PAID, OrderStatus.SHIPPED].includes(currentOrderStatus)) {
+      return OrderStatus.COMPLETED;
+    }
+    return null;
+  }
+
+  if (["picked_up", "in_transit", "out_for_delivery"].includes(shipmentStatus)) {
+    if (currentOrderStatus === OrderStatus.PAID) {
+      return OrderStatus.SHIPPED;
+    }
+  }
+
+  return null;
+}
+
+function publishShipmentOrderUpdate(order) {
+  if (!order?.id) {
+    return;
+  }
+
+  publishEvent("admin", {
+    type: "order-update",
+    orderId: order.id,
+    status: order.status,
+    shipmentStatus: order.shipmentStatus || null,
+  });
+  publishEvent("public", {
+    type: "order-update",
+    orderId: order.id,
+    status: order.status,
+    shipmentStatus: order.shipmentStatus || null,
+  });
+}
+
+function resolveSandboxShipmentReferenceDate(order) {
+  const trackingCode = String(order?.trackingCode || "").trim();
+  const trackingMatch = trackingCode.match(/track-(\d{10,})/i);
+  if (trackingMatch) {
+    const timestamp = Number(trackingMatch[1]);
+    if (Number.isFinite(timestamp) && timestamp > 0) {
+      return new Date(timestamp);
+    }
+  }
+
+  return order?.updatedAt || order?.createdAt || new Date();
+}
+
+function simulateSandboxShipmentLifecycle(order, now = new Date()) {
+  const startedAt = resolveSandboxShipmentReferenceDate(order);
+  const elapsedMs = Math.max(0, now.getTime() - startedAt.getTime());
+
+  if (elapsedMs >= 45 * 60 * 1000) {
+    return "delivered";
+  }
+
+  if (elapsedMs >= 30 * 60 * 1000) {
+    return "out_for_delivery";
+  }
+
+  if (elapsedMs >= 15 * 60 * 1000) {
+    return "in_transit";
+  }
+
+  if (elapsedMs >= 5 * 60 * 1000) {
+    return "picked_up";
+  }
+
+  return "created";
+}
+
+async function updateShipmentStatus(orderId, externalStatus, options = {}) {
+  const db = options.tx || prisma;
+  const currentOrder = options.order || await db.order.findUnique({
+    where: { id: orderId },
+    include: { items: true, user: true, address: true },
+  });
+
+  if (!currentOrder) {
+    return {
+      order: null,
+      previousOrder: null,
+      changed: false,
+      ignored: true,
+      reason: "order_not_found",
+      shipmentStatus: null,
+    };
+  }
+
+  if (currentOrder.shippingZone === ShippingZone.PICKUP) {
+    return {
+      order: currentOrder,
+      previousOrder: currentOrder,
+      changed: false,
+      ignored: true,
+      reason: "pickup_order",
+      shipmentStatus: currentOrder.shipmentStatus || null,
+    };
+  }
+
+  const nextShipmentStatus = mapShipmentLifecycleStatus(externalStatus);
+  if (!nextShipmentStatus) {
+    logEvent("SHIPMENT_STATUS_IGNORED", "Shipment status ignored", {
+      requestId: options.requestId || null,
+      source: options.source || "unknown",
+      orderId: currentOrder.id,
+      externalStatus: externalStatus || null,
+      reason: "unknown_status",
+    });
+    return {
+      order: currentOrder,
+      previousOrder: currentOrder,
+      changed: false,
+      ignored: true,
+      reason: "unknown_status",
+      shipmentStatus: null,
+    };
+  }
+
+  const currentShipmentStatus = normalizeShipmentStatusToken(currentOrder.shipmentStatus);
+  const currentRank = getShipmentStatusRank(currentShipmentStatus);
+  const nextRank = getShipmentStatusRank(nextShipmentStatus);
+  const allowRegression = options.allowRegression === true;
+
+  if (
+    !allowRegression
+    && currentShipmentStatus
+    && currentShipmentStatus !== nextShipmentStatus
+    && !SHIPMENT_STATUS_TERMINAL.has(nextShipmentStatus)
+    && currentRank >= 0
+    && nextRank >= 0
+    && nextRank < currentRank
+  ) {
+    logEvent("SHIPMENT_STATUS_IGNORED", "Shipment status ignored", {
+      requestId: options.requestId || null,
+      source: options.source || "unknown",
+      orderId: currentOrder.id,
+      externalStatus: externalStatus || null,
+      currentShipmentStatus,
+      nextShipmentStatus,
+      reason: "stale_status",
+    });
+    return {
+      order: currentOrder,
+      previousOrder: currentOrder,
+      changed: false,
+      ignored: true,
+      reason: "stale_status",
+      shipmentStatus: nextShipmentStatus,
+    };
+  }
+
+  const nextOrderStatus = deriveOrderStatusFromShipmentStatus(currentOrder.status, nextShipmentStatus);
+  const updateData = {};
+
+  if (currentShipmentStatus !== nextShipmentStatus) {
+    updateData.shipmentStatus = nextShipmentStatus;
+  }
+
+  if (nextOrderStatus && nextOrderStatus !== currentOrder.status) {
+    updateData.status = nextOrderStatus;
+  }
+
+  if (Object.keys(updateData).length === 0) {
+    return {
+      order: currentOrder,
+      previousOrder: currentOrder,
+      changed: false,
+      ignored: true,
+      reason: "no_change",
+      shipmentStatus: nextShipmentStatus,
+    };
+  }
+
+  logEvent("SHIPMENT_STATUS_UPDATE", "Updating shipment", {
+    requestId: options.requestId || null,
+    source: options.source || "unknown",
+    orderId: currentOrder.id,
+    previousShipmentStatus: currentOrder.shipmentStatus || null,
+    newStatus: nextShipmentStatus,
+    previousOrderStatus: currentOrder.status,
+    nextOrderStatus: nextOrderStatus || currentOrder.status,
+    manual: options.manual === true,
+  });
+
+  const updatedOrder = await db.order.update({
+    where: { id: currentOrder.id },
+    data: updateData,
+    include: { items: true, user: true, address: true },
+  });
+
+  if (options.emitEvents !== false) {
+    publishShipmentOrderUpdate(updatedOrder);
+  }
+
+  logDbUpdate("order", updatedOrder.id, Object.keys(updateData), {
+    requestId: options.requestId || null,
+    source: options.source || "unknown",
+  });
+
+  logEvent("SHIPMENT_STATUS_UPDATED", "Updated shipment OK", {
+    requestId: options.requestId || null,
+    source: options.source || "unknown",
+    orderId: updatedOrder.id,
+    externalStatus: externalStatus || null,
+    previousShipmentStatus: currentOrder.shipmentStatus || null,
+    shipmentStatus: updatedOrder.shipmentStatus || null,
+    previousOrderStatus: currentOrder.status,
+    orderStatus: updatedOrder.status,
+    manual: options.manual === true,
+  });
+
+  return {
+    order: updatedOrder,
+    previousOrder: currentOrder,
+    changed: true,
+    ignored: false,
+    reason: null,
+    shipmentStatus: nextShipmentStatus,
+  };
+}
+
+async function syncShipmentStatuses({ source = "poller", requestId = null, limit = SHIPPING_TRACKING_SYNC_BATCH_SIZE } = {}) {
+  const resolvedLimit = Math.max(1, Number(limit || SHIPPING_TRACKING_SYNC_BATCH_SIZE));
+
+  logEvent("TRACKING_SYNC_START", "Starting sync", {
+    requestId,
+    source,
+    limit: resolvedLimit,
+  });
+
+  const orders = await prisma.order.findMany({
+    where: {
+      shippingZone: { not: ShippingZone.PICKUP },
+      OR: [
+        { shipmentId: { not: null } },
+        { trackingCode: { not: null } },
+      ],
+      AND: [
+        {
+          OR: [
+            { shipmentStatus: null },
+            { shipmentStatus: "" },
+            { shipmentStatus: { notIn: ["delivered", "cancelled", "returned"] } },
+          ],
+        },
+      ],
+    },
+    orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+    take: resolvedLimit,
+    include: { items: true, user: true, address: true },
+  });
+
+  if (!orders.length) {
+    return {
+      scannedCount: 0,
+      updatedCount: 0,
+      ignoredCount: 0,
+      errorCount: 0,
+      errors: [],
+    };
+  }
+
+  let updatedCount = 0;
+  let ignoredCount = 0;
+  const errors = [];
+
+  for (const order of orders) {
+    try {
+      logEvent("TRACKING_SYNC_ORDER", "Syncing order", {
+        requestId,
+        source,
+        orderId: order.id,
+        trackingNumber: order.trackingCode || null,
+        shipmentId: order.shipmentId || null,
+        currentShipmentStatus: order.shipmentStatus || null,
+      });
+
+      let providerStatus = null;
+      let providerPayload = null;
+
+      if (String(order.shipmentId || "").startsWith("sandbox_")) {
+        providerStatus = simulateSandboxShipmentLifecycle(order);
+        providerPayload = {
+          simulated: true,
+          shipmentId: order.shipmentId || null,
+          trackingCode: order.trackingCode || null,
+        };
+      } else {
+        const trackingCode = String(order.trackingCode || "").trim();
+        if (!trackingCode) {
+          ignoredCount += 1;
+          continue;
+        }
+
+        logEvent("ENVIACOM_REQUEST", "Fetching tracking", {
+          requestId,
+          orderId: order.id,
+          trackingNumber: trackingCode,
+          carrier: order.carrier || "correo-argentino",
+        });
+
+        providerPayload = await getTracking(trackingCode, order.carrier || "correo-argentino");
+        providerStatus = providerPayload.status;
+
+        logEvent("ENVIACOM_RESPONSE_OK", "Tracking fetched", {
+          requestId,
+          orderId: order.id,
+          trackingNumber: trackingCode,
+          response: providerPayload,
+        });
+      }
+
+      const result = await updateShipmentStatus(order.id, providerStatus, {
+        source,
+        requestId,
+        payload: providerPayload,
+      });
+
+      if (result.ignored) {
+        ignoredCount += 1;
+        continue;
+      }
+
+      logEvent("TRACKING_STATUS_CHANGED", "Shipment status updated", {
+        requestId,
+        source,
+        orderId: order.id,
+        from: order.shipmentStatus || null,
+        to: result.order?.shipmentStatus || null,
+      });
+
+      updatedCount += 1;
+    } catch (error) {
+      errors.push({
+        orderId: order.id,
+        error: error?.message || "Failed to sync shipment",
+      });
+
+      logEvent("ENVIACOM_ERROR", "Tracking sync failed", {
+        requestId,
+        source,
+        orderId: order.id,
+        message: error?.message || "Failed to sync shipment",
+        stack: error?.stack || null,
+      });
+    }
+  }
+
+  return {
+    scannedCount: orders.length,
+    updatedCount,
+    ignoredCount,
+    errorCount: errors.length,
+    errors,
+  };
+}
+
+function startShippingTrackingSyncLoop() {
+  if (shippingTrackingSyncInterval || !ENABLE_SHIPPING_TRACKING_SYNC_LOOP) {
+    return;
+  }
+
+  const runSync = async (source) => {
+    try {
+      const result = await syncShipmentStatuses({
+        source,
+        limit: SHIPPING_TRACKING_SYNC_BATCH_SIZE,
+      });
+
+      if (result.updatedCount > 0 || result.errorCount > 0) {
+        logEvent("TRACKING_SYNC_DONE", "Shipping sync cycle finished", {
+          source,
+          ...result,
+        });
+      }
+    } catch (error) {
+      logEvent("TRACKING_SYNC_ERROR", "Shipping sync cycle failed", {
+        source,
+        error,
+      });
+    }
+  };
+
+  shippingTrackingSyncInterval = setInterval(() => {
+    void runSync("interval");
+  }, SHIPPING_TRACKING_SYNC_INTERVAL_MS);
+  shippingTrackingSyncInterval.unref?.();
+
+  logEvent("TRACKING_SYNC_LOOP_START", "Shipping sync loop started", {
+    intervalMs: SHIPPING_TRACKING_SYNC_INTERVAL_MS,
+  });
+  void runSync("startup");
+}
+
+function stopShippingTrackingSyncLoop() {
+  if (!shippingTrackingSyncInterval) {
+    return;
+  }
+
+  clearInterval(shippingTrackingSyncInterval);
+  shippingTrackingSyncInterval = null;
+  logEvent("TRACKING_SYNC_LOOP_STOP", "Shipping sync loop stopped");
+}
+
+function escapePdfText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\x20-\x7E]/g, " ")
+    .replace(/\\/g, "\\\\")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)");
+}
+
+function buildSimplePdfBuffer(lines) {
+  const content = [
+    "BT",
+    "/F2 22 Tf",
+    `1 0 0 1 48 760 Tm (${escapePdfText(lines.title)}) Tj`,
+    "/F1 12 Tf",
+    ...lines.body.flatMap((line, index) => [
+      `1 0 0 1 48 ${730 - index * 24} Tm (${escapePdfText(line)}) Tj`,
+    ]),
+    "/F2 18 Tf",
+    `1 0 0 1 48 540 Tm (${escapePdfText(lines.barcode)}) Tj`,
+    "ET",
+  ].join("\n");
+
+  const objects = [
+    null,
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> /Contents 4 0 R >>",
+    `<< /Length ${Buffer.byteLength(content, "utf8")} >>\nstream\n${content}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+  ];
+
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+
+  for (let index = 1; index < objects.length; index += 1) {
+    offsets[index] = Buffer.byteLength(pdf, "utf8");
+    pdf += `${index} 0 obj\n${objects[index]}\nendobj\n`;
+  }
+
+  const xrefOffset = Buffer.byteLength(pdf, "utf8");
+  pdf += `xref\n0 ${objects.length}\n`;
+  pdf += "0000000000 65535 f \n";
+
+  for (let index = 1; index < objects.length; index += 1) {
+    pdf += `${String(offsets[index]).padStart(10, "0")} 00000 n \n`;
+  }
+
+  pdf += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  return Buffer.from(pdf, "utf8");
+}
+
+function buildSandboxShippingLabelPdf(order) {
+  const destination = buildAddressSummary(order) || "Direccion no disponible";
+  const carrier = String(order?.carrier || order?.shippingLabel || "andreani").trim() || "andreani";
+  const trackingNumber = String(order?.trackingCode || `TRACK-${order?.id || Date.now()}`).trim();
+  const recipient = String(order?.customerName || order?.address?.recipientName || "Cliente DuelVault").trim();
+
+  return buildSimplePdfBuffer({
+    title: "DUELVAULT SHIPPING LABEL",
+    body: [
+      `Order: ${order?.id || "N/A"}`,
+      `Carrier: ${carrier}`,
+      `Tracking: ${trackingNumber}`,
+      `Customer: ${recipient}`,
+      `Destination: ${destination}`,
+      `Service: ${String(order?.shippingLabel || "Standard").trim() || "Standard"}`,
+      "Print and attach this sandbox label for end-to-end QA.",
+    ],
+    barcode: `* ${trackingNumber} *`,
+  });
+}
+
+async function createShipment({ order, carrier = null, service = null, isSandbox = false }) {
+  const resolvedCarrier = normalizeCheckoutCarrier(carrier || order?.carrier) || normalizeEnviaCarrier(carrier || order?.carrier) || "andreani";
+
+  if (isSandbox) {
+    logEvent("ENVIACOM_REQUEST", "Creating sandbox shipment", {
+      orderId: order?.id || null,
+      carrier: resolvedCarrier,
+      service: service || null,
+    });
+
+    const fakeShipment = {
+      shipmentId: `sandbox_${order.id}`,
+      trackingNumber: `TRACK-${Date.now()}`,
+      carrier: resolvedCarrier,
+      labelUrl: buildSandboxShippingLabelUrl(order.id),
+      label: buildSandboxShippingLabelUrl(order.id),
+      status: "created",
+    };
+
+    logEvent("ENVIACOM_RESPONSE_OK", "Sandbox shipment created", {
+      orderId: order?.id || null,
+      response: fakeShipment,
+    });
+    return fakeShipment;
+  }
+
+  const shipment = await createEnviaShipment({
+    order,
+    carrier: resolvedCarrier,
+    service,
+  });
+
+  const normalizedShipment = {
+    shipmentId: shipment?.shipmentId || null,
+    trackingNumber: shipment?.trackingNumber || null,
+    carrier: normalizeEnviaCarrier(shipment?.carrier || resolvedCarrier) || resolvedCarrier,
+    labelUrl: shipment?.labelUrl || shipment?.label || null,
+    label: shipment?.labelUrl || shipment?.label || null,
+    status: shipment?.status || "created",
+  };
+
+  logEvent("ENVIACOM_RESPONSE_OK", "Shipment created", {
+    orderId: order?.id || null,
+    response: normalizedShipment,
+  });
+  return normalizedShipment;
+}
+
+function buildEnviaShipmentPayloadLog(order, { carrier, service }) {
+  return {
+    orderId: order?.id || null,
+    carrier,
+    service,
+    shippingZone: order?.shippingZone || null,
+    customerName: order?.customerName || null,
+    customerEmail: order?.customerEmail || null,
+    customerPhone: order?.customerPhone || null,
+    address: {
+      street: order?.shippingAddress || null,
+      city: order?.shippingCity || null,
+      province: order?.shippingProvince || null,
+      postalCode: order?.shippingPostalCode || null,
+    },
+    items: Array.isArray(order?.items)
+      ? order.items.map((item) => ({
+          cardId: item.cardId,
+          quantity: item.quantity,
+        }))
+      : [],
+  };
+}
+
+async function createOrderShipmentWithEffects(order, { carrier = null, service = null, requestId = null, source = "payment" } = {}) {
+  if (!order) {
+    return { order: null, shipment: null, skipped: true, reason: "missing_order" };
+  }
+
+  if (order.shippingZone === ShippingZone.PICKUP) {
+    return { order, shipment: null, skipped: true, reason: "pickup_order" };
+  }
+
+  if (order.shipmentId) {
+    return { order, shipment: null, skipped: true, reason: "shipment_exists" };
+  }
+
+  const normalizedCarrier = normalizeCheckoutCarrier(carrier || order.carrier);
+  if (!normalizedCarrier || normalizedCarrier === "showroom") {
+    throw createAppError("Shipping carrier unavailable for shipment creation", {
+      statusCode: 409,
+      code: "SHIPMENT_CARRIER_UNAVAILABLE",
+      details: {
+        orderId: order.id,
+        carrier: carrier || order.carrier || null,
+      },
+    });
+  }
+
+  const resolvedService = resolveOrderShipmentService(order, service);
+  const isSandbox = isMercadoPagoSandboxMode();
+  const enviaPayload = buildEnviaShipmentPayloadLog(order, {
+    carrier: normalizedCarrier,
+    service: resolvedService,
+  });
+
+  logEvent("SHIPMENT_FLOW_START", "Starting shipment flow", {
+    requestId,
+    source,
+    orderId: order.id,
+    carrier: normalizedCarrier,
+    service: resolvedService,
+    isSandbox,
+  });
+
+  logEvent("ENVIACOM_REQUEST", "Creating shipment", {
+    requestId,
+    orderId: order.id,
+    payload: enviaPayload,
+    isSandbox,
+  });
+
+  let shipment;
+  try {
+    shipment = await createShipment({
+      order,
+      carrier: normalizedCarrier,
+      service: resolvedService,
+      isSandbox,
+    });
+  } catch (error) {
+    logEvent("ENVIACOM_ERROR", "Shipment failed", {
+      requestId,
+      orderId: order.id,
+      payload: enviaPayload,
+      status: error?.statusCode || null,
+      body: error?.enviaBody || null,
+      message: error?.message || "Shipment failed",
+      stack: error?.stack || null,
+    });
+    throw error;
+  }
+
+  const persistedTrackingNumber = shipment?.trackingNumber || null;
+  const persistedCarrier = shipment?.carrier || normalizedCarrier;
+  const persistedLabelUrl = shipment?.labelUrl || shipment?.label || null;
+  const persistedStatus = mapShipmentLifecycleStatus(shipment?.status) || "created";
+
+  const updatedOrder = await prisma.order.update({
+    where: { id: order.id },
+    data: {
+      shipmentId: shipment.shipmentId || null,
+      trackingCode: persistedTrackingNumber,
+      shippingLabelUrl: persistedLabelUrl,
+      carrier: persistedCarrier,
+      shipmentStatus: persistedStatus,
+      estimatedDelivery: null,
+      trackingVisibleToUser: true,
+    },
+    include: { items: true, user: true, address: true },
+  });
+
+  logDbUpdate("order", updatedOrder.id, [
+    "shipmentId",
+    "trackingCode",
+    "shippingLabelUrl",
+    "carrier",
+    "shipmentStatus",
+    "estimatedDelivery",
+    "trackingVisibleToUser",
+  ], {
+    requestId,
+    source,
+  });
+
+  logEvent("SHIPMENT_PERSISTED", "Shipment persisted", {
+    orderId: updatedOrder.id,
+    tracking: persistedTrackingNumber,
+    carrier: persistedCarrier,
+    label: persistedLabelUrl,
+  });
+
+  publishShipmentOrderUpdate(updatedOrder);
+
+  logEvent("SHIPMENT_FLOW_DONE", "Shipment flow completed", {
+    requestId,
+    source,
+    orderId: updatedOrder.id,
+    shipmentId: updatedOrder.shipmentId || null,
+    trackingCode: updatedOrder.trackingCode || null,
+    carrier: updatedOrder.carrier || null,
+  });
+
+  return {
+    order: updatedOrder,
+    shipment,
+    skipped: false,
+    reason: null,
+  };
 }
 
 function normalizeHashInput(value) {
@@ -1766,9 +2671,14 @@ function toOrderResponse(order, cardsById, options = {}) {
     shipping_label: order.shippingLabel,
     is_shipping_order: order.shippingZone !== ShippingZone.PICKUP,
     tracking_code: includeAdminFields ? order.trackingCode || null : trackingVisibleToUser ? order.trackingCode : null,
+    trackingNumber: includeAdminFields ? order.trackingCode || null : trackingVisibleToUser ? order.trackingCode : null,
     tracking_visible_to_user: includeAdminFields ? Boolean(order.trackingVisibleToUser) : trackingVisibleToUser,
     carrier: order.carrier || null,
+    shipping_label_url: includeAdminFields ? order.shippingLabelUrl || null : null,
+    shippingLabelUrl: includeAdminFields ? order.shippingLabelUrl || null : null,
     shipment_status: order.shipmentStatus || null,
+    shippingStatus: order.shipmentStatus || null,
+    shipmentId: includeAdminFields ? order.shipmentId || null : null,
     estimated_delivery: order.estimatedDelivery || null,
     customer_name: order.customerName || null,
     customer_email: order.customerEmail || null,
@@ -1786,26 +2696,38 @@ function toOrderResponse(order, cardsById, options = {}) {
   };
 }
 
-function isTestOrderEmail(value) {
-  const normalized = String(value || "").trim().toLowerCase();
-  if (!normalized || !normalized.includes("@")) {
-    return false;
-  }
+function buildAdminTestOrdersWhere() {
+  const testEmailDomains = ["@test.com", "@example.com", "@testuser.com"];
+  const emailMatchers = testEmailDomains.flatMap((domain) => ([
+    { customerEmail: { endsWith: domain, mode: "insensitive" } },
+    { user: { is: { email: { endsWith: domain, mode: "insensitive" } } } },
+  ]));
 
-  return normalized.endsWith("@test.com") || normalized.endsWith("@example.com");
+  return {
+    OR: [
+      ...emailMatchers,
+      { customerName: { contains: "smoke buyer", mode: "insensitive" } },
+      { user: { is: { fullName: { contains: "smoke buyer", mode: "insensitive" } } } },
+    ],
+  };
 }
 
-function isAdminTestOrder(order) {
-  if (!order) {
-    return false;
+function toErrorLogDetails(error) {
+  if (!error) {
+    return {
+      message: "Unknown error",
+      code: null,
+      statusCode: null,
+      stack: null,
+    };
   }
 
-  if (isTestOrderEmail(order.customerEmail) || isTestOrderEmail(order.user?.email)) {
-    return true;
-  }
-
-  const customerName = String(order.customerName || order.user?.fullName || "").trim().toLowerCase();
-  return customerName.includes("smoke buyer");
+  return {
+    message: error instanceof Error ? error.message : String(error),
+    code: error?.code || null,
+    statusCode: error?.statusCode || null,
+    stack: error instanceof Error ? error.stack : null,
+  };
 }
 
 function buildCustomCategoryTree(categories) {
@@ -2479,6 +3401,15 @@ function parseAdminOrderShippingPayload(payload) {
   return { data };
 }
 
+function parseAdminOrderShipmentStatusPayload(payload) {
+  const requestedStatus = mapShipmentLifecycleStatus(payload?.status ?? payload?.shipment_status);
+  if (!requestedStatus || !MANUAL_SHIPMENT_STATUS_OPTIONS.has(requestedStatus)) {
+    return { error: "Invalid shipment status" };
+  }
+
+  return { status: requestedStatus };
+}
+
 async function getOrderCardsMap(orders, options = {}) {
   const cardIds = [...new Set(orders.flatMap((order) => order.items.map((item) => item.cardId)))];
   if (cardIds.length === 0) {
@@ -2493,18 +3424,122 @@ async function getOrderCardsMap(orders, options = {}) {
   return new Map(enrichedCards.map((card) => [card.id, card]));
 }
 
-async function rollbackOrderEffects(tx, order) {
-  for (const item of order.items) {
-    if (isBillableStatus(order.status)) {
+async function rollbackOrderEffects(tx, order, context = {}) {
+  const requestId = context.requestId || null;
+  const clearScope = context.clearScope || null;
+
+  console.log("ADMIN_ORDER_CLEAR_ROLLBACK_START", {
+    requestId,
+    clearScope,
+    orderId: order?.id || null,
+    status: order?.status || null,
+    itemCount: Array.isArray(order?.items) ? order.items.length : 0,
+  });
+
+  if (!isBillableStatus(order.status)) {
+    console.log("ADMIN_ORDER_CLEAR_ROLLBACK_SKIP", {
+      requestId,
+      clearScope,
+      orderId: order?.id || null,
+      status: order?.status || null,
+      reason: "non_billable_status",
+    });
+    return;
+  }
+
+  try {
+    for (const item of order.items) {
       await tx.card.update({
         where: { id: item.cardId },
-        data: { salesCount: { decrement: item.quantity } },
-      });
-      await tx.card.update({
-        where: { id: item.cardId },
-        data: { stock: { increment: item.quantity } },
+        data: {
+          salesCount: { decrement: item.quantity },
+          stock: { increment: item.quantity },
+        },
       });
     }
+
+    console.log("ADMIN_ORDER_CLEAR_ROLLBACK_DONE", {
+      requestId,
+      clearScope,
+      orderId: order?.id || null,
+      status: order?.status || null,
+    });
+  } catch (error) {
+    console.error("ADMIN_ORDER_CLEAR_ROLLBACK_ERROR", {
+      requestId,
+      clearScope,
+      orderId: order?.id || null,
+      status: order?.status || null,
+      ...toErrorLogDetails(error),
+    });
+    throw error;
+  }
+}
+
+async function deleteAdminOrderWithEffects(tx, orderId, { actorId, req, routeKey, mutationMeta, clearScope = null } = {}) {
+  const requestId = req?.requestContext?.requestId || mutationMeta?.requestId || null;
+
+  console.log("ADMIN_ORDER_CLEAR_DELETE_START", {
+    requestId,
+    clearScope,
+    orderId,
+  });
+
+  try {
+    await lockOrderForUpdate(tx, orderId);
+
+    const order = await tx.order.findUnique({
+      where: { id: orderId },
+      include: { items: true },
+    });
+
+    if (!order) {
+      console.log("ADMIN_ORDER_CLEAR_DELETE_SKIP", {
+        requestId,
+        clearScope,
+        orderId,
+        reason: "order_not_found",
+      });
+      return null;
+    }
+
+    await rollbackOrderEffects(tx, order, {
+      requestId,
+      clearScope,
+    });
+    await createAdminAuditLog(tx, {
+      actorId,
+      entityType: "order",
+      entityId: orderId,
+      action: "ADMIN_ORDER_DELETED",
+      req,
+      routeKey,
+      before: sanitizeOrderForAudit(order),
+      after: null,
+      metadata: {
+        mutationId: mutationMeta?.mutationId || null,
+        requestId: mutationMeta?.requestId || null,
+        ...(clearScope ? { clearScope } : {}),
+      },
+    });
+    await tx.order.delete({ where: { id: orderId } });
+
+    console.log("ADMIN_ORDER_CLEAR_DELETE_DONE", {
+      requestId,
+      clearScope,
+      orderId,
+      status: order.status,
+    });
+
+    return order.id;
+  } catch (error) {
+    console.error("ADMIN_ORDER_CLEAR_DELETE_ERROR", {
+      requestId,
+      clearScope,
+      orderId,
+      ...toErrorLogDetails(error),
+    });
+    throw error;
   }
 }
 
@@ -3121,6 +4156,304 @@ async function persistDirectPaymentProviderFailure(req, { orderId, userId, payme
   return result.order;
 }
 
+async function reconcileMercadoPagoPayment(req, { payment, paymentIdOverride = null, providerRequestId = null } = {}) {
+  const paymentId = String(paymentIdOverride || payment?.id || "").trim();
+  const paymentStatus = normalizeMercadoPagoPaymentStatus(payment?.status);
+  const orderId = resolveMercadoPagoOrderId(payment);
+  const paymentAmount = resolveMercadoPagoPaymentAmount(payment);
+
+  if (!paymentId) {
+    return {
+      received: true,
+      ignored: true,
+      reason: "missing_payment_id",
+      order: null,
+      outcome: null,
+    };
+  }
+
+  if (!Number.isFinite(orderId)) {
+    logEvent("MERCADOPAGO_WEBHOOK_IGNORED", "Payment without valid external_reference", {
+      paymentId,
+      paymentStatus,
+      providerRequestId: providerRequestId || null,
+    });
+
+    return {
+      received: true,
+      ignored: true,
+      reason: "missing_external_reference",
+      order: null,
+      outcome: null,
+    };
+  }
+
+  const outcome = await prisma.$transaction(async (tx) => {
+    await lockOrderForUpdate(tx, orderId);
+    const order = await tx.order.findUnique({
+      where: { id: orderId },
+      include: { items: true, user: true, address: true },
+    });
+
+    if (!order) {
+      return null;
+    }
+
+    if (order.status === OrderStatus.PENDING_PAYMENT && order.expires_at && order.expires_at <= new Date()) {
+      const expiredOrder = await updateOrderStatusWithEffects(tx, order, OrderStatus.EXPIRED, {
+        payment_status: order.payment_status || "expired",
+        payment_status_detail: order.payment_status_detail || "expired_order",
+      });
+      return {
+        order: expiredOrder,
+        duplicate: false,
+        appliedStatus: OrderStatus.EXPIRED,
+        paymentStatus,
+        postCommitEffect: buildOrderStatusPostCommitEffect(order, OrderStatus.EXPIRED),
+      };
+    }
+
+    const nextStatus = resolveWebhookOrderStatus(order.status, paymentStatus);
+    const paymentData = {
+      payment_id: String(payment?.id || paymentId),
+      payment_status: paymentStatus || order.payment_status || null,
+      payment_status_detail: normalizeMercadoPagoPaymentStatusDetail(payment?.status_detail) || order.payment_status_detail || null,
+      payment_approved_at: paymentStatus === "approved"
+        ? order.payment_approved_at || new Date()
+        : order.payment_approved_at,
+    };
+    const staleWebhook = order.payment_id && order.payment_id !== paymentData.payment_id;
+    const expectedAmount = formatCurrency(order.total_ars ?? order.total);
+
+    if (staleWebhook) {
+      return {
+        order,
+        duplicate: false,
+        ignored: true,
+        appliedStatus: order.status,
+        paymentStatus,
+        ignoreReason: "stale_payment_id",
+      };
+    }
+
+    if (paymentStatus === "approved" && isApprovedPaymentReconciliationFailure(order)) {
+      return {
+        order,
+        duplicate: false,
+        ignored: true,
+        appliedStatus: order.status,
+        paymentStatus,
+        ignoreReason: "approved_payment_already_reconciled",
+      };
+    }
+
+    if (paymentStatus === "approved" && paymentAmount !== expectedAmount) {
+      const mismatchData = {
+        ...paymentData,
+        payment_status_detail: "amount_mismatch",
+      };
+      const mismatchOrder = order.status === OrderStatus.FAILED
+        ? await tx.order.update({
+          where: { id: order.id },
+          data: mismatchData,
+          include: { items: true, user: true, address: true },
+        })
+        : await updateOrderStatusWithEffects(tx, order, OrderStatus.FAILED, mismatchData);
+
+      return {
+        order: mismatchOrder,
+        duplicate: false,
+        appliedStatus: order.status === OrderStatus.FAILED ? order.status : OrderStatus.FAILED,
+        paymentStatus,
+        paymentAmount,
+        expectedAmount,
+        amountMismatch: true,
+        postCommitEffect: order.status === OrderStatus.FAILED
+          ? null
+          : buildOrderStatusPostCommitEffect(order, OrderStatus.FAILED),
+      };
+    }
+
+    const isDuplicate = order.payment_id === paymentData.payment_id
+      && order.payment_status === paymentData.payment_status
+      && order.payment_status_detail === paymentData.payment_status_detail
+      && (!nextStatus || order.status === nextStatus);
+
+    if (isDuplicate) {
+      return {
+        order,
+        duplicate: true,
+        appliedStatus: order.status,
+        paymentStatus,
+        postCommitEffect: null,
+      };
+    }
+
+    if (nextStatus && order.status !== nextStatus) {
+      try {
+        const updatedOrder = await updateOrderStatusWithEffects(tx, order, nextStatus, paymentData);
+        return {
+          order: updatedOrder,
+          duplicate: false,
+          appliedStatus: nextStatus,
+          paymentStatus,
+          paymentAmount,
+          expectedAmount,
+          postCommitEffect: buildOrderStatusPostCommitEffect(order, nextStatus),
+        };
+      } catch (transitionError) {
+        if (paymentStatus === "approved" && transitionError?.code === "INSUFFICIENT_STOCK") {
+          const stockConflictData = {
+            ...paymentData,
+            payment_status_detail: "stock_conflict_after_approval",
+          };
+          const conflictOrder = order.status === OrderStatus.FAILED
+            ? await tx.order.update({
+              where: { id: order.id },
+              data: stockConflictData,
+              include: { items: true, user: true, address: true },
+            })
+            : await updateOrderStatusWithEffects(tx, order, OrderStatus.FAILED, stockConflictData);
+
+          return {
+            order: conflictOrder,
+            duplicate: false,
+            appliedStatus: order.status === OrderStatus.FAILED ? order.status : OrderStatus.FAILED,
+            paymentStatus,
+            paymentAmount,
+            expectedAmount,
+            stockConflict: true,
+            unavailableCardIds: transitionError.unavailableCardIds || [],
+            postCommitEffect: order.status === OrderStatus.FAILED
+              ? null
+              : buildOrderStatusPostCommitEffect(order, OrderStatus.FAILED),
+          };
+        }
+
+        throw transitionError;
+      }
+    }
+
+    const updatedOrder = await tx.order.update({
+      where: { id: order.id },
+      data: paymentData,
+      include: { items: true, user: true, address: true },
+    });
+
+    return {
+      order: updatedOrder,
+      duplicate: false,
+      appliedStatus: order.status,
+      paymentStatus,
+      paymentAmount,
+      expectedAmount,
+      postCommitEffect: null,
+    };
+  });
+
+  if (!outcome?.order) {
+    logEvent("MERCADOPAGO_WEBHOOK_IGNORED", "Webhook for unknown order", {
+      paymentId,
+      orderId,
+      paymentStatus,
+      providerRequestId: providerRequestId || null,
+    });
+
+    return {
+      received: true,
+      ignored: true,
+      reason: "order_not_found",
+      order: null,
+      outcome: null,
+    };
+  }
+
+  await applyOrderStatusPostCommitEffect(outcome.postCommitEffect);
+
+  let shipmentResult = null;
+  if (outcome.paymentStatus === "approved" && !outcome.ignored && outcome.order.status === OrderStatus.PAID) {
+    shipmentResult = await createOrderShipmentWithEffects(outcome.order, {
+      requestId: req.requestContext?.requestId || null,
+      source: "mercadopago_webhook",
+    });
+
+    if (shipmentResult?.order) {
+      outcome.order = shipmentResult.order;
+    }
+  }
+
+  const activityAction = outcome.duplicate
+    ? "CHECKOUT_WEBHOOK_DUPLICATE"
+    : outcome.ignored
+      ? "CHECKOUT_WEBHOOK_IGNORED"
+      : outcome.amountMismatch
+        ? "CHECKOUT_PAYMENT_AMOUNT_MISMATCH"
+        : outcome.stockConflict
+          ? "CHECKOUT_PAYMENT_STOCK_CONFLICT"
+          : outcome.paymentStatus === "approved" && outcome.appliedStatus === OrderStatus.PAID
+            ? "CHECKOUT_PAYMENT_APPROVED"
+            : outcome.appliedStatus === OrderStatus.EXPIRED
+              ? "CHECKOUT_PAYMENT_EXPIRED"
+              : outcome.paymentStatus === "pending" || outcome.paymentStatus === "in_process"
+                ? "CHECKOUT_PAYMENT_PENDING"
+                : "CHECKOUT_PAYMENT_FAILED";
+
+  try {
+    await recordActivity(outcome.order.userId ?? null, activityAction, req, {
+      orderId: outcome.order.id,
+      paymentId: outcome.order.payment_id,
+      paymentStatus: outcome.paymentStatus,
+      paymentStatusDetail: outcome.order.payment_status_detail || null,
+      appliedStatus: outcome.appliedStatus,
+      duplicate: outcome.duplicate,
+      ignored: Boolean(outcome.ignored),
+      ignoreReason: outcome.ignoreReason || null,
+      paymentAmount: outcome.paymentAmount || null,
+      expectedAmount: outcome.expectedAmount || null,
+      amountMismatch: Boolean(outcome.amountMismatch),
+      stockConflict: Boolean(outcome.stockConflict),
+      unavailableCardIds: outcome.unavailableCardIds || [],
+      providerRequestId: providerRequestId || null,
+      shipmentCreated: Boolean(shipmentResult && !shipmentResult.skipped),
+      shipmentSkippedReason: shipmentResult?.reason || null,
+    });
+  } catch (activityError) {
+    logEvent("SERVER_ERROR", "Failed to record Mercado Pago webhook activity", {
+      requestId: req.requestContext?.requestId || null,
+      orderId: outcome.order.id,
+      error: activityError,
+    });
+  }
+
+  logEvent("MERCADOPAGO_WEBHOOK_PROCESSED", "Mercado Pago webhook processed", {
+    requestId: req.requestContext?.requestId || null,
+    providerRequestId: providerRequestId || null,
+    orderId: outcome.order.id,
+    paymentId: outcome.order.payment_id,
+    paymentStatus: outcome.paymentStatus,
+    appliedStatus: outcome.appliedStatus,
+    duplicate: outcome.duplicate,
+    ignored: Boolean(outcome.ignored),
+    ignoreReason: outcome.ignoreReason || null,
+    paymentAmount: outcome.paymentAmount || null,
+    expectedAmount: outcome.expectedAmount || null,
+    amountMismatch: Boolean(outcome.amountMismatch),
+    stockConflict: Boolean(outcome.stockConflict),
+    shipmentCreated: Boolean(shipmentResult && !shipmentResult.skipped),
+    shipmentSkippedReason: shipmentResult?.reason || null,
+  });
+
+  invalidatePublicCatalogCaches();
+
+  return {
+    received: true,
+    ignored: false,
+    reason: null,
+    order: outcome.order,
+    outcome,
+  };
+}
+
 async function createCheckoutPreferenceForOrder(req, { orderId, userId }) {
   assertMercadoPagoCheckoutConfigured();
 
@@ -3149,7 +4482,7 @@ async function createCheckoutPreferenceForOrder(req, { orderId, userId }) {
     expires: true,
     expiration_date_from: new Date().toISOString(),
     expiration_date_to: prepared.expiresAt.toISOString(),
-    payer: resolveMercadoPagoPayer(prepared.order, { accountDetails: mercadoPagoAccount }),
+    payer: await resolveMercadoPagoPayer(prepared.order, { accountDetails: mercadoPagoAccount }),
     metadata: {
       order_id: prepared.order.id,
       request_id: req.requestContext?.requestId || null,
@@ -5375,6 +6708,86 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
   let idempotency = null;
   let prepared = null;
   let userId = null;
+  let paymentDebugContext = {
+    orderId: null,
+    token: null,
+    paymentMethodId: null,
+    issuerId: null,
+    installments: null,
+    identificationType: null,
+    identificationNumber: null,
+    notificationUrl: null,
+    providerIdempotencyKey: null,
+    paymentPayload: null,
+    amount: {
+      transactionAmount: null,
+      orderTotal: null,
+      totalArs: null,
+    },
+  };
+
+  const getPreparedOrder = () => (prepared && prepared.order ? prepared.order : null);
+
+  const buildPaymentDebugOrder = (order) => {
+    if (!order) {
+      return null;
+    }
+
+    return {
+      id: order.id,
+      status: order.status || null,
+      subtotal: order.subtotal ?? null,
+      shippingCost: order.shippingCost ?? order.shipping_cost ?? null,
+      total: order.total ?? null,
+      totalArs: order.total_ars ?? null,
+      currency: order.currency || null,
+      paymentId: order.payment_id || null,
+      paymentStatus: order.payment_status || null,
+      paymentStatusDetail: order.payment_status_detail || null,
+      carrier: order.carrier || null,
+      shippingLabel: order.shippingLabel || order.shipping_label || null,
+      customerEmail: order.customerEmail || order.customer_email || null,
+      expiresAt: order.expires_at || null,
+      updatedAt: order.updatedAt || null,
+    };
+  };
+
+  const buildPaymentDebugValidation = (error) => {
+    const providerCause = Array.isArray(error?.providerPayload?.cause) ? error.providerPayload.cause[0] : null;
+    const preparedOrder = getPreparedOrder();
+
+    return {
+      hasOrderId: Number.isFinite(paymentDebugContext.orderId),
+      hasToken: Boolean(paymentDebugContext.token),
+      hasPaymentMethodId: Boolean(paymentDebugContext.paymentMethodId),
+      hasIssuerId: Boolean(paymentDebugContext.issuerId),
+      installmentsValid: Number.isInteger(paymentDebugContext.installments) && paymentDebugContext.installments > 0,
+      hasIdentification: Boolean(paymentDebugContext.identificationType && paymentDebugContext.identificationNumber),
+      orderPrepared: Boolean(preparedOrder?.id),
+      orderStatus: preparedOrder?.status || null,
+      orderPayable: Boolean(preparedOrder && isOrderPayableStatus(preparedOrder.status)),
+      totalPositive: Number(paymentDebugContext.amount.transactionAmount || 0) > 0,
+      notificationUrlConfigured: Boolean(paymentDebugContext.notificationUrl),
+      providerIdempotencyKey: paymentDebugContext.providerIdempotencyKey || null,
+      payerEmail: paymentDebugContext.paymentPayload?.payer?.email || null,
+      providerStatusCode: error?.statusCode || null,
+      providerReason: error?.reason || null,
+      providerMessage: error?.message || null,
+      providerCode: providerCause?.code || error?.providerPayload?.error || null,
+      providerType: error?.providerPayload?.type || null,
+    };
+  };
+
+  const buildPaymentDebugPayload = (error) => ({
+    order: buildPaymentDebugOrder(getPreparedOrder()),
+    amount: {
+      transactionAmount: paymentDebugContext.amount.transactionAmount,
+      orderTotal: paymentDebugContext.amount.orderTotal,
+      totalArs: paymentDebugContext.amount.totalArs,
+    },
+    token: paymentDebugContext.token || null,
+    validation: buildPaymentDebugValidation(error),
+  });
 
   try {
     assertMercadoPagoDirectPaymentsConfigured();
@@ -5404,6 +6817,17 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
     const installments = Number(req.body?.installments);
     const identificationType = String(req.body?.identification?.type || "").trim();
     const identificationNumber = String(req.body?.identification?.number || "").trim();
+
+    paymentDebugContext = {
+      ...paymentDebugContext,
+      orderId,
+      token,
+      paymentMethodId,
+      issuerId,
+      installments,
+      identificationType,
+      identificationNumber,
+    };
 
     if (!Number.isFinite(orderId)) {
       res.status(400).json({ error: "Invalid order id", code: "INVALID_ORDER_ID" });
@@ -5439,7 +6863,7 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
       description: `DuelVault order #${prepared.order.id}`,
       external_reference: String(prepared.order.id),
       ...(notificationUrl ? { notification_url: notificationUrl } : {}),
-      payer: resolveMercadoPagoPayer(prepared.order, {
+      payer: await resolveMercadoPagoPayer(prepared.order, {
         accountDetails: mercadoPagoAccount,
         identificationType,
         identificationNumber,
@@ -5452,17 +6876,56 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
       },
     };
 
-    const payment = await createMercadoPagoDirectPayment({
-      accessToken: MERCADOPAGO_ACCESS_TOKEN,
-      idempotencyKey: providerIdempotencyKey,
-      body: paymentPayload,
-      timeoutMs: CHECKOUT_REQUEST_TIMEOUT_MS,
-      signal: req.requestContext?.signal,
+    paymentDebugContext = {
+      ...paymentDebugContext,
+      notificationUrl: notificationUrl || null,
+      providerIdempotencyKey,
+      paymentPayload,
+      amount: {
+        transactionAmount: prepared.totalArs,
+        orderTotal: prepared?.order?.total ?? null,
+        totalArs: prepared?.order?.total_ars ?? prepared.totalArs ?? null,
+      },
+    };
+
+    logEvent("PAYMENT_REQUEST", "Mercado Pago payment payload ready", {
+      requestId: req.requestContext?.requestId || null,
+      orderId: prepared.order.id,
+      payerEmail: paymentPayload?.payer?.email || null,
+      amount: paymentPayload.transaction_amount,
+      payment_method_id: paymentPayload.payment_method_id,
+      issuer_id: paymentPayload.issuer_id || null,
+    });
+
+    const isSandbox = MERCADOPAGO_ACCESS_TOKEN?.startsWith("TEST");
+    let payment = resolvePaymentResult({ isSandbox, payload: paymentPayload });
+
+    if (!payment) {
+      payment = await createMercadoPagoDirectPayment({
+        accessToken: MERCADOPAGO_ACCESS_TOKEN,
+        idempotencyKey: providerIdempotencyKey,
+        body: paymentPayload,
+        timeoutMs: CHECKOUT_REQUEST_TIMEOUT_MS,
+        signal: req.requestContext?.signal,
+      });
+    }
+
+    logEvent("PAYMENT_FLOW", "Payment flow resolved", {
+      requestId: req.requestContext?.requestId || null,
+      orderId: prepared.order.id,
+      isSandbox,
+      result: payment?.status || null,
+    });
+
+    logEvent("FINAL_PAYMENT_RESULT", "Final payment result", {
+      requestId: req.requestContext?.requestId || null,
+      orderId: prepared.order.id,
+      payment,
     });
 
     const paymentStatus = normalizeMercadoPagoPaymentStatus(payment?.status);
     const paymentStatusDetail = normalizeMercadoPagoPaymentStatusDetail(payment?.status_detail);
-    const updatedOrder = await persistDirectPaymentAttempt(req, {
+    let updatedOrder = await persistDirectPaymentAttempt(req, {
       orderId: prepared.order.id,
       userId,
       paymentId: String(payment?.id || "").trim() || null,
@@ -5472,6 +6935,53 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
       totalArs: prepared.totalArs,
       expiresAt: prepared.expiresAt,
     });
+
+    logDbUpdate("order", updatedOrder.id, [
+      "payment_id",
+      "payment_status",
+      "payment_status_detail",
+      "exchange_rate",
+      "total_ars",
+      "expires_at",
+    ], {
+      requestId: req.requestContext?.requestId || null,
+      source: "payments_create",
+    });
+
+    let webhookPending = true;
+
+    if (isSandbox && paymentStatus === "approved") {
+      logEvent("WEBHOOK_SIMULATION_START", "Sandbox webhook simulation start", {
+        requestId: req.requestContext?.requestId || null,
+        orderId: updatedOrder.id,
+      });
+      const simulatedPayment = {
+        id: payment?.id,
+        status: paymentStatus,
+        status_detail: paymentStatusDetail,
+        transaction_amount: Number(payment?.transaction_amount || prepared.totalArs),
+        transaction_details: {
+          total_paid_amount: Number(payment?.transaction_amount || prepared.totalArs),
+        },
+        metadata: {
+          order_id: updatedOrder.id,
+        },
+        external_reference: String(updatedOrder.id),
+      };
+      const simulationResult = await reconcileMercadoPagoPayment(req, {
+        payment: simulatedPayment,
+        paymentIdOverride: String(payment?.id || "").trim() || null,
+        providerRequestId: `sandbox_${req.requestContext?.requestId || Date.now()}`,
+      });
+      updatedOrder = simulationResult.order || updatedOrder;
+      webhookPending = false;
+      logEvent("WEBHOOK_SIMULATION_DONE", "Sandbox webhook simulation done", {
+        requestId: req.requestContext?.requestId || null,
+        orderId: updatedOrder.id,
+        appliedStatus: simulationResult.outcome?.appliedStatus || updatedOrder.status,
+      });
+    }
+
     const cardsById = await getOrderCardsMap([updatedOrder]);
     const responsePayload = {
       order: toOrderResponse(updatedOrder, cardsById),
@@ -5483,7 +6993,7 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
         installments: Number(payment?.installments || installments),
         payment_method_id: String(payment?.payment_method_id || paymentMethodId),
       },
-      webhook_pending: true,
+      webhook_pending: webhookPending,
     };
 
     try {
@@ -5494,10 +7004,14 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
         paymentStatusDetail,
       });
     } catch (activityError) {
-      console.error("Failed to record direct payment activity", activityError);
+      logEvent("SERVER_ERROR", "Failed to record direct payment activity", {
+        requestId: req.requestContext?.requestId || null,
+        orderId: updatedOrder.id,
+        error: activityError,
+      });
     }
 
-    console.info("Direct payment created", {
+    logEvent("PAYMENT_CREATED", "Direct payment created", {
       requestId: req.requestContext?.requestId || null,
       orderId: updatedOrder.id,
       paymentId: responsePayload.payment.id,
@@ -5538,28 +7052,66 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
             paymentStatusDetail,
           });
         } catch (activityError) {
-          console.error("Failed to record direct payment rejection activity", activityError);
+          logEvent("SERVER_ERROR", "Failed to record direct payment rejection activity", {
+            requestId: req.requestContext?.requestId || null,
+            orderId: prepared.order.id,
+            error: activityError,
+          });
         }
       } catch (persistError) {
-        console.error("Failed to persist direct payment rejection", persistError);
+        logEvent("SERVER_ERROR", "Failed to persist direct payment rejection", {
+          requestId: req.requestContext?.requestId || null,
+          orderId: prepared.order.id,
+          error: persistError,
+        });
       }
     }
+
+    logEvent("PAYMENT_DEBUG", "Payment debug", {
+      requestId: req.requestContext?.requestId || null,
+      order: buildPaymentDebugOrder(getPreparedOrder()),
+      body: req.body,
+      error: {
+        ...toErrorLogDetails(error),
+        reason: error?.reason || null,
+        providerPayload: error?.providerPayload || null,
+        details: error?.details || null,
+      },
+    });
+
+    const paymentDebugPayload = buildPaymentDebugPayload(error || {});
+    logEvent("PAYMENT_DEBUG_FULL", "Payment debug payload", {
+      requestId: req.requestContext?.requestId || null,
+      debug: paymentDebugPayload,
+    });
 
     await releaseIdempotentMutation(idempotency);
 
     if (res.headersSent) return;
 
+    if (Number(error?.statusCode) === 412) {
+      return res.status(412).json({
+        error: "payment_validation_failed",
+        debug: paymentDebugPayload,
+      });
+    }
+
     if (error?.statusCode) {
       res.status(error.statusCode).json({
         error: error.message,
         code: error.code || "PAYMENT_CREATE_FAILED",
+        ...(error?.reason ? { reason: error.reason } : {}),
         ...(error.providerPayload ? { provider: error.providerPayload } : {}),
         ...(error.details ? error.details : {}),
       });
       return;
     }
 
-    console.error(error);
+    logEvent("SERVER_ERROR", "Failed to create Mercado Pago payment", {
+      requestId: req.requestContext?.requestId || null,
+      orderId: prepared?.order?.id || null,
+      error,
+    });
     res.status(500).json({ error: error.message || "Failed to create Mercado Pago payment" });
   }
 });
@@ -5570,7 +7122,7 @@ app.post(MERCADOPAGO_WEBHOOK_PATHS, async (req, res) => {
 
     const notificationType = String(req.body?.type || req.query?.type || "payment").trim().toLowerCase();
     if (notificationType && notificationType !== "payment") {
-      console.info("Ignoring unsupported Mercado Pago webhook", {
+      logEvent("MERCADOPAGO_WEBHOOK_IGNORED", "Ignoring unsupported Mercado Pago webhook", {
         type: notificationType,
         requestId: req.requestContext?.requestId || null,
       });
@@ -5588,251 +7140,21 @@ app.post(MERCADOPAGO_WEBHOOK_PATHS, async (req, res) => {
 
     const paymentResponse = await mercadoPagoPaymentClient.get({ id: paymentId });
     const payment = unwrapMercadoPagoBody(paymentResponse);
-    const paymentStatus = normalizeMercadoPagoPaymentStatus(payment?.status);
-    const orderId = resolveMercadoPagoOrderId(payment);
-    const paymentAmount = resolveMercadoPagoPaymentAmount(payment);
-
-    if (!Number.isFinite(orderId)) {
-      console.warn("Mercado Pago payment without valid external_reference", {
-        paymentId,
-        paymentStatus,
-      });
-      res.status(200).json({ received: true, ignored: true, reason: "missing_external_reference" });
-      return;
-    }
-
-    const outcome = await prisma.$transaction(async (tx) => {
-      await lockOrderForUpdate(tx, orderId);
-      const order = await tx.order.findUnique({
-        where: { id: orderId },
-        include: { items: true, user: true, address: true },
-      });
-
-      if (!order) {
-        return null;
-      }
-
-      if (order.status === OrderStatus.PENDING_PAYMENT && order.expires_at && order.expires_at <= new Date()) {
-        const expiredOrder = await updateOrderStatusWithEffects(tx, order, OrderStatus.EXPIRED, {
-          payment_status: order.payment_status || "expired",
-          payment_status_detail: order.payment_status_detail || "expired_order",
-        });
-        return {
-          order: expiredOrder,
-          duplicate: false,
-          appliedStatus: OrderStatus.EXPIRED,
-          paymentStatus,
-          postCommitEffect: buildOrderStatusPostCommitEffect(order, OrderStatus.EXPIRED),
-        };
-      }
-
-      const nextStatus = resolveWebhookOrderStatus(order.status, paymentStatus);
-      const paymentData = {
-        payment_id: String(payment?.id || paymentId),
-        payment_status: paymentStatus || order.payment_status || null,
-        payment_status_detail: normalizeMercadoPagoPaymentStatusDetail(payment?.status_detail) || order.payment_status_detail || null,
-        payment_approved_at: paymentStatus === "approved"
-          ? order.payment_approved_at || new Date()
-          : order.payment_approved_at,
-      };
-      const staleWebhook = order.payment_id && order.payment_id !== paymentData.payment_id;
-      const expectedAmount = formatCurrency(order.total_ars ?? order.total);
-
-      if (staleWebhook) {
-        return {
-          order,
-          duplicate: false,
-          ignored: true,
-          appliedStatus: order.status,
-          paymentStatus,
-          ignoreReason: "stale_payment_id",
-        };
-      }
-
-      if (paymentStatus === "approved" && isApprovedPaymentReconciliationFailure(order)) {
-        return {
-          order,
-          duplicate: false,
-          ignored: true,
-          appliedStatus: order.status,
-          paymentStatus,
-          ignoreReason: "approved_payment_already_reconciled",
-        };
-      }
-
-      if (paymentStatus === "approved" && paymentAmount !== expectedAmount) {
-        const mismatchData = {
-          ...paymentData,
-          payment_status_detail: "amount_mismatch",
-        };
-        const mismatchOrder = order.status === OrderStatus.FAILED
-          ? await tx.order.update({
-            where: { id: order.id },
-            data: mismatchData,
-            include: { items: true, user: true, address: true },
-          })
-          : await updateOrderStatusWithEffects(tx, order, OrderStatus.FAILED, mismatchData);
-
-        return {
-          order: mismatchOrder,
-          duplicate: false,
-          appliedStatus: order.status === OrderStatus.FAILED ? order.status : OrderStatus.FAILED,
-          paymentStatus,
-          paymentAmount,
-          expectedAmount,
-          amountMismatch: true,
-          postCommitEffect: order.status === OrderStatus.FAILED
-            ? null
-            : buildOrderStatusPostCommitEffect(order, OrderStatus.FAILED),
-        };
-      }
-
-      const isDuplicate = order.payment_id === paymentData.payment_id
-        && order.payment_status === paymentData.payment_status
-        && order.payment_status_detail === paymentData.payment_status_detail
-        && (!nextStatus || order.status === nextStatus);
-
-      if (isDuplicate) {
-        return {
-          order,
-          duplicate: true,
-          appliedStatus: order.status,
-          paymentStatus,
-          postCommitEffect: null,
-        };
-      }
-
-      if (nextStatus && order.status !== nextStatus) {
-        try {
-          const updatedOrder = await updateOrderStatusWithEffects(tx, order, nextStatus, paymentData);
-          return {
-            order: updatedOrder,
-            duplicate: false,
-            appliedStatus: nextStatus,
-            paymentStatus,
-            paymentAmount,
-            expectedAmount,
-            postCommitEffect: buildOrderStatusPostCommitEffect(order, nextStatus),
-          };
-        } catch (transitionError) {
-          if (paymentStatus === "approved" && transitionError?.code === "INSUFFICIENT_STOCK") {
-            const stockConflictData = {
-              ...paymentData,
-              payment_status_detail: "stock_conflict_after_approval",
-            };
-            const conflictOrder = order.status === OrderStatus.FAILED
-              ? await tx.order.update({
-                where: { id: order.id },
-                data: stockConflictData,
-                include: { items: true, user: true, address: true },
-              })
-              : await updateOrderStatusWithEffects(tx, order, OrderStatus.FAILED, stockConflictData);
-
-            return {
-              order: conflictOrder,
-              duplicate: false,
-              appliedStatus: order.status === OrderStatus.FAILED ? order.status : OrderStatus.FAILED,
-              paymentStatus,
-              paymentAmount,
-              expectedAmount,
-              stockConflict: true,
-              unavailableCardIds: transitionError.unavailableCardIds || [],
-              postCommitEffect: order.status === OrderStatus.FAILED
-                ? null
-                : buildOrderStatusPostCommitEffect(order, OrderStatus.FAILED),
-            };
-          }
-
-          throw transitionError;
-        }
-      }
-
-      const updatedOrder = await tx.order.update({
-        where: { id: order.id },
-        data: paymentData,
-        include: { items: true, user: true, address: true },
-      });
-
-      return {
-        order: updatedOrder,
-        duplicate: false,
-        appliedStatus: order.status,
-        paymentStatus,
-        paymentAmount,
-        expectedAmount,
-        postCommitEffect: null,
-      };
-    });
-
-    if (!outcome?.order) {
-      console.warn("Mercado Pago webhook for unknown order", {
-        paymentId,
-        orderId,
-        paymentStatus,
-      });
-      res.status(200).json({ received: true, ignored: true, reason: "order_not_found" });
-      return;
-    }
-
-    await applyOrderStatusPostCommitEffect(outcome.postCommitEffect);
-
-    const activityAction = outcome.duplicate
-      ? "CHECKOUT_WEBHOOK_DUPLICATE"
-      : outcome.ignored
-        ? "CHECKOUT_WEBHOOK_IGNORED"
-        : outcome.amountMismatch
-          ? "CHECKOUT_PAYMENT_AMOUNT_MISMATCH"
-          : outcome.stockConflict
-            ? "CHECKOUT_PAYMENT_STOCK_CONFLICT"
-      : outcome.paymentStatus === "approved" && outcome.appliedStatus === OrderStatus.PAID
-        ? "CHECKOUT_PAYMENT_APPROVED"
-        : outcome.appliedStatus === OrderStatus.EXPIRED
-          ? "CHECKOUT_PAYMENT_EXPIRED"
-        : outcome.paymentStatus === "pending" || outcome.paymentStatus === "in_process"
-          ? "CHECKOUT_PAYMENT_PENDING"
-          : "CHECKOUT_PAYMENT_FAILED";
-
-    try {
-      await recordActivity(outcome.order.userId ?? null, activityAction, req, {
-        orderId: outcome.order.id,
-        paymentId: outcome.order.payment_id,
-        paymentStatus: outcome.paymentStatus,
-        paymentStatusDetail: outcome.order.payment_status_detail || null,
-        appliedStatus: outcome.appliedStatus,
-        duplicate: outcome.duplicate,
-        ignored: Boolean(outcome.ignored),
-        ignoreReason: outcome.ignoreReason || null,
-        paymentAmount: outcome.paymentAmount || null,
-        expectedAmount: outcome.expectedAmount || null,
-        amountMismatch: Boolean(outcome.amountMismatch),
-        stockConflict: Boolean(outcome.stockConflict),
-        unavailableCardIds: outcome.unavailableCardIds || [],
-        providerRequestId: signatureMeta.providerRequestId,
-      });
-    } catch (activityError) {
-      console.error("Failed to record Mercado Pago webhook activity", activityError);
-    }
-
-    console.info("Mercado Pago webhook processed", {
-      requestId: req.requestContext?.requestId || null,
+    const reconciliation = await reconcileMercadoPagoPayment(req, {
+      payment,
+      paymentIdOverride: paymentId,
       providerRequestId: signatureMeta.providerRequestId,
-      orderId: outcome.order.id,
-      paymentId: outcome.order.payment_id,
-      paymentStatus: outcome.paymentStatus,
-      appliedStatus: outcome.appliedStatus,
-      duplicate: outcome.duplicate,
-      ignored: Boolean(outcome.ignored),
-      ignoreReason: outcome.ignoreReason || null,
-      paymentAmount: outcome.paymentAmount || null,
-      expectedAmount: outcome.expectedAmount || null,
-      amountMismatch: Boolean(outcome.amountMismatch),
-      stockConflict: Boolean(outcome.stockConflict),
     });
 
-    invalidatePublicCatalogCaches();
-    return res.status(200).json({ received: true });
+    return res.status(200).json({
+      received: true,
+      ...(reconciliation.ignored ? { ignored: true, reason: reconciliation.reason } : {}),
+    });
   } catch (error) {
-    console.error("Mercado Pago webhook failed", error);
+    logEvent("SERVER_ERROR", "Mercado Pago webhook failed", {
+      requestId: req.requestContext?.requestId || null,
+      error,
+    });
     if (res.headersSent) return;
     res.status(error?.statusCode || 500).json({
       error: error?.message || "Webhook processing failed",
@@ -5856,7 +7178,14 @@ app.post("/api/shipping/rates", requireAuth, async (req, res) => {
     const itemCount = Number(req.body?.item_count || req.body?.itemCount || 1);
     const weight = Number(req.body?.weight || 0);
 
-    console.log("SHIPPING_FLOW", { postalCode, city, state, itemCount, weight });
+    logEvent("SHIPPING_FLOW", "Fetching shipping rates", {
+      requestId: req.requestContext?.requestId || null,
+      postalCode,
+      city,
+      state,
+      itemCount,
+      weight,
+    });
 
     const cacheKey = `shipping-rates:${postalCode}:${city.toLowerCase()}:${state.toLowerCase()}:${itemCount}:${Math.round(weight * 100)}`;
     const rates = await cacheGetOrFetch(
@@ -5872,7 +7201,11 @@ app.post("/api/shipping/rates", requireAuth, async (req, res) => {
 
     res.json({ rates });
   } catch (error) {
-    console.error("SHIPPING_ERROR", { error: error.message, stack: error.stack });
+    logEvent("SHIPPING_ERROR", "Shipping rates failed", {
+      requestId: req.requestContext?.requestId || null,
+      error: error.message,
+      stack: error.stack,
+    });
     res.status(503).json({ error: "Shipping unavailable" });
   }
 });
@@ -5918,23 +7251,13 @@ app.post("/api/admin/shipping/create", requireAdminAuth, async (req, res) => {
       return;
     }
 
-    const shipment = await createShipment({ order, carrier, service });
-
-    const updatedOrder = await prisma.order.update({
-      where: { id: orderId },
-      data: {
-        shipmentId: shipment.shipmentId,
-        trackingCode: shipment.trackingNumber,
-        carrier,
-        shipmentStatus: "created",
-        estimatedDelivery: null,
-        trackingVisibleToUser: true,
-      },
-      include: { items: true, user: true, address: true },
+    const shipmentResult = await createOrderShipmentWithEffects(order, {
+      carrier,
+      service,
+      requestId: req.requestContext?.requestId || null,
+      source: "admin",
     });
-
-    publishEvent("admin", { type: "order-update", orderId, status: updatedOrder.status });
-    publishEvent("public", { type: "order-update", orderId, status: updatedOrder.status });
+    const shipment = shipmentResult.shipment;
 
     res.json({
       shipment_id: shipment.shipmentId,
@@ -5943,8 +7266,50 @@ app.post("/api/admin/shipping/create", requireAdminAuth, async (req, res) => {
       label: shipment.label,
     });
   } catch (error) {
-    console.error("ADMIN_SHIPMENT_ERROR", { orderId: orderId || null, error: error.message, stack: error.stack });
+    logEvent("ENVIACOM_ERROR", "Admin shipment creation failed", {
+      requestId: req.requestContext?.requestId || null,
+      orderId: req.body?.order_id || req.body?.orderId || null,
+      message: error.message,
+      stack: error.stack,
+    });
     res.status(500).json({ error: error.message || "No se pudo crear el envío" });
+  }
+});
+
+app.get("/api/shipping/label/:orderId", async (req, res) => {
+  try {
+    const orderId = Number(req.params.orderId);
+    if (!Number.isFinite(orderId)) {
+      res.status(400).json({ error: "Invalid order id" });
+      return;
+    }
+
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { address: true },
+    });
+
+    if (!order) {
+      res.status(404).json({ error: "Order not found" });
+      return;
+    }
+
+    if (!String(order.shipmentId || "").startsWith("sandbox_")) {
+      res.status(404).json({ error: "Shipping label not found" });
+      return;
+    }
+
+    const pdf = buildSandboxShippingLabelPdf(order);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="duelvault-shipping-label-${order.id}.pdf"`);
+    res.send(pdf);
+  } catch (error) {
+    logEvent("ENVIACOM_ERROR", "Sandbox shipping label failed", {
+      requestId: req.requestContext?.requestId || null,
+      orderId: req.params.orderId || null,
+      error,
+    });
+    res.status(500).json({ error: "Failed to generate shipping label" });
   }
 });
 
@@ -5970,26 +7335,64 @@ app.get("/api/shipping/tracking/:code", requireAuth, async (req, res) => {
       return;
     }
 
+    logEvent("ENVIACOM_REQUEST", "Looking up tracking", {
+      requestId: req.requestContext?.requestId || null,
+      orderId: order.id,
+      trackingNumber: trackingCode,
+      carrier: order.carrier || "correo-argentino",
+    });
+
     const tracking = await getTracking(trackingCode, order.carrier || "correo-argentino");
+
+    logEvent("ENVIACOM_RESPONSE_OK", "Tracking lookup succeeded", {
+      requestId: req.requestContext?.requestId || null,
+      orderId: order.id,
+      trackingNumber: trackingCode,
+      response: tracking,
+    });
     res.json(tracking);
   } catch (error) {
-    console.error("Tracking lookup failed", error);
+    logEvent("ENVIACOM_ERROR", "Tracking lookup failed", {
+      requestId: req.requestContext?.requestId || null,
+      trackingNumber: req.params.code || null,
+      error,
+    });
     res.status(500).json({ error: error.message || "No se pudo obtener el tracking" });
   }
 });
 
-app.post("/api/webhooks/envia", express.raw({ type: "*/*" }), async (req, res) => {
+app.post(ENVIA_WEBHOOK_PATH, express.raw({ type: "*/*" }), async (req, res) => {
   try {
-    const rawBody = typeof req.body === "string" ? req.body : req.body?.toString?.("utf8") || "";
+    const rawBody = typeof req.rawBody === "string"
+      ? req.rawBody
+      : Buffer.isBuffer(req.body)
+        ? req.body.toString("utf8")
+        : typeof req.body === "string"
+          ? req.body
+          : JSON.stringify(req.body || {});
     const signature = String(req.headers["x-envia-signature"] || req.headers["x-webhook-signature"] || "");
 
+    logEvent("ENVIACOM_WEBHOOK_RECEIVED", "Webhook recibido", {
+      requestId: req.requestContext?.requestId || null,
+      headers: req.headers,
+      rawBody,
+    });
+
     if (!verifyEnviaWebhookSignature(rawBody, signature)) {
-      console.warn("Envia webhook: invalid signature");
+      logEvent("ENVIACOM_WEBHOOK_SIGNATURE_FAIL", "Firma inválida", {
+        requestId: req.requestContext?.requestId || null,
+      });
       res.sendStatus(401);
       return;
     }
 
-    const payload = JSON.parse(rawBody);
+    const payload = req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body)
+      ? req.body
+      : JSON.parse(rawBody);
+    logEvent("ENVIACOM_WEBHOOK_PARSED", "Webhook parseado", {
+      requestId: req.requestContext?.requestId || null,
+      parsed: payload,
+    });
     const trackingNumber = String(payload?.tracking_number || payload?.data?.tracking_number || "").trim();
     const newStatus = normalizeEnviaWebhookStatus(String(payload?.status || payload?.data?.status || ""));
 
@@ -6007,34 +7410,52 @@ app.post("/api/webhooks/envia", express.raw({ type: "*/*" }), async (req, res) =
       return;
     }
 
-    if (order.shipmentStatus === newStatus) {
-      res.status(200).json({ received: true, duplicate: true });
-      return;
-    }
-
-    const updateData = { shipmentStatus: newStatus };
-
-    if (newStatus === "delivered" && order.status === OrderStatus.SHIPPED) {
-      updateData.status = OrderStatus.COMPLETED;
-    }
-
-    if (newStatus === "in_transit" && order.status === OrderStatus.PAID) {
-      updateData.status = OrderStatus.SHIPPED;
-    }
-
-    await prisma.order.update({
-      where: { id: order.id },
-      data: updateData,
+    const result = await updateShipmentStatus(order.id, newStatus, {
+      source: "envia_webhook",
+      requestId: req.requestContext?.requestId || null,
+      payload,
+      order,
     });
 
-    publishEvent("admin", { type: "order-update", orderId: order.id, status: updateData.status || order.status, shipmentStatus: newStatus });
-    publishEvent("public", { type: "order-update", orderId: order.id, status: updateData.status || order.status, shipmentStatus: newStatus });
-
-    console.info("Envia webhook processed", { trackingNumber, newStatus, orderId: order.id });
-    res.status(200).json({ received: true });
+    logEvent("ENVIACOM_WEBHOOK_PROCESSED", "Webhook processed", {
+      requestId: req.requestContext?.requestId || null,
+      trackingNumber,
+      newStatus,
+      orderId: order.id,
+      ignored: result.ignored,
+      reason: result.reason,
+    });
+    res.status(200).json({
+      received: true,
+      ...(result.ignored ? { ignored: true, reason: result.reason } : {}),
+    });
   } catch (error) {
-    console.error("Envia webhook failed", error);
+    logEvent("ENVIACOM_ERROR", "Envia webhook failed", {
+      requestId: req.requestContext?.requestId || null,
+      error,
+    });
     if (!res.headersSent) res.status(500).json({ error: "Webhook processing failed" });
+  }
+});
+
+app.get("/api/internal/shipping/sync", async (req, res) => {
+  try {
+    assertCronAuthorized(req);
+    const requestedLimit = Number(req.query?.limit || SHIPPING_TRACKING_SYNC_BATCH_SIZE);
+    const result = await syncShipmentStatuses({
+      source: "cron",
+      requestId: req.requestContext?.requestId || null,
+      limit: requestedLimit,
+    });
+
+    res.json(result);
+  } catch (error) {
+    if (res.headersSent) return;
+    res.status(error?.statusCode || 500).json({
+      error: error?.message || "Failed to sync shipment statuses",
+      code: error?.code || "SYNC_SHIPMENT_STATUSES_FAILED",
+      requestId: req.requestContext?.requestId || null,
+    });
   }
 });
 
@@ -8497,6 +9918,164 @@ app.put("/api/admin/orders/:id/shipping", requireAdminAuth, async (req, res) => 
   }
 });
 
+app.patch("/api/admin/orders/:id/shipment-status", requireAdminAuth, async (req, res) => {
+  const requestId = req.requestContext?.requestId || null;
+  let idempotency = null;
+
+  try {
+    const mutationMeta = getMutationMetadata(req);
+    const orderId = Number(req.params.id);
+    const expectedUpdatedAt = parseExpectedUpdatedAt(req.body?.expected_updated_at);
+    if (!Number.isFinite(orderId)) {
+      res.status(400).json({ error: "Invalid order id" });
+      return;
+    }
+
+    if (expectedUpdatedAt === "INVALID_DATE") {
+      res.status(400).json({ error: "Invalid expected_updated_at value" });
+      return;
+    }
+
+    const parsed = parseAdminOrderShipmentStatusPayload(req.body || {});
+    if (parsed.error) {
+      res.status(400).json({ error: parsed.error });
+      return;
+    }
+
+    idempotency = await beginIdempotentMutation(req, {
+      payload: {
+        orderId,
+        status: parsed.status,
+      },
+    });
+
+    if (idempotency.replay) {
+      res.status(idempotency.replay.statusCode).json(idempotency.replay.body);
+      return;
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      assertRequestActive(req);
+
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        include: { items: true, user: true, address: true },
+      });
+
+      if (!order) {
+        throw createAppError("Order not found", {
+          statusCode: 404,
+          code: "ORDER_NOT_FOUND",
+        });
+      }
+
+      assertExpectedUpdatedAt(order, expectedUpdatedAt);
+
+      if (order.shippingZone === ShippingZone.PICKUP) {
+        throw createAppError("Pickup orders do not support shipment status", {
+          statusCode: 409,
+          code: "ORDER_HAS_NO_SHIPPING",
+        });
+      }
+
+      if (!order.shipmentId && !order.trackingCode) {
+        throw createAppError("Order has no shipment created yet", {
+          statusCode: 409,
+          code: "ORDER_SHIPMENT_NOT_CREATED",
+        });
+      }
+
+      const shipmentUpdate = await updateShipmentStatus(order.id, parsed.status, {
+        source: "admin_manual_override",
+        requestId,
+        manual: true,
+        allowRegression: true,
+        emitEvents: false,
+        order,
+        tx,
+      });
+
+      if (shipmentUpdate.changed) {
+        await createAdminAuditLog(tx, {
+          actorId: req.user.id,
+          entityType: "order",
+          entityId: orderId,
+          action: "ADMIN_ORDER_SHIPMENT_STATUS_UPDATED",
+          req,
+          routeKey: idempotency.routeKey,
+          before: sanitizeOrderForAudit(order),
+          after: sanitizeOrderForAudit(shipmentUpdate.order),
+          metadata: {
+            mutationId: mutationMeta.mutationId,
+            requestId: mutationMeta.requestId,
+            previousShipmentStatus: order.shipmentStatus || null,
+            shipmentStatus: shipmentUpdate.order?.shipmentStatus || null,
+          },
+        });
+      }
+
+      return shipmentUpdate;
+    });
+
+    if (result.changed) {
+      publishShipmentOrderUpdate(result.order);
+      try {
+        await recordActivity(req.user.id, "ADMIN_ORDER_SHIPMENT_STATUS_UPDATED", req, {
+          mutationId: mutationMeta.mutationId,
+          requestId: mutationMeta.requestId,
+          orderId,
+          shipmentStatus: result.order?.shipmentStatus || null,
+        });
+      } catch (activityError) {
+        console.error("Failed to record shipment status activity", activityError);
+      }
+    }
+
+    const cardsById = result.order ? await getOrderCardsMap([result.order], { adminThumbnail: true }) : new Map();
+    const responsePayload = {
+      order: result.order ? toOrderResponse(result.order, cardsById, { includeAdminFields: true }) : null,
+      ...(result.ignored ? { ignored: true, reason: result.reason } : {}),
+    };
+    await finalizeIdempotentMutation(idempotency, 200, responsePayload);
+    return res.json(responsePayload);
+  } catch (error) {
+    await releaseIdempotentMutation(idempotency);
+
+    if (res.headersSent) return;
+
+    if (error.message === "CONCURRENT_MODIFICATION") {
+      const currentOrder = await prisma.order.findUnique({
+        where: { id: Number(req.params.id) },
+        include: { items: true, user: true, address: true },
+      });
+      const cardsById = currentOrder ? await getOrderCardsMap([currentOrder], { adminThumbnail: true }) : new Map();
+      sendConcurrencyConflict(res, {
+        error: "El estado de envío ya cambió en otra sesión. Refrescá y reintentá.",
+        currentResource: currentOrder ? toOrderResponse(currentOrder, cardsById, { includeAdminFields: true }) : null,
+        requestId,
+        context: {
+          entity: "order",
+          operation: "shipment_status_update",
+        },
+      });
+      return;
+    }
+
+    if (error?.statusCode) {
+      res.status(error.statusCode).json({
+        error: error.message,
+        code: error.code || "REQUEST_ERROR",
+        requestId,
+        ...(error.details ? { details: error.details } : {}),
+      });
+      return;
+    }
+
+    console.error(error);
+    res.status(500).json({ error: "Failed to update shipment status" });
+  }
+});
+
 app.delete("/api/admin/orders/:id", requireAdminAuth, requireAdminRole([UserRole.ADMIN]), async (req, res) => {
   const requestId = req.requestContext?.requestId || null;
   let idempotency = null;
@@ -8620,7 +10199,7 @@ app.delete("/api/admin/orders", requireAdminAuth, requireAdminRole([UserRole.ADM
 
   try {
     const mutationMeta = getMutationMetadata(req);
-    const clearScope = String(req.body?.scope || "test").trim().toLowerCase();
+    const clearScope = String(req.query?.scope || req.body?.scope || "test").trim().toLowerCase();
     if (!["test", "all"].includes(clearScope)) {
       res.status(400).json({ error: "Invalid clear scope" });
       return;
@@ -8638,63 +10217,159 @@ app.delete("/api/admin/orders", requireAdminAuth, requireAdminRole([UserRole.ADM
       return;
     }
 
-    const responsePayload = await prisma.$transaction(async (tx) => {
-      assertRequestActive(req);
+    const ordersWhere = clearScope === "all" ? undefined : buildAdminTestOrdersWhere();
+    const candidateCount = await withDatabaseConnection(() => prisma.order.count({
+      where: ordersWhere,
+    }), { maxWaitMs: 5000 });
 
-      const allOrders = await tx.order.findMany({ include: { items: true, user: true } });
-      const orders = clearScope === "all"
-        ? allOrders
-        : allOrders.filter((order) => isAdminTestOrder(order));
+    const orders = await withDatabaseConnection(() => prisma.order.findMany({
+      where: ordersWhere,
+      select: {
+        id: true,
+      },
+      orderBy: { id: "asc" },
+      take: ADMIN_ORDER_CLEAR_BATCH_SIZE,
+    }), { maxWaitMs: 5000 });
 
-      if (!orders.length) {
-        return {
-          deletedCount: 0,
-          deletedOrderIds: [],
-          scope: clearScope,
-        };
-      }
+    const batchDeadlineAt = (req.requestContext?.startedAt || Date.now())
+      + Math.max(1000, (req.requestContext?.timeoutMs || REQUEST_TIMEOUT_MS) - ADMIN_ORDER_CLEAR_RESPONSE_GRACE_MS);
 
-      const deletedOrderIds = orders.map((order) => order.id);
-
-      for (const order of orders) {
-        assertRequestActive(req);
-        await rollbackOrderEffects(tx, order);
-        await createAdminAuditLog(tx, {
-          actorId: req.user.id,
-          entityType: "order",
-          entityId: order.id,
-          action: "ADMIN_ORDER_DELETED",
-          req,
-          routeKey: idempotency.routeKey,
-          before: sanitizeOrderForAudit(order),
-          after: null,
-          metadata: {
-            mutationId: mutationMeta.mutationId,
-            requestId: mutationMeta.requestId,
-            clearScope,
-          },
-        });
-      }
-
-      const result = await tx.order.deleteMany({
-        where: {
-          id: { in: deletedOrderIds },
-        },
-      });
-      return {
-        deletedCount: result.count,
-        deletedOrderIds,
-        scope: clearScope,
-      };
+    console.log("ADMIN_ORDER_CLEAR_BATCH_START", {
+      requestId,
+      clearScope,
+      candidateCount,
+      batchSize: orders.length,
+      batchLimit: ADMIN_ORDER_CLEAR_BATCH_SIZE,
+      timeoutMs: req.requestContext?.timeoutMs || null,
+      batchDeadlineAt,
     });
 
-    invalidatePublicCatalogCaches();
+    if (!candidateCount || !orders.length) {
+      const responsePayload = {
+        deletedCount: 0,
+        deletedOrderIds: [],
+        failedOrderIds: [],
+        errors: [],
+        failed: [],
+        scope: clearScope,
+        remainingCount: 0,
+        hasMore: false,
+      };
+      await finalizeIdempotentMutation(idempotency, 200, responsePayload);
+      return res.json(responsePayload);
+    }
+
+    const deletedOrderIds = [];
+    const errors = [];
+
+    for (const order of orders) {
+      if (Date.now() >= batchDeadlineAt) {
+        console.log("ADMIN_ORDER_CLEAR_BATCH_DEADLINE_REACHED", {
+          requestId,
+          clearScope,
+          nextOrderId: order.id,
+          deletedCount: deletedOrderIds.length,
+          failedCount: errors.length,
+          batchDeadlineAt,
+          now: Date.now(),
+        });
+        break;
+      }
+
+      assertRequestActive(req);
+      const orderStartedAt = Date.now();
+
+      console.log("ADMIN_ORDER_CLEAR_TX_START", {
+        requestId,
+        clearScope,
+        orderId: order.id,
+      });
+
+      try {
+        const deletedOrderId = await withDatabaseConnection(() => prisma.$transaction(async (tx) => {
+          assertRequestActive(req);
+          return deleteAdminOrderWithEffects(tx, order.id, {
+            actorId: req.user.id,
+            req,
+            routeKey: idempotency.routeKey,
+            mutationMeta,
+            clearScope,
+          });
+        }), { maxWaitMs: 5000 });
+
+        if (deletedOrderId != null) {
+          deletedOrderIds.push(deletedOrderId);
+        }
+
+        console.log("ADMIN_ORDER_CLEAR_TX_DONE", {
+          requestId,
+          clearScope,
+          orderId: order.id,
+          deleted: deletedOrderId != null,
+          durationMs: Date.now() - orderStartedAt,
+        });
+      } catch (error) {
+        const errorDetails = toErrorLogDetails(error);
+        console.error("ADMIN_ORDER_CLEAR_TX_ERROR", {
+          requestId,
+          clearScope,
+          orderId: order.id,
+          durationMs: Date.now() - orderStartedAt,
+          ...errorDetails,
+        });
+
+        errors.push({
+          orderId: order.id,
+          error: errorDetails.message,
+          code: errorDetails.code,
+        });
+      }
+    }
+
+    const remainingCount = await withDatabaseConnection(() => prisma.order.count({
+      where: ordersWhere,
+    }), { maxWaitMs: 5000 });
+
+    const responsePayload = {
+      deletedCount: deletedOrderIds.length,
+      deletedOrderIds,
+      failedOrderIds: errors.map((entry) => entry.orderId),
+      errors,
+      failed: errors,
+      scope: clearScope,
+      remainingCount,
+      hasMore: remainingCount > 0,
+    };
+
+    console.log("ADMIN_ORDER_CLEAR_BATCH_DONE", {
+      requestId,
+      clearScope,
+      candidateCount,
+      deletedCount: responsePayload.deletedCount,
+      failedCount: responsePayload.failedOrderIds.length,
+      remainingCount,
+      hasMore: responsePayload.hasMore,
+    });
+
+    console.log("ADMIN_ORDER_CLEAR_BATCH_DONE", {
+      requestId,
+      clearScope,
+      deletedCount: responsePayload.deletedCount,
+      failedCount: responsePayload.failedOrderIds.length,
+      failedOrderIds: responsePayload.failedOrderIds,
+    });
+
+    if (deletedOrderIds.length) {
+      invalidatePublicCatalogCaches();
+    }
     try {
       await recordActivity(req.user.id, "ADMIN_ORDERS_CLEARED", req, {
         mutationId: mutationMeta.mutationId,
         requestId: mutationMeta.requestId,
         deletedCount: responsePayload.deletedCount,
         deletedOrderIds: responsePayload.deletedOrderIds,
+        failedCount: responsePayload.errors.length,
+        failedOrderIds: responsePayload.failedOrderIds,
         scope: responsePayload.scope,
       });
     } catch (activityError) {
@@ -8732,15 +10407,23 @@ app.use((error, req, res, next) => {
 });
 
 if (isDirectExecution) {
-  console.log("[startup] DuelVault API starting...");
-  console.log(`[startup] NODE_ENV=${process.env.NODE_ENV || "undefined"} PORT=${PORT}`);
-  console.log(`[startup] JWT configured: access=${!!process.env.ACCESS_TOKEN_SECRET} refresh=${!!process.env.REFRESH_TOKEN_SECRET}`);
-  console.log(`[startup] DB configured: ${!!process.env.DATABASE_URL}`);
-  console.log(`[startup] DB host: ${(() => { try { return new URL(process.env.DATABASE_URL || "").hostname; } catch { return "INVALID_URL"; } })()}`);
-  console.log(`[startup] Redis TCP: ${isRedisTcpConfigured()}`);
+  logEvent("STARTUP", "DuelVault API starting", {
+    nodeEnv: process.env.NODE_ENV || "undefined",
+    port: PORT,
+    jwtConfigured: {
+      access: !!process.env.ACCESS_TOKEN_SECRET,
+      refresh: !!process.env.REFRESH_TOKEN_SECRET,
+    },
+    databaseConfigured: !!process.env.DATABASE_URL,
+    databaseHost: (() => { try { return new URL(process.env.DATABASE_URL || "").hostname; } catch { return "INVALID_URL"; } })(),
+    redisTcpConfigured: isRedisTcpConfigured(),
+  });
 
   const server = app.listen(PORT, () => {
-    console.log(`[startup] DuelVault API running at http://localhost:${PORT}`);
+    logEvent("STARTUP", "DuelVault API listening", {
+      port: PORT,
+      url: `http://localhost:${PORT}`,
+    });
 
     /* ── Fire-and-forget infrastructure probes (never block startup) ── */
     (async () => {
@@ -8749,42 +10432,52 @@ if (isDirectExecution) {
           prisma.$queryRaw`SELECT 1`,
           new Promise((_, r) => setTimeout(() => r(new Error("timeout")), 5000)),
         ]);
-        console.log("[db] connected");
+        logEvent("DB_STATUS", "Database connected");
         startDatabaseKeepalive();
-        console.log("[db-keepalive] started (every 4min)");
+        logEvent("DB_KEEPALIVE", "Database keepalive started", { intervalMinutes: 4 });
       } catch (err) {
-        console.warn(`[db] connection failed — ${err.message}. Will retry on first request.`);
+        logEvent("DB_STATUS", "Database connection failed; will retry on first request", {
+          error: err?.message || String(err),
+        });
         startDatabaseKeepalive();
       }
 
       try {
         const redisCache = await probeRedisConnection();
-        console.log(`[infra] cache backend=${redisCache.backend} ready=${redisCache.ok}`);
+        logEvent("INFRA_STATUS", "Redis cache probed", {
+          backend: redisCache.backend,
+          ready: redisCache.ok,
+        });
       } catch { /* non-critical */ }
 
       if (isRedisTcpConfigured()) {
         try {
           const tcpOk = await pingRedisTcp();
-          console.log(`[infra] redis-tcp ready=${tcpOk}`);
+          logEvent("INFRA_STATUS", "Redis TCP probed", { ready: tcpOk });
 
           if (tcpOk) {
             startWorker();
           }
         } catch { /* non-critical */ }
       } else {
-        console.log("[infra] redis-tcp not configured — jobs will run inline");
+        logEvent("INFRA_STATUS", "Redis TCP not configured; jobs will run inline");
+      }
+
+      if (ENABLE_SHIPPING_TRACKING_SYNC_LOOP) {
+        startShippingTrackingSyncLoop();
       }
     })();
   });
 
   /* ── Graceful shutdown ── */
   const shutdown = async (signal) => {
-    console.log(`[shutdown] ${signal} received — cleaning up...`);
+    logEvent("SHUTDOWN", "Signal received; cleaning up", { signal });
 
     server.close(() => {
-      console.log("[shutdown] HTTP server closed");
+      logEvent("SHUTDOWN", "HTTP server closed");
     });
 
+    stopShippingTrackingSyncLoop();
     stopDatabaseKeepalive();
 
     await Promise.allSettled([
@@ -8794,7 +10487,7 @@ if (isDirectExecution) {
       shutdownRedisTcp(),
     ]);
 
-    console.log("[shutdown] all resources released");
+    logEvent("SHUTDOWN", "All resources released", { signal });
     process.exit(0);
   };
 

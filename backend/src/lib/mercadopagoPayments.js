@@ -26,6 +26,28 @@ function extractMercadoPagoErrorMessage(payload, fallbackMessage) {
   return fallbackMessage;
 }
 
+function extractMercadoPagoErrorReason(payload, fallbackReason = null) {
+  const firstCause = Array.isArray(payload?.cause) ? payload.cause[0] : null;
+
+  if (firstCause?.description) {
+    return String(firstCause.description);
+  }
+
+  if (firstCause?.code) {
+    return String(firstCause.code);
+  }
+
+  if (payload?.error) {
+    return String(payload.error);
+  }
+
+  if (payload?.message) {
+    return String(payload.message);
+  }
+
+  return fallbackReason;
+}
+
 export async function createMercadoPagoDirectPayment({ accessToken, idempotencyKey, body, timeoutMs = DEFAULT_TIMEOUT_MS, signal }) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort("timeout"), timeoutMs);
@@ -62,6 +84,7 @@ export async function createMercadoPagoDirectPayment({ accessToken, idempotencyK
       );
       error.statusCode = response.status;
       error.code = "MERCADOPAGO_PAYMENT_FAILED";
+      error.reason = extractMercadoPagoErrorReason(payload, `provider_http_${response.status}`);
       error.providerPayload = payload;
       throw error;
     }

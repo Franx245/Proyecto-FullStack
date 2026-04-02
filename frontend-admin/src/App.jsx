@@ -41,6 +41,7 @@ import {
   updateContactRequestStatus,
   syncCatalogToScope,
   updateOrderShipping,
+  updateOrderShipmentStatus,
   updateOrderStatus,
   updateWhatsappSettings,
   updateUserRole,
@@ -1165,8 +1166,10 @@ function AdminShell({ session, onLogout }) {
   const [updatingUserId, setUpdatingUserId] = useState(null);
   const [isExportingOrders, setIsExportingOrders] = useState(false);
   const [savingShippingOrderId, setSavingShippingOrderId] = useState(null);
+  const [savingShipmentStatusOrderId, setSavingShipmentStatusOrderId] = useState(null);
   const [completedOrderActionKey, setCompletedOrderActionKey] = useState(null);
   const [completedShippingOrderId, setCompletedShippingOrderId] = useState(null);
+  const [completedShipmentStatusOrderId, setCompletedShipmentStatusOrderId] = useState(null);
   const [whatsappSavedToken, setWhatsappSavedToken] = useState(0);
   const [catalogSyncToken, setCatalogSyncToken] = useState(0);
   const [operationNotice, setOperationNotice] = useState(null);
@@ -1975,7 +1978,71 @@ function AdminShell({ session, onLogout }) {
   });
 
   const clearOrdersMutation = useMutation({
-    mutationFn: () => clearOrders(createMutationPayload({ scope: "test" }, { resourceType: "orders", action: "clear-test" })),
+    mutationFn: async () => {
+      const deletedOrderIds = [];
+      const failedOrderIds = [];
+      const errors = [];
+      let remainingCount = 0;
+      let hasMore = false;
+      let batchCount = 0;
+
+      while (batchCount < 12) {
+        const batch = await clearOrders(
+          createMutationPayload({ scope: "test" }, {
+            resourceType: "orders",
+            action: `clear-test-${batchCount + 1}`,
+          }),
+          { timeoutMs: 70000 }
+        );
+
+        batchCount += 1;
+
+        for (const orderId of Array.isArray(batch?.deletedOrderIds) ? batch.deletedOrderIds : []) {
+          const normalizedOrderId = Number(orderId);
+          if (Number.isFinite(normalizedOrderId) && !deletedOrderIds.includes(normalizedOrderId)) {
+            deletedOrderIds.push(normalizedOrderId);
+          }
+        }
+
+        for (const orderId of Array.isArray(batch?.failedOrderIds) ? batch.failedOrderIds : []) {
+          const normalizedOrderId = Number(orderId);
+          if (Number.isFinite(normalizedOrderId) && !failedOrderIds.includes(normalizedOrderId)) {
+            failedOrderIds.push(normalizedOrderId);
+          }
+        }
+
+        for (const entry of Array.isArray(batch?.errors) ? batch.errors : []) {
+          const normalizedOrderId = Number(entry?.orderId);
+          if (Number.isFinite(normalizedOrderId) && !errors.some((current) => current?.orderId === normalizedOrderId)) {
+            errors.push(entry);
+          }
+        }
+
+        remainingCount = Number(batch?.remainingCount || 0);
+        hasMore = Boolean(batch?.hasMore);
+
+        if (!hasMore) {
+          break;
+        }
+
+        const batchDeletedCount = Number(batch?.deletedCount || 0);
+        const batchFailedCount = Array.isArray(batch?.failedOrderIds) ? batch.failedOrderIds.length : 0;
+        if (batchDeletedCount === 0 && batchFailedCount === 0) {
+          break;
+        }
+      }
+
+      return {
+        deletedCount: deletedOrderIds.length,
+        deletedOrderIds,
+        failedOrderIds,
+        errors,
+        failed: errors,
+        remainingCount,
+        hasMore,
+        batchCount,
+      };
+    },
     onMutate: async () => {
       setIsClearingOrders(true);
       await queryClient.cancelQueries({ queryKey: ["orders", session.admin.id] });
@@ -1990,6 +2057,13 @@ function AdminShell({ session, onLogout }) {
     onSuccess: (data) => {
       const deletedOrderIds = Array.isArray(data?.deletedOrderIds) ? data.deletedOrderIds.map(Number).filter(Number.isFinite) : [];
       const deletedIds = new Set(deletedOrderIds);
+      const failedCount = Array.isArray(data?.failed)
+        ? data.failed.length
+        : Array.isArray(data?.failedOrderIds)
+          ? data.failedOrderIds.length
+          : 0;
+      const remainingCount = Number(data?.remainingCount || 0);
+      const hasMore = Boolean(data?.hasMore || remainingCount > 0);
 
       if (deletedIds.size > 0) {
         for (const [queryKey] of queryClient.getQueriesData({ queryKey: ["orders", session.admin.id] })) {
@@ -1999,7 +2073,19 @@ function AdminShell({ session, onLogout }) {
           queryClient.removeQueries({ queryKey: getOrderEntityQueryKey(orderId), exact: true });
         }
         persistAdminQueryCacheNow();
-        publishNotice("success", `Se limpiaron ${deletedIds.size} pedidos de prueba.`);
+        publishNotice(
+          failedCount > 0 || hasMore ? "info" : "success",
+          failedCount > 0
+            ? `Se limpiaron ${deletedIds.size} pedidos de prueba. Quedaron ${failedCount} con error${hasMore ? ` y ${remainingCount} pendientes` : ""}; reintentá para completar la limpieza.`
+            : hasMore
+              ? `Se limpiaron ${deletedIds.size} pedidos de prueba. Quedan ${remainingCount} pendientes; continuá la limpieza.`
+              : `Se limpiaron ${deletedIds.size} pedidos de prueba.`
+        );
+        return;
+      }
+
+      if (failedCount > 0) {
+        publishNotice("error", `No se pudo limpiar ${failedCount} pedidos de prueba. Reintentá.`);
         return;
       }
 
@@ -2078,6 +2164,64 @@ function AdminShell({ session, onLogout }) {
     },
     onSettled: (_data, _error, variables) => {
       setSavingShippingOrderId(null);
+      const tasks = [];
+      if (variables?.orderId) {
+        tasks.push(queryClient.invalidateQueries({ queryKey: getOrderEntityQueryKey(variables.orderId), exact: true, refetchType: "active" }));
+      }
+      void Promise.allSettled(tasks);
+    },
+  });
+
+  const updateOrderShipmentStatusMutation = useMutation({
+    mutationFn: ({ orderId, payload, expectedUpdatedAt }) => updateOrderShipmentStatus(
+      orderId,
+      createMutationPayload(payload, {
+        resourceType: "order",
+        action: `shipment-status-${payload?.status || payload?.shipment_status || "update"}`,
+        resourceId: orderId,
+        expectedUpdatedAt,
+      })
+    ),
+    onMutate: async ({ orderId, payload }) => {
+      setSavingShipmentStatusOrderId(orderId);
+      const orderEntityQueryKey = getOrderEntityQueryKey(orderId);
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: ["orders", session.admin.id] }),
+        queryClient.cancelQueries({ queryKey: orderEntityQueryKey, exact: true }),
+      ]);
+
+      const previousOrders = queryClient.getQueriesData({ queryKey: ["orders", session.admin.id] });
+      const previousOrderDetail = queryClient.getQueryData(orderEntityQueryKey);
+      for (const [queryKey] of previousOrders) {
+        queryClient.setQueryData(queryKey, (current) => mergeOrderIntoResponse(current, queryKey, orderId, {
+          shipment_status: payload.status,
+        }));
+      }
+      mergeEntityCache(queryClient, orderEntityQueryKey, "order", {
+        shipment_status: payload.status,
+      }, { createIfMissing: false });
+
+      return { previousOrders, previousOrderDetail, orderEntityQueryKey };
+    },
+    onError: (error, variables, context) => {
+      restoreQuerySnapshots(queryClient, context?.previousOrders);
+      restoreExactQuerySnapshot(queryClient, context?.orderEntityQueryKey || getOrderEntityQueryKey(variables.orderId), context?.previousOrderDetail);
+      publishNotice("error", `Estado de envío de pedido #${variables.orderId}: ${getReadableMutationError(error)}`);
+    },
+    onSuccess: (data, variables) => {
+      const updatedOrder = data?.order;
+      if (updatedOrder) {
+        for (const [queryKey] of queryClient.getQueriesData({ queryKey: ["orders", session.admin.id] })) {
+          queryClient.setQueryData(queryKey, (current) => mergeOrderIntoResponse(current, queryKey, variables.orderId, updatedOrder));
+        }
+        mergeEntityCache(queryClient, getOrderEntityQueryKey(variables.orderId), "order", updatedOrder);
+      }
+
+      pulseSuccess(setCompletedShipmentStatusOrderId, variables.orderId);
+      publishNotice("success", `Estado de envío actualizado para pedido #${variables.orderId}.`);
+    },
+    onSettled: (_data, _error, variables) => {
+      setSavingShipmentStatusOrderId(null);
       const tasks = [];
       if (variables?.orderId) {
         tasks.push(queryClient.invalidateQueries({ queryKey: getOrderEntityQueryKey(variables.orderId), exact: true, refetchType: "active" }));
@@ -2548,7 +2692,9 @@ function AdminShell({ session, onLogout }) {
             updatingOrderId={updatingOrderId}
             completedOrderActionKey={completedOrderActionKey}
             savingShippingOrderId={savingShippingOrderId}
+            savingShipmentStatusOrderId={savingShipmentStatusOrderId}
             completedShippingOrderId={completedShippingOrderId}
+            completedShipmentStatusOrderId={completedShipmentStatusOrderId}
             deletingOrderId={deletingOrderId}
             isClearingOrders={isClearingOrders}
             isExportingOrders={isExportingOrders}
@@ -2568,6 +2714,11 @@ function AdminShell({ session, onLogout }) {
             onShippingSave={(orderId, payload) => updateOrderShippingMutation.mutate({
               orderId,
               payload,
+              expectedUpdatedAt: getResourceUpdatedAt(orders.find((order) => order.id === orderId)),
+            })}
+            onShipmentStatusSave={(orderId, status) => updateOrderShipmentStatusMutation.mutate({
+              orderId,
+              payload: { status },
               expectedUpdatedAt: getResourceUpdatedAt(orders.find((order) => order.id === orderId)),
             })}
           />

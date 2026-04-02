@@ -1,0 +1,86 @@
+# Page snapshot
+
+```yaml
+- generic [active] [ref=e1]:
+  - region "Notifications alt+T"
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - generic [ref=e6]:
+        - link "YG DuelVault Marketplace premium" [ref=e7] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e10]: YG
+          - generic [ref=e11]:
+            - paragraph [ref=e12]: DuelVault
+            - paragraph [ref=e13]:
+              - img [ref=e14]
+              - text: Marketplace premium
+        - navigation [ref=e16]:
+          - link "Inicio" [ref=e17] [cursor=pointer]:
+            - /url: /
+          - link "Cartas" [ref=e18] [cursor=pointer]:
+            - /url: /singles
+          - link "Lotes" [ref=e19] [cursor=pointer]:
+            - /url: /lotes
+          - link "Decks" [ref=e20] [cursor=pointer]:
+            - /url: /decks
+          - link "Pedidos" [ref=e21] [cursor=pointer]:
+            - /url: /orders
+        - generic [ref=e23]:
+          - img [ref=e24]
+          - textbox "Buscar cartas por nombre, tipo o rareza" [ref=e27]:
+            - /placeholder: Buscar cartas...
+        - link "Abrir carrito" [ref=e28] [cursor=pointer]:
+          - /url: /cart
+          - img [ref=e29]
+        - link "Ingresar" [ref=e33] [cursor=pointer]:
+          - /url: /auth?redirect=/cart
+    - main [ref=e34]
+    - contentinfo [ref=e35]:
+      - generic [ref=e37]:
+        - generic [ref=e38]:
+          - link "YG DuelVault Marketplace premium" [ref=e39] [cursor=pointer]:
+            - /url: /
+            - generic [ref=e42]: YG
+            - generic [ref=e43]:
+              - paragraph [ref=e44]: DuelVault
+              - paragraph [ref=e45]: Marketplace premium
+          - paragraph [ref=e46]: Tu destino para cartas, accesorios y productos sellados. Catálogo curado, stock real y una experiencia pensada para compradores competitivos.
+        - generic [ref=e47]:
+          - heading "Explorar" [level=2] [ref=e48]
+          - generic [ref=e49]:
+            - link "Inicio" [ref=e50] [cursor=pointer]:
+              - /url: /
+            - link "Cartas sueltas" [ref=e51] [cursor=pointer]:
+              - /url: /singles
+            - link "Lotes" [ref=e52] [cursor=pointer]:
+              - /url: /lotes
+            - link "Decks" [ref=e53] [cursor=pointer]:
+              - /url: /decks
+            - link "Pedidos" [ref=e54] [cursor=pointer]:
+              - /url: /orders
+        - generic [ref=e55]:
+          - heading "Soporte" [level=2] [ref=e56]
+          - generic [ref=e57]:
+            - link "Contacto" [ref=e58] [cursor=pointer]:
+              - /url: /contact
+            - link "Política de privacidad" [ref=e59] [cursor=pointer]:
+              - /url: /privacy
+            - link "Términos y condiciones" [ref=e60] [cursor=pointer]:
+              - /url: /terms
+        - generic [ref=e61]:
+          - heading "Contáctanos" [level=2] [ref=e62]
+          - generic [ref=e63]:
+            - generic [ref=e64]:
+              - img [ref=e65]
+              - generic [ref=e68]: Buenos Aires, Argentina
+            - generic [ref=e69]:
+              - img [ref=e70]
+              - generic [ref=e73]: Sin email configurado
+            - generic [ref=e74]:
+              - img [ref=e75]
+              - generic [ref=e77]: Sin configurar
+      - generic [ref=e79]:
+        - paragraph [ref=e80]: © 2026 DuelVault. Todos los derechos reservados.
+        - paragraph [ref=e81]: No afiliado a Konami. Diseño optimizado para la tienda.
+  - alert [ref=e82]
+```
