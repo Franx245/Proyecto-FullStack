@@ -74,6 +74,18 @@ export function logEvent(type, message, data = {}) {
   }));
 }
 
+export const logger = {
+  info(type, data = {}) {
+    logEvent(type, type, data);
+  },
+  warn(type, data = {}) {
+    logEvent(type, type, data);
+  },
+  error(type, data = {}) {
+    logEvent(type, type, data);
+  },
+};
+
 export function toLogError(error) {
   return normalizeLogValue(error);
 }

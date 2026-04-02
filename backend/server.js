@@ -39,7 +39,7 @@ import { handleWarmPublicCache } from "./src/lib/jobs/warm-public-cache.js";
 import { getRedisBackendName, probeRedisConnection } from "./src/lib/redis.js";
 import { getShippingRates, createShipment as createEnviaShipment, getTracking, verifyEnviaWebhookSignature, normalizeEnviaWebhookStatus, normalizeEnviaCarrier } from "./src/lib/envia.js";
 import { invalidateOrderRelatedCache } from "./src/lib/cache-invalidation.js";
-import { logEvent } from "./src/lib/logger.js";
+import { logEvent, logger } from "./src/lib/logger.js";
 import { recordApiMetric, recordCatalogSearchMetric } from "./src/lib/metrics.js";
 import {
   adminLoginBodySchema,
@@ -297,6 +297,12 @@ app.use((req, res, next) => {
     startedAt: Date.now(),
     timeoutMs,
   };
+
+  logger.info("HTTP_REQUEST", {
+    requestId,
+    method: req.method,
+    url: req.url,
+  });
 
   logEvent("REQUEST_IN", "Incoming request", {
     requestId,
@@ -4483,7 +4489,7 @@ async function scheduleMercadoPagoReconciliation(req, { payment, paymentIdOverri
         "user-agent": req.headers?.["user-agent"] || null,
       },
     }, {
-      jobId: `reconcile-mercadopago-payment:${paymentId}`,
+      jobId: `reconcile-mercadopago-payment-${paymentId}`,
     });
 
     return {
@@ -6880,6 +6886,11 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
     assertMercadoPagoDirectPaymentsConfigured();
     await ensureOrderSchemaReady();
 
+    logger.info("PAYMENT_REQUEST_RECEIVED", {
+      requestId: req.requestContext?.requestId || null,
+      body: req.body,
+    });
+
     idempotency = await beginIdempotentMutation(req, {
       payload: {
         orderId: req.body?.orderId ?? null,
@@ -6904,6 +6915,12 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
     const installments = Number(req.body?.installments);
     const identificationType = String(req.body?.identification?.type || "").trim();
     const identificationNumber = String(req.body?.identification?.number || "").trim();
+
+    logger.info("TOKEN_RECEIVED", {
+      requestId: req.requestContext?.requestId || null,
+      orderId: Number.isFinite(orderId) ? orderId : null,
+      present: Boolean(token),
+    });
 
     paymentDebugContext = {
       ...paymentDebugContext,
@@ -6942,6 +6959,12 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
       useSandboxWebhook: shouldUseMercadoPagoSandboxWebhook(mercadoPagoAccount),
     });
     const providerIdempotencyKey = String(idempotency.key || req.body?.mutation_id || `${orderId}-${Date.now()}`);
+
+    logger.info("PAYMENT_PAYLOAD_BUILD_START", {
+      requestId: req.requestContext?.requestId || null,
+      orderId: prepared?.order?.id || null,
+    });
+
     const paymentPayload = {
       transaction_amount: prepared.totalArs,
       token,
@@ -6985,6 +7008,15 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
     });
 
     const isSandbox = MERCADOPAGO_ACCESS_TOKEN?.startsWith("TEST");
+
+    logger.info("PAYMENT_PROVIDER_CALL", {
+      requestId: req.requestContext?.requestId || null,
+      orderId: prepared.order.id,
+      isSandbox,
+      hasToken: Boolean(paymentPayload?.token),
+      amount: paymentPayload.transaction_amount,
+    });
+
     let payment = resolvePaymentResult({ isSandbox, payload: paymentPayload });
 
     if (!payment) {
@@ -6996,6 +7028,18 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
         signal: req.requestContext?.signal,
       });
     }
+
+    logger.info("PAYMENT_RESULT_RAW", {
+      requestId: req.requestContext?.requestId || null,
+      orderId: prepared.order.id,
+      paymentResult: payment,
+    });
+
+    logger.info("PAYMENT_STATUS_CHECK", {
+      requestId: req.requestContext?.requestId || null,
+      orderId: prepared.order.id,
+      status: payment?.status || null,
+    });
 
     logEvent("PAYMENT_FLOW", "Payment flow resolved", {
       requestId: req.requestContext?.requestId || null,
@@ -7038,6 +7082,11 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
     let webhookPending = true;
 
     if (paymentStatus === "approved") {
+      logger.info("PAYMENT_APPROVED_DETECTED", {
+        requestId: req.requestContext?.requestId || null,
+        orderId: updatedOrder.id,
+      });
+
       const simulatedPayment = {
         id: payment?.id,
         status: paymentStatus,
@@ -7066,6 +7115,13 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
           ? `sandbox_${req.requestContext?.requestId || Date.now()}`
           : req.requestContext?.requestId || null,
         source: isSandbox ? "payments_create_sandbox" : "payments_create",
+      });
+
+      logger.info("ENQUEUE_PAYMENT_JOB", {
+        requestId: req.requestContext?.requestId || null,
+        orderId: updatedOrder.id,
+        queued: reconciliationJob.queued,
+        jobId: reconciliationJob.jobId || null,
       });
 
       if (reconciliationJob.queued) {
@@ -7104,6 +7160,13 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
       },
       webhook_pending: webhookPending,
     };
+
+    logger.info("PAYMENT_RESPONSE", {
+      requestId: req.requestContext?.requestId || null,
+      status: payment?.status || null,
+      orderId: updatedOrder.id,
+      webhookPending,
+    });
 
     try {
       await recordActivity(userId, "PAYMENT_CREATE_REQUESTED", req, {

@@ -85,6 +85,7 @@ export function startWorker() {
       name: job.name,
       id: job.id,
       attempt: job.attemptsMade + 1,
+      data: job.data,
     });
   });
 

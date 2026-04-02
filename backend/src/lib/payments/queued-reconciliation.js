@@ -1,6 +1,13 @@
-import { logEvent } from "../logger.js";
+import { logEvent, logger } from "../logger.js";
 
 export async function processQueuedMercadoPagoPayment(data = {}) {
+  logger.info("HANDLE_PAYMENT_START", {
+    orderId: Number(data?.payment?.metadata?.order_id || data?.payment?.external_reference || 0) || null,
+    paymentId: String(data?.paymentIdOverride || data?.payment?.id || "").trim() || null,
+    source: data?.source || "bullmq",
+    requestId: data?.requestId || null,
+  });
+
   logEvent("JOB_PAYMENT_RECONCILIATION_START", "Processing queued Mercado Pago reconciliation", {
     orderId: Number(data?.payment?.metadata?.order_id || data?.payment?.external_reference || 0) || null,
     paymentId: String(data?.paymentIdOverride || data?.payment?.id || "").trim() || null,
