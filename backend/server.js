@@ -640,30 +640,6 @@ const DASHBOARD_ORDER_SUMMARY_SELECT = {
   },
 };
 
-const ORDER_HISTORY_USER_SELECT = {
-  id: true,
-  username: true,
-  fullName: true,
-  avatarUrl: true,
-};
-
-const ORDER_HISTORY_ADDRESS_SELECT = {
-  id: true,
-  label: true,
-  recipientName: true,
-  phone: true,
-  line1: true,
-  line2: true,
-  city: true,
-  state: true,
-  postalCode: true,
-  zone: true,
-  notes: true,
-  isDefault: true,
-  createdAt: true,
-  updatedAt: true,
-};
-
 const ORDER_HISTORY_ITEM_SELECT = {
   id: true,
   cardId: true,
@@ -705,8 +681,6 @@ const ORDER_HISTORY_SELECT = {
   notes: true,
   createdAt: true,
   updatedAt: true,
-  user: { select: ORDER_HISTORY_USER_SELECT },
-  address: { select: ORDER_HISTORY_ADDRESS_SELECT },
   items: { select: ORDER_HISTORY_ITEM_SELECT },
 };
 
@@ -715,23 +689,11 @@ const ORDER_HISTORY_CARD_SELECT = {
   ygoproId: true,
   name: true,
   image: true,
-  description: true,
-  cardType: true,
-  race: true,
-  attribute: true,
-  atk: true,
-  def: true,
-  level: true,
-  setName: true,
   setCode: true,
   rarity: true,
   price: true,
   stock: true,
   lowStockThreshold: true,
-  isVisible: true,
-  isFeatured: true,
-  isNewArrival: true,
-  salesCount: true,
   updatedAt: true,
 };
 
