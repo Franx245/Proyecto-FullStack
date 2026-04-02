@@ -2,12 +2,47 @@
  * Redis TCP client — used for BullMQ queues and pub/sub.
  *
  * Separate from the Upstash REST client (cache).
- * Requires REDIS_URL env var pointing to a TCP Redis instance (e.g. Railway Redis).
+ * Requires REDIS_TCP_URL or REDIS_URL pointing to a TCP Redis instance (e.g. Railway Redis).
  */
 import "./load-env.js";
 import IORedis from "ioredis";
+import { logEvent } from "./logger.js";
 
-const REDIS_URL = String(process.env.REDIS_URL || "").trim();
+function getRedisUrl() {
+  return String(process.env.REDIS_TCP_URL || process.env.REDIS_URL || "").trim();
+}
+
+function describeRedisUrl(redisUrl) {
+  try {
+    const parsed = new URL(redisUrl);
+    return {
+      protocol: parsed.protocol.replace(/:$/, ""),
+      host: parsed.hostname,
+      port: parsed.port || null,
+    };
+  } catch {
+    return {
+      protocol: null,
+      host: null,
+      port: null,
+    };
+  }
+}
+
+function requireRedisUrl(label = "default") {
+  const redisUrl = getRedisUrl();
+  if (redisUrl) {
+    return redisUrl;
+  }
+
+  const error = new Error("REDIS_TCP_URL or REDIS_URL is not set");
+  logEvent("REDIS_CONFIG_ERROR", "Redis URL is required", {
+    label,
+    envKeys: ["REDIS_TCP_URL", "REDIS_URL"],
+    error,
+  });
+  throw error;
+}
 
 /** @type {IORedis | null} */
 let sharedClient = null;
@@ -18,10 +53,19 @@ let subscriberClient = null;
 /** @type {IORedis | null} */
 let publisherClient = null;
 
-function createIORedisClient(label = "default") {
-  if (!REDIS_URL) return null;
+function createIORedisClient(label = "default", { required = false } = {}) {
+  const redisUrl = required ? requireRedisUrl(label) : getRedisUrl();
+  if (!redisUrl) return null;
 
-  const client = new IORedis(REDIS_URL, {
+  logEvent("REDIS_CONNECTING", "Connecting to Redis...", {
+    label,
+  });
+  logEvent("REDIS_URL_DETECTED", "Redis URL detected", {
+    label,
+    ...describeRedisUrl(redisUrl),
+  });
+
+  const client = new IORedis(redisUrl, {
     maxRetriesPerRequest: null,
     enableReadyCheck: true,
     retryStrategy(times) {
@@ -35,22 +79,46 @@ function createIORedisClient(label = "default") {
   });
 
   client.on("error", (err) => {
-    console.error(`[redis-tcp:${label}] error:`, err.message);
+    logEvent("REDIS_ERROR", "Redis connection error", {
+      label,
+      error: err,
+    });
   });
 
   client.on("connect", () => {
-    console.info(`[redis-tcp:${label}] connected`);
+    logEvent("REDIS_CONNECTED", "Redis socket connected", {
+      label,
+    });
+  });
+
+  client.on("ready", () => {
+    logEvent("REDIS_READY", "Connected to Redis", {
+      label,
+    });
+  });
+
+  client.on("close", () => {
+    logEvent("REDIS_CLOSE", "Redis connection closed", {
+      label,
+    });
+  });
+
+  client.on("reconnecting", (delay) => {
+    logEvent("REDIS_RECONNECTING", "Redis reconnecting", {
+      label,
+      delayMs: delay,
+    });
   });
 
   return client;
 }
 
 export function isRedisTcpConfigured() {
-  return Boolean(REDIS_URL);
+  return Boolean(getRedisUrl());
 }
 
 export function getSharedRedisClient() {
-  if (!REDIS_URL) return null;
+  if (!getRedisUrl()) return null;
   if (!sharedClient) {
     sharedClient = createIORedisClient("shared");
   }
@@ -59,7 +127,7 @@ export function getSharedRedisClient() {
 
 /** Dedicated subscriber connection for pub/sub (cannot share with commands). */
 export function getSubscriberClient() {
-  if (!REDIS_URL) return null;
+  if (!getRedisUrl()) return null;
   if (!subscriberClient) {
     subscriberClient = createIORedisClient("subscriber");
   }
@@ -68,7 +136,7 @@ export function getSubscriberClient() {
 
 /** Dedicated publisher connection for pub/sub. */
 export function getPublisherClient() {
-  if (!REDIS_URL) return null;
+  if (!getRedisUrl()) return null;
   if (!publisherClient) {
     publisherClient = createIORedisClient("publisher");
   }
@@ -77,8 +145,7 @@ export function getPublisherClient() {
 
 /** BullMQ connection object — creates a new IORedis per call for workers. */
 export function createBullMQConnection() {
-  if (!REDIS_URL) return null;
-  return createIORedisClient("bullmq");
+  return createIORedisClient("bullmq", { required: true });
 }
 
 /** Reusable connection for BullMQ Queue (not Worker). */

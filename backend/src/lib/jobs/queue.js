@@ -6,6 +6,7 @@
  */
 import { Queue } from "bullmq";
 import { getQueueConnection, isRedisTcpConfigured } from "../redis-tcp.js";
+import { logEvent } from "../logger.js";
 
 /** @type {Queue | null} */
 let jobQueue = null;
@@ -47,7 +48,10 @@ export async function enqueueJob(jobName, data, opts = {}) {
 
   if (!queue) {
     // Inline fallback — run synchronously (serverless / dev)
-    console.warn(`[queue] no TCP Redis — running job "${jobName}" inline`);
+    logEvent("JOB_INLINE_FALLBACK", "Redis TCP unavailable; running job inline", {
+      jobName,
+      options: opts,
+    });
     const { processJob } = await import("./worker.js");
     await processJob(jobName, data);
     return null;
@@ -59,7 +63,13 @@ export async function enqueueJob(jobName, data, opts = {}) {
     ...(opts.jobId ? { jobId: opts.jobId } : {}),
   });
 
-  console.info(`[queue] enqueued ${jobName} (id=${job.id})`);
+  logEvent("JOB_ENQUEUED", "Job enqueued", {
+    jobName,
+    id: job.id,
+    priority: opts.priority ?? null,
+    delay: opts.delay ?? 0,
+    jobId: opts.jobId ?? null,
+  });
   return job;
 }
 

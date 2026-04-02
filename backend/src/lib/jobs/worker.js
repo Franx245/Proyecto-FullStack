@@ -6,6 +6,7 @@
  */
 import { Worker } from "bullmq";
 import { createBullMQConnection, isRedisTcpConfigured } from "../redis-tcp.js";
+import { logEvent } from "../logger.js";
 import { getQueueName } from "./queue.js";
 import { handleRecomputePrices } from "./recompute-prices.js";
 import { handleComputeCardRankings } from "./compute-card-rankings.js";
@@ -51,28 +52,17 @@ export async function processJob(jobName, data) {
 export function startWorker() {
   if (worker) return worker;
   if (!isRedisTcpConfigured()) {
-    console.info("[worker] Redis TCP not configured — worker disabled (inline fallback)");
+    logEvent("WORKER_DISABLED", "Redis TCP not configured; worker disabled", {
+      mode: "inline-fallback",
+    });
     return null;
   }
 
   const connection = createBullMQConnection();
-  if (!connection) return null;
 
   worker = new Worker(
     getQueueName(),
-    async (job) => {
-      const t0 = Date.now();
-      console.info(`[worker] processing ${job.name} (id=${job.id}, attempt=${job.attemptsMade + 1})`);
-
-      try {
-        const result = await processJob(job.name, job.data);
-        console.info(`[worker] completed ${job.name} (id=${job.id}) in ${Date.now() - t0}ms`);
-        return result;
-      } catch (err) {
-        console.error(`[worker] failed ${job.name} (id=${job.id}):`, err.message);
-        throw err;
-      }
-    },
+    async (job) => processJob(job.name, job.data),
     {
       connection,
       concurrency: 3,
@@ -80,15 +70,46 @@ export function startWorker() {
     },
   );
 
+  worker.on("ready", () => {
+    logEvent("WORKER_READY", "Connected to Redis", {
+      queue: getQueueName(),
+    });
+  });
+
+  worker.on("active", (job) => {
+    logEvent("JOB_RECEIVED", "JOB RECEIVED", {
+      name: job.name,
+      id: job.id,
+      attempt: job.attemptsMade + 1,
+    });
+  });
+
+  worker.on("completed", (job) => {
+    logEvent("JOB_DONE", "JOB DONE", {
+      name: job?.name,
+      id: job?.id,
+    });
+  });
+
   worker.on("failed", (job, err) => {
-    console.error(`[worker] job ${job?.name} (id=${job?.id}) failed permanently:`, err.message);
+    logEvent("JOB_FAILED", "JOB FAILED", {
+      name: job?.name,
+      id: job?.id,
+      error: err?.message,
+      stack: err?.stack,
+    });
   });
 
   worker.on("error", (err) => {
-    console.error("[worker] error:", err.message);
+    logEvent("WORKER_ERROR", "Worker error", {
+      error: err,
+    });
   });
 
-  console.info("[worker] BullMQ worker started");
+  logEvent("WORKER_STARTED", "BullMQ worker started", {
+    queue: getQueueName(),
+    concurrency: 3,
+  });
   return worker;
 }
 
@@ -96,6 +117,8 @@ export async function shutdownWorker() {
   if (worker) {
     await worker.close();
     worker = null;
-    console.info("[worker] shut down");
+    logEvent("WORKER_SHUTDOWN", "Worker shut down", {
+      queue: getQueueName(),
+    });
   }
 }
