@@ -6322,6 +6322,7 @@ app.get("/api/auth/orders", requireAuth, async (req, res) => {
 
     const queryStart = Date.now();
     const ordersWithSentinel = await prisma.order.findMany({
+      relationLoadStrategy: "join",
       where: { userId },
       select: ORDER_HISTORY_SELECT,
       orderBy: { createdAt: "desc" },
