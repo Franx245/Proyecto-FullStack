@@ -645,6 +645,9 @@ const ORDER_HISTORY_ITEM_SELECT = {
   cardId: true,
   quantity: true,
   price: true,
+  card: {
+    select: ORDER_HISTORY_CARD_SELECT,
+  },
 };
 
 const ORDER_HISTORY_SELECT = {
@@ -6292,10 +6295,17 @@ app.get("/api/auth/orders", requireAuth, async (req, res) => {
     });
 
     const cardsMapStart = Date.now();
-    const cardsById = await getOrderCardsMap(orders, {
-      adminThumbnail: true,
-      cardSelect: ORDER_HISTORY_CARD_SELECT,
-    });
+    const cardsById = new Map(
+      attachMetadata(
+        [...new Map(
+          orders
+            .flatMap((order) => order.items)
+            .filter((item) => item.card)
+            .map((item) => [item.cardId, item.card]),
+        ).values()],
+        { adminThumbnail: true },
+      ).map((card) => [card.id, card]),
+    );
     logger.info("ORDERS_CARDS_MAP_TIME", {
       userId,
       page,
