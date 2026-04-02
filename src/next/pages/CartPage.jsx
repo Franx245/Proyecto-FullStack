@@ -65,6 +65,7 @@ import { formatPrice } from "@/utils/currency";
  *  customer_name?: string,
  *  phone?: string,
  *  addressId?: string,
+ *  shipping?: string,
  *  recipient_name?: string,
  *  line1?: string,
  *  city?: string,
@@ -227,6 +228,19 @@ function findRateByCarrier(rates, carrier) {
   return rates.find((rate) => normalizeShippingCarrier(rate.carrier) === normalizedCarrier) || null;
 }
 
+function buildShippingQuoteKey({ zone, deliveryMode, addressId, postalCode, city, state, itemCount, weight }) {
+  return JSON.stringify({
+    zone: String(zone || ""),
+    deliveryMode: String(deliveryMode || ""),
+    addressId: deliveryMode === "saved" ? String(addressId || "") : "",
+    postalCode: String(postalCode || "").trim(),
+    city: String(city || "").trim().toLowerCase(),
+    state: String(state || "").trim().toLowerCase(),
+    itemCount: Number(itemCount || 0),
+    weight: Number(weight || 0).toFixed(2),
+  });
+}
+
 export default function CartPage() {
   const { items, totalPrice, totalItems, clearCart, removeItem, isHydrated } = useCart();
   const { user, isAuthenticated, isBootstrapping } = useAuth();
@@ -244,6 +258,7 @@ export default function CartPage() {
   const [errors, setErrors] = useState(/** @type {CheckoutErrors} */ ({}));
   const [shippingPostalCode, setShippingPostalCode] = useState("");
   const [selectedCarrier, setSelectedCarrier] = useState(/** @type {string | null} */ (null));
+  const [selectedCarrierQuoteKey, setSelectedCarrierQuoteKey] = useState(/** @type {string | null} */ (null));
 
   const debouncedPostalCode = useDebounce(shippingPostalCode, 400);
   const totalWeight = items.reduce((acc, item) => acc + 0.6 * item.quantity, 0);
@@ -278,6 +293,33 @@ export default function CartPage() {
   const isPickup = effectiveZone === "pickup";
   const normalizedQuotedCity = String(quotedAddress?.city || "").trim().toLowerCase();
   const normalizedQuotedState = String(quotedAddress?.state || "").trim().toLowerCase();
+  const visibleShippingQuoteKey = useMemo(
+    () => buildShippingQuoteKey({
+      zone: effectiveZone,
+      deliveryMode,
+      addressId: selectedAddressId,
+      postalCode: shippingPostalCode,
+      city: quotedAddress?.city,
+      state: quotedAddress?.state,
+      itemCount: items.length,
+      weight: totalWeight,
+    }),
+    [deliveryMode, effectiveZone, items.length, quotedAddress?.city, quotedAddress?.state, selectedAddressId, shippingPostalCode, totalWeight]
+  );
+  const resolvedShippingQuoteKey = useMemo(
+    () => buildShippingQuoteKey({
+      zone: effectiveZone,
+      deliveryMode,
+      addressId: selectedAddressId,
+      postalCode: debouncedPostalCode,
+      city: quotedAddress?.city,
+      state: quotedAddress?.state,
+      itemCount: items.length,
+      weight: totalWeight,
+    }),
+    [debouncedPostalCode, deliveryMode, effectiveZone, items.length, quotedAddress?.city, quotedAddress?.state, selectedAddressId, totalWeight]
+  );
+  const waitingForFreshShippingQuote = !isPickup && visibleShippingQuoteKey !== resolvedShippingQuoteKey;
 
   const shippingRatesQuery = useQuery({
     queryKey: ["shipping", debouncedPostalCode, normalizedQuotedCity, normalizedQuotedState, items.length, totalWeight],
@@ -313,6 +355,10 @@ export default function CartPage() {
   }, [user]);
 
   useEffect(() => {
+    if (addressesQuery.isLoading) {
+      return;
+    }
+
     const defaultAddress = getPreferredAddress(addresses);
     if (!defaultAddress) {
       setDeliveryMode("new");
@@ -322,12 +368,13 @@ export default function CartPage() {
     setDeliveryMode("saved");
     setSelectedAddressId(String(defaultAddress.id));
     setShippingZone(defaultAddress.zone);
-  }, [addresses]);
+  }, [addresses, addressesQuery.isLoading]);
 
   useEffect(() => {
     if (isPickup) {
       setShippingPostalCode("");
       setSelectedCarrier("showroom");
+      setSelectedCarrierQuoteKey("pickup");
       return;
     }
 
@@ -344,15 +391,15 @@ export default function CartPage() {
       return;
     }
 
-    setSelectedCarrier(null);
-  }, [debouncedPostalCode, normalizedQuotedCity, normalizedQuotedState, items.length, totalWeight, isPickup]);
+    setSelectedCarrierQuoteKey(null);
+  }, [deliveryMode, effectiveZone, isPickup, items.length, normalizedQuotedCity, normalizedQuotedState, selectedAddressId, shippingPostalCode, totalWeight]);
 
   useEffect(() => {
     if (isPickup) {
       return;
     }
 
-    if (shippingRatesQuery.isFetching || !shippingRates.length) {
+    if (waitingForFreshShippingQuote || shippingRatesQuery.isFetching || !shippingRates.length) {
       return;
     }
 
@@ -365,10 +412,24 @@ export default function CartPage() {
       const preferredRate = findRateByCarrier(shippingRates, DEFAULT_DELIVERY_CARRIER);
       return normalizeShippingCarrier(preferredRate?.carrier || shippingRates[0]?.carrier);
     });
-  }, [shippingRates, shippingRatesQuery.isFetching, isPickup]);
+  }, [shippingRates, shippingRatesQuery.isFetching, isPickup, waitingForFreshShippingQuote]);
 
   useEffect(() => {
-    if (!isAuthenticated || deliveryMode !== "saved" || isPickup) {
+    if (isPickup) {
+      return;
+    }
+
+    if (waitingForFreshShippingQuote || shippingRatesQuery.isFetching || !selectedRate || !normalizeShippingCarrier(selectedCarrier)) {
+      return;
+    }
+
+    setSelectedCarrierQuoteKey((current) => (
+      current === resolvedShippingQuoteKey ? current : resolvedShippingQuoteKey
+    ));
+  }, [isPickup, resolvedShippingQuoteKey, selectedCarrier, selectedRate, shippingRatesQuery.isFetching, waitingForFreshShippingQuote]);
+
+  useEffect(() => {
+    if (addressesQuery.isLoading || !isAuthenticated || deliveryMode !== "saved" || isPickup) {
       return;
     }
 
@@ -384,11 +445,31 @@ export default function CartPage() {
 
     setSelectedAddressId(String(fallbackAddress.id));
     setShippingZone(fallbackAddress.zone);
-  }, [addresses, deliveryMode, isAuthenticated, isPickup, selectedAddress]);
+  }, [addresses, addressesQuery.isLoading, deliveryMode, isAuthenticated, isPickup, selectedAddress]);
+
+  useEffect(() => {
+    setErrors((current) => (current.shipping ? { ...current, shipping: "" } : current));
+  }, [selectedCarrier, shippingPostalCode, shippingZone, deliveryMode, selectedAddressId]);
 
   useEffect(() => {
     setNewAddress((current) => ({ ...current, zone: shippingZone }));
   }, [shippingZone]);
+
+  const hasValidSelectedCarrier = !isPickup
+    && Boolean(
+      selectedRate
+      && normalizeShippingCarrier(selectedCarrier)
+      && selectedCarrierQuoteKey === visibleShippingQuoteKey
+      && !shippingRatesQuery.isError
+      && !waitingForFreshShippingQuote
+      && !shippingRatesQuery.isFetching
+    );
+  const hasStaleShippingSelection = !isPickup
+    && Boolean(selectedCarrier)
+    && selectedCarrierQuoteKey !== null
+    && selectedCarrierQuoteKey !== visibleShippingQuoteKey;
+  const shippingLoading = !isPickup && (shippingRatesQuery.isFetching || waitingForFreshShippingQuote);
+  const hasResolvedShippingRates = !isPickup && !shippingLoading && !shippingRatesQuery.isError && shippingRates.length > 0;
 
   /** @type {number | null} */
   let effectiveShippingCost = null;
@@ -396,17 +477,18 @@ export default function CartPage() {
     effectiveShippingCost = 0;
   } else if (normalizeShippingCarrier(selectedCarrier) === "showroom") {
     effectiveShippingCost = 0;
-  } else if (Number(selectedRate?.price) > 0) {
+  } else if (hasValidSelectedCarrier && Number(selectedRate?.price) > 0) {
     effectiveShippingCost = selectedRate.price;
   }
 
-  const shippingLoading = !isPickup && shippingRatesQuery.isFetching;
   const effectiveCarrierLabel = isPickup
     ? "Retiro en showroom"
-    : selectedRate?.carrierLabel || getShippingCarrierLabel(selectedCarrier) || "Seleccioná envío";
+    : hasValidSelectedCarrier
+      ? (selectedRate?.carrierLabel || getShippingCarrierLabel(selectedCarrier) || "Seleccioná envío")
+      : "Seleccioná envío";
   const totalWithShipping = effectiveShippingCost === null ? null : totalPrice + effectiveShippingCost;
-  const isShippingValid = isPickup || (!!normalizeShippingCarrier(selectedCarrier) && Number(selectedRate?.price) > 0);
   const requiresManualAddress = isAuthenticated && effectiveZone !== "pickup" && (deliveryMode === "new" || !selectedAddress);
+  const checkoutBlockedByShipping = isAuthenticated && !isPickup && (shippingLoading || shippingRatesQuery.isError || !hasValidSelectedCarrier);
 
   const checkoutMutation = useMutation({
     mutationFn: checkoutCart,
@@ -424,13 +506,28 @@ export default function CartPage() {
     if (!phone.trim()) nextErrors.phone = "Ingresá tu número de WhatsApp";
     if (!customerName.trim()) nextErrors.customer_name = "Ingresá el nombre de quien recibe";
     if (effectiveZone !== "pickup" && deliveryMode === "saved" && !selectedAddressId) {
-      nextErrors.addressId = "Elegí una dirección guardada o cargá una nueva";
+      nextErrors.addressId = addressesQuery.isLoading
+        ? "Esperá a que carguemos tus direcciones o cargá una nueva"
+        : "Elegí una dirección guardada o cargá una nueva";
     }
     if (requiresManualAddress) {
       if (!newAddress.recipient_name.trim()) nextErrors.recipient_name = "Ingresá quién recibe";
       if (!newAddress.line1.trim()) nextErrors.line1 = "Ingresá calle y altura";
       if (!newAddress.city.trim()) nextErrors.city = "Ingresá la ciudad";
       if (!newAddress.state.trim()) nextErrors.state = "Ingresá la provincia";
+    }
+    if (effectiveZone !== "pickup") {
+      if (shippingPostalCode.trim().length < 4) {
+        nextErrors.shipping = "Completá el código postal para calcular el envío";
+      } else if (shippingLoading) {
+        nextErrors.shipping = "Esperá a que terminemos de calcular el envío";
+      } else if (shippingRatesQuery.isError) {
+        nextErrors.shipping = "No pudimos calcular el envío para esa dirección";
+      } else if (hasStaleShippingSelection) {
+        nextErrors.shipping = "Volvé a elegir el envío para la dirección actual";
+      } else if (!hasValidSelectedCarrier) {
+        nextErrors.shipping = "Seleccioná un método de envío para continuar";
+      }
     }
     if (!accepted) nextErrors.accepted = "Debés aceptar la política de privacidad";
     setErrors(nextErrors);
@@ -619,6 +716,7 @@ export default function CartPage() {
                           onClick={() => {
                             setShippingZone("pickup");
                             setSelectedCarrier("showroom");
+                            setSelectedCarrierQuoteKey("pickup");
                             setSelectedAddressId("");
                           }}
                           className={`group relative flex flex-col items-center gap-1 sm:gap-2 rounded-2xl border-2 px-2 sm:px-4 py-3 sm:py-5 text-center transition-all duration-200 ${
@@ -641,7 +739,7 @@ export default function CartPage() {
                         {/* Correo Argentino */}
                         <button
                           type="button"
-                          disabled={!isPickup && !shippingLoading && !correoRate}
+                          disabled={!isPickup && (shippingLoading || !correoRate)}
                           onClick={() => {
                             setSelectedCarrier("correo-argentino");
                             if (effectiveZone === "pickup") {
@@ -659,14 +757,14 @@ export default function CartPage() {
                             }
                           }}
                           className={`group relative flex flex-col items-center gap-1 sm:gap-2 rounded-2xl border-2 px-2 sm:px-4 py-3 sm:py-5 text-center transition-all duration-200 ${
-                            normalizeShippingCarrier(selectedCarrier) === "correo-argentino" && !isPickup
+                            normalizeShippingCarrier(selectedCarrier) === "correo-argentino" && !isPickup && selectedCarrierQuoteKey === visibleShippingQuoteKey
                               ? "border-sky-400 bg-sky-400/10 shadow-[0_0_24px_rgba(56,189,248,0.12)]"
                               : !isPickup && !shippingLoading && !correoRate
                                 ? "border-border/40 opacity-50"
                                 : "border-border/60 hover:border-sky-400/40 hover:bg-sky-400/5"
                           } disabled:cursor-not-allowed`}
                         >
-                          {normalizeShippingCarrier(selectedCarrier) === "correo-argentino" && !isPickup ? (
+                          {normalizeShippingCarrier(selectedCarrier) === "correo-argentino" && !isPickup && selectedCarrierQuoteKey === visibleShippingQuoteKey ? (
                             <div className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-sky-400 shadow-lg shadow-sky-400/30">
                               <Check className="h-3 w-3 text-background" />
                             </div>
@@ -689,7 +787,7 @@ export default function CartPage() {
                         {/* Andreani */}
                         <button
                           type="button"
-                          disabled={!isPickup && !shippingLoading && !andreaniRate}
+                          disabled={!isPickup && (shippingLoading || !andreaniRate)}
                           onClick={() => {
                             setSelectedCarrier("andreani");
                             if (effectiveZone === "pickup") {
@@ -707,14 +805,14 @@ export default function CartPage() {
                             }
                           }}
                           className={`group relative flex flex-col items-center gap-1 sm:gap-2 rounded-2xl border-2 px-2 sm:px-4 py-3 sm:py-5 text-center transition-all duration-200 ${
-                            normalizeShippingCarrier(selectedCarrier) === "andreani" && !isPickup
+                            normalizeShippingCarrier(selectedCarrier) === "andreani" && !isPickup && selectedCarrierQuoteKey === visibleShippingQuoteKey
                               ? "border-violet-400 bg-violet-400/10 shadow-[0_0_24px_rgba(167,139,250,0.12)]"
                               : !isPickup && !shippingLoading && !andreaniRate
                                 ? "border-border/40 opacity-50"
                                 : "border-border/60 hover:border-violet-400/40 hover:bg-violet-400/5"
                           } disabled:cursor-not-allowed`}
                         >
-                          {normalizeShippingCarrier(selectedCarrier) === "andreani" && !isPickup ? (
+                          {normalizeShippingCarrier(selectedCarrier) === "andreani" && !isPickup && selectedCarrierQuoteKey === visibleShippingQuoteKey ? (
                             <div className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-violet-400 shadow-lg shadow-violet-400/30">
                               <Check className="h-3 w-3 text-background" />
                             </div>
@@ -739,13 +837,13 @@ export default function CartPage() {
                         <div className="rounded-xl border border-rose-400/25 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">
                           ⚠️ No pudimos calcular el envío para ese código postal.
                         </div>
-                      ) : !isPickup && shippingPostalCode.length >= 4 && shippingRatesQuery.isLoading ? (
+                      ) : !isPickup && shippingPostalCode.length >= 4 && shippingLoading ? (
                         <div className="flex items-center gap-2 rounded-xl border border-border bg-secondary/60 px-4 py-3 text-sm text-muted-foreground">
-                          <Loader2 className="h-4 w-4 animate-spin" /> Calculando envío real para CP {shippingPostalCode}...
+                          <Loader2 className="h-4 w-4 animate-spin" /> Actualizando envío real para CP {shippingPostalCode.trim()}...
                         </div>
-                      ) : !isPickup && shippingRates.length > 0 ? (
+                      ) : hasResolvedShippingRates ? (
                         <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/5 px-4 py-2 text-xs text-emerald-300">
-                          ✓ Tarifa actualizada por Envia.com para CP {shippingPostalCode}
+                          ✓ Tarifa actualizada por Envia.com para CP {shippingPostalCode.trim()}
                         </div>
                       ) : !isPickup ? (
                         <div className="rounded-xl border border-border bg-secondary/40 px-4 py-2 text-xs text-muted-foreground">
@@ -828,6 +926,11 @@ export default function CartPage() {
                                 </p>
                               </div>
                             ) : null}
+                          </div>
+                        ) : deliveryMode === "saved" && addressesQuery.isLoading ? (
+                          <div className="space-y-3 rounded-2xl border border-border bg-background/50 p-4">
+                            <div className="h-11 animate-pulse rounded-xl bg-secondary/80" />
+                            <div className="h-20 animate-pulse rounded-2xl bg-secondary/60" />
                           </div>
                         ) : (
                           <div className="grid gap-3 sm:grid-cols-2">
@@ -966,19 +1069,11 @@ export default function CartPage() {
                 </label>
                 {errors.accepted ? <p className="text-xs text-destructive">{errors.accepted}</p> : null}
 
-                {!isShippingValid && effectiveZone !== "pickup" && !shippingLoading ? (
-                  <p className="text-xs text-amber-400 text-center">
-                    {shippingRatesQuery.isError
-                      ? "⚠️ No pudimos calcular el envío. Intentá de nuevo."
-                      : !debouncedPostalCode || debouncedPostalCode.length < 4
-                        ? "Seleccioná un método de envío"
-                        : "Calculando tarifa de envío…"}
-                  </p>
-                ) : null}
+                {errors.shipping ? <p className="text-xs text-amber-400 text-center">{errors.shipping}</p> : null}
 
                 <button
                   onClick={handleConfirm}
-                  disabled={checkoutMutation.isPending || isBootstrapping || addressesQuery.isLoading || shippingLoading || !isShippingValid || totalWithShipping === null || items.length === 0}
+                  disabled={checkoutMutation.isPending || isBootstrapping || items.length === 0 || checkoutBlockedByShipping}
                   className="w-full h-12 rounded-2xl bg-primary font-bold text-primary-foreground flex items-center justify-center gap-2 transition-all duration-200 hover:brightness-110 hover:shadow-lg hover:shadow-primary/20 disabled:cursor-not-allowed disabled:opacity-40 active:scale-[0.98]"
                 >
                   {checkoutMutation.isPending ? (

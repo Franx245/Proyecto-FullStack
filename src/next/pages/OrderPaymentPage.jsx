@@ -175,6 +175,7 @@ export default function OrderPaymentPage({ orderId }) {
 
   const canPay = ownsOrder && canRetryDirectPayment(order);
   const shouldPollOrder = Boolean(lastAttempt && order?.status === "pending_payment");
+  const shouldShowOrderPlaceholder = !order && (isBootstrapping || isRestoringSession || orderQuery.isLoading || orderQuery.isFetching);
 
   /** @param {DirectPaymentPayload} payload */
   const createPaymentMutation = (payload) => createDirectPayment(payload, {
@@ -417,12 +418,6 @@ export default function OrderPaymentPage({ orderId }) {
     };
   }, [amount, brickContainerId, brickPayerEmail, canPay, currentOrderId, isAuthenticated, ownsOrder]);
 
-  if (isBootstrapping || isRestoringSession) {
-    return (
-      <div className="mx-auto flex min-h-[40vh] max-w-[900px] items-center justify-center px-4 py-10 text-sm text-muted-foreground">{isRestoringSession ? "Restaurando sesión..." : "Cargando sesión..."}</div>
-    );
-  }
-
   if (!isValidOrderId) {
     return (
       <div className="mx-auto max-w-[760px] px-4 py-10 text-sm text-muted-foreground">ID de orden inválido.</div>
@@ -476,10 +471,23 @@ export default function OrderPaymentPage({ orderId }) {
             <div className="group rounded-[32px] border border-violet-500/20 bg-card/60 backdrop-blur-xl p-6 shadow-[0_24px_80px_rgba(0,0,0,0.24),0_0_40px_rgba(139,92,246,0.08)] transition-all duration-300 hover:border-violet-500/35 hover:shadow-[0_24px_80px_rgba(0,0,0,0.24),0_0_60px_rgba(139,92,246,0.12)]">
               <h2 className="text-lg font-black text-foreground">Resumen de la orden</h2>
 
-              {orderQuery.isLoading ? (
-                <div className="mt-5 flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Cargando orden...
+              {shouldShowOrderPlaceholder ? (
+                <div className="mt-5 space-y-4">
+                  <div className="rounded-3xl border border-border bg-background/50 p-5">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {Array.from({ length: 4 }).map((_, index) => (
+                        <div key={index} className="space-y-2">
+                          <div className="h-3 w-24 animate-pulse rounded bg-secondary/70" />
+                          <div className="h-6 w-32 animate-pulse rounded bg-secondary/90" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    {Array.from({ length: 2 }).map((_, index) => (
+                      <div key={index} className="h-16 animate-pulse rounded-2xl border border-border bg-background/50" />
+                    ))}
+                  </div>
                 </div>
               ) : !order ? (
                 <div className="mt-5 space-y-3">
@@ -554,7 +562,7 @@ export default function OrderPaymentPage({ orderId }) {
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h2 className="text-2xl font-black text-foreground">Formulario de pago</h2>
-                  <p className="mt-2 text-sm text-muted-foreground">Monto validado por servidor: {order ? formatCurrency(amount) : "No disponible"}</p>
+                  <p className="mt-2 text-sm text-muted-foreground">Monto validado por servidor: {order ? formatCurrency(amount) : shouldShowOrderPlaceholder ? "Cargando..." : "No disponible"}</p>
                 </div>
                 <div className="rounded-2xl border border-border bg-background/60 px-4 py-3 text-xs text-muted-foreground">Orden #{numericOrderId}</div>
               </div>
@@ -564,6 +572,28 @@ export default function OrderPaymentPage({ orderId }) {
               ) : null}
 
               {sdkError ? <div className="mt-6 rounded-2xl border border-rose-400/25 bg-rose-400/10 p-4 text-sm text-rose-200">{sdkError}</div> : null}
+
+              {shouldShowOrderPlaceholder ? (
+                <div className="mt-6 space-y-4">
+                  <div className="flex items-center gap-2 rounded-2xl border border-border bg-background/50 px-4 py-3 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    {isRestoringSession ? "Restaurando sesión..." : isBootstrapping ? "Validando sesión..." : "Cargando datos de la orden..."}
+                  </div>
+                  <div className="overflow-hidden rounded-[28px] border border-violet-500/20 bg-slate-950/90 p-3 shadow-[0_24px_60px_rgba(15,23,42,0.18),0_0_40px_rgba(139,92,246,0.12)] backdrop-blur-xl">
+                    <div className="min-h-[420px] rounded-[24px] bg-slate-900/80 p-5">
+                      <div className="space-y-4">
+                        <div className="h-10 w-40 animate-pulse rounded-xl bg-slate-800" />
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          {Array.from({ length: 6 }).map((_, index) => (
+                            <div key={index} className="h-12 animate-pulse rounded-xl bg-slate-800/90" />
+                          ))}
+                        </div>
+                        <div className="h-28 animate-pulse rounded-2xl bg-slate-800/80" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
 
               {order && canPay ? (
                 <div className={`mt-6 rounded-2xl border p-4 ${sdkError || paymentMutation.isError ? "border-amber-400/25 bg-amber-400/10" : "border-violet-500/15 bg-violet-500/5"}`}>

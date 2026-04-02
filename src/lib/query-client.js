@@ -6,6 +6,7 @@ import { CATALOG_QUERY_STALE_TIME } from "@/api/store";
 const CARDS_CACHE_MAX_AGE = 1000 * 60 * 60 * 6;
 const CARDS_QUERY_GC_TIME = 1000 * 60 * 30;
 const QUERY_PERSISTENCE_KEY = "duelvault-react-query-cache-v2";
+const VOLATILE_QUERY_KEYS = new Set(["card-detail", "storefront-config"]);
 const noopPersister = {
 	persistClient: async () => {},
 	restoreClient: async () => undefined,
@@ -64,6 +65,12 @@ function hasStaleCatalogScope(queries) {
 	return false;
 }
 
+/** @param {PersistedQueryLike} query */
+function isVolatilePersistedQuery(query) {
+	const key = Array.isArray(query?.queryKey) ? query.queryKey[0] : null;
+	return typeof key === "string" && VOLATILE_QUERY_KEYS.has(key);
+}
+
 /** @param {any} persistedClient */
 function sanitizePersistedClient(persistedClient) {
 	if (!persistedClient || typeof persistedClient !== "object") {
@@ -78,7 +85,7 @@ function sanitizePersistedClient(persistedClient) {
 	const rawQueries = Array.isArray(clientState.queries) ? clientState.queries : [];
 	const validQueries = rawQueries.filter(
 		/** @param {PersistedQueryLike} query */
-		(query) => isRestorableQueryState(query?.state)
+		(query) => isRestorableQueryState(query?.state) && !isVolatilePersistedQuery(query)
 	);
 
 	const discardCatalog = hasStaleCatalogScope(validQueries);
@@ -148,7 +155,11 @@ function shouldPersistQuery(query) {
 		return false;
 	}
 
-	if (["ygopro-card-sets", "card-detail", "storefront-config"].includes(query.queryKey[0])) {
+	if (VOLATILE_QUERY_KEYS.has(query.queryKey[0])) {
+		return false;
+	}
+
+	if (["ygopro-card-sets"].includes(query.queryKey[0])) {
 		return true;
 	}
 

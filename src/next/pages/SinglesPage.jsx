@@ -100,8 +100,8 @@ export default function SinglesPage({ category, initialData }) {
     placeholderData: retainPreviousData,
     staleTime: CATALOG_QUERY_STALE_TIME,
     refetchOnMount: false,
-    refetchOnReconnect: true,
-    refetchOnWindowFocus: true,
+    refetchOnReconnect: false,
+    refetchOnWindowFocus: false,
     queryFn: async () => fetchCatalogCards({
       page,
       pageSize: CATALOG_PAGE_SIZE,

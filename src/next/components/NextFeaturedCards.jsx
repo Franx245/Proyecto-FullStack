@@ -22,11 +22,9 @@ export default function NextFeaturedCards({
     staleTime: 1000 * 60 * 2,
     initialData,
     placeholderData: retainPreviousData,
-    refetchOnMount: "always",
-    refetchOnWindowFocus: true,
-    refetchOnReconnect: true,
-    refetchInterval: 25_000,
-    refetchIntervalInBackground: false,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     queryFn,
   });
 

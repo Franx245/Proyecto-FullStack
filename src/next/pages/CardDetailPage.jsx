@@ -15,6 +15,8 @@ import { readLastCatalogHref } from "@/lib/catalog-url-state";
 import { retainPreviousData } from "@/lib/query-client";
 import { buildCardPath } from "@/lib/seo";
 
+const CARD_DETAIL_STALE_TIME = 1000 * 60 * 2;
+
 function DetailSkeleton() {
   return (
     <div className="max-w-[1200px] mx-auto px-4 py-6 space-y-6">
@@ -46,17 +48,18 @@ function DetailSkeleton() {
 export default function CardDetailPage({ id, initialData }) {
   const router = useRouter();
   const backHref = useMemo(() => readLastCatalogHref("/singles"), []);
+  const hasInitialData = Boolean(initialData?.card);
   const { data, isLoading } = useQuery({
     queryKey: ["card-detail", id],
     queryFn: () => fetchCardDetail(id || ""),
     enabled: Boolean(id),
-    staleTime: 1000 * 60 * 2,
+    staleTime: CARD_DETAIL_STALE_TIME,
     initialData,
-    initialDataUpdatedAt: Date.now(),
-    placeholderData: retainPreviousData,
-    refetchOnMount: true,
-    refetchOnReconnect: true,
-    refetchOnWindowFocus: true,
+    initialDataUpdatedAt: hasInitialData ? Date.now() : undefined,
+    placeholderData: hasInitialData ? undefined : retainPreviousData,
+    refetchOnMount: (query) => Date.now() - Number(query.state.dataUpdatedAt || 0) >= CARD_DETAIL_STALE_TIME,
+    refetchOnReconnect: false,
+    refetchOnWindowFocus: false,
   });
 
   const card = data?.card ?? null;
