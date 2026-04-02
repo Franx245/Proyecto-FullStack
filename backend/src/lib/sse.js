@@ -80,20 +80,22 @@ function setupSSEResponse(req, res) {
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
+  req.setTimeout(0);
+  res.setTimeout(0);
   res.flushHeaders();
 
-  // Heartbeat every 30s to keep connection alive + detect dead sockets
+  // Heartbeat every 10s to keep intermediaries and sockets alive.
   const heartbeat = setInterval(() => {
     if (res.writableEnded) {
       clearInterval(heartbeat);
       return;
     }
     try {
-      res.write(":heartbeat\n\n");
+      res.write(":\n\n");
     } catch {
       clearInterval(heartbeat);
     }
-  }, 30_000);
+  }, 10_000);
 
   // Send initial connected event
   sendSSE(res, { event: "connected", ts: Date.now() });
