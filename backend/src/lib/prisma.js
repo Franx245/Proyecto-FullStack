@@ -204,3 +204,72 @@ export async function probeDatabaseConnection({ force = false } = {}) {
 
   return databaseProbeState.inflight;
 }
+
+/* ── DB keepalive: prevent Supabase free-tier from pausing ── */
+
+const DB_KEEPALIVE_INTERVAL_MS = 4 * 60 * 1000; // every 4 minutes
+let _keepaliveTimer = null;
+
+export function startDatabaseKeepalive() {
+  if (_keepaliveTimer) return;
+  _keepaliveTimer = setInterval(async () => {
+    try {
+      await Promise.race([
+        prisma.$queryRaw`SELECT 1`,
+        new Promise((_, r) => setTimeout(() => r(new Error("keepalive timeout")), 3000)),
+      ]);
+    } catch (err) {
+      console.warn("[db-keepalive] ping failed:", err.message);
+    }
+  }, DB_KEEPALIVE_INTERVAL_MS);
+  _keepaliveTimer.unref(); // don't prevent process exit
+}
+
+export function stopDatabaseKeepalive() {
+  if (_keepaliveTimer) {
+    clearInterval(_keepaliveTimer);
+    _keepaliveTimer = null;
+  }
+}
+
+/* ── Retry wrapper for transient connection failures ── */
+
+const TRANSIENT_CODES = new Set([
+  "P1001", // Can't reach database server
+  "P1002", // Database server timed out
+  "P1008", // Operations timed out
+  "P1017", // Server has closed the connection
+  "P2024", // Timed out fetching a new connection from the connection pool
+]);
+
+function isTransientError(err) {
+  if (!err) return false;
+  const code = err.code || err?.meta?.code || "";
+  if (TRANSIENT_CODES.has(code)) return true;
+  const msg = String(err.message || "");
+  return (
+    msg.includes("Can't reach database server") ||
+    msg.includes("Connection refused") ||
+    msg.includes("Connection timed out") ||
+    msg.includes("Server has closed the connection")
+  );
+}
+
+export async function withRetry(fn, { retries = 1, delayMs = 500 } = {}) {
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (attempt < retries && isTransientError(err)) {
+        console.warn(`[db-retry] attempt ${attempt + 1} failed (${err.code || err.message}), retrying in ${delayMs}ms...`);
+        await new Promise((r) => setTimeout(r, delayMs));
+        delayMs *= 2; // exponential backoff
+      } else {
+        throw err;
+      }
+    }
+  }
+  throw lastError;
+}

@@ -9,7 +9,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import prismaPkg from "@prisma/client";
 import path from "path";
 import { fileURLToPath } from "url";
-import { prisma, withDatabaseConnection } from "./src/lib/prisma.js";
+import { prisma, withDatabaseConnection, startDatabaseKeepalive, stopDatabaseKeepalive, withRetry } from "./src/lib/prisma.js";
 import { syncCatalogFromScope } from "./src/lib/catalogSync.js";
 import {
   cacheGetOrFetch,
@@ -782,7 +782,7 @@ function buildCheckoutExpirationDate(baseTime = Date.now()) {
 }
 
 async function inspectOrderSchemaCompatibility() {
-  const [columnRows, enumRows] = await Promise.all([
+  const [columnRows, enumRows] = await withRetry(() => Promise.all([
     prisma.$queryRaw`
       SELECT column_name
       FROM information_schema.columns
@@ -795,7 +795,7 @@ async function inspectOrderSchemaCompatibility() {
       JOIN pg_type t ON e.enumtypid = t.oid
       WHERE t.typname = 'OrderStatus'
     `,
-  ]);
+  ]), { retries: 2, delayMs: 1000 });
 
   const existingColumns = new Set((Array.isArray(columnRows) ? columnRows : []).map((row) => String(row.column_name || "").trim()));
   const existingStatuses = new Set((Array.isArray(enumRows) ? enumRows : []).map((row) => String(row.enumlabel || "").trim()));
@@ -4061,10 +4061,12 @@ app.get("/api/health", async (_req, res) => {
   let dbOk = false;
   let dbError = null;
   try {
-    await Promise.race([
-      prisma.$queryRaw`SELECT 1`.then(() => { dbOk = true; }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("db probe timeout")), 2000)),
-    ]);
+    await withRetry(async () => {
+      await Promise.race([
+        prisma.$queryRaw`SELECT 1`.then(() => { dbOk = true; }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("db probe timeout")), 2000)),
+      ]);
+    }, { retries: 1, delayMs: 500 });
   } catch (err) {
     dbError = err?.message || "unknown";
   }
@@ -8467,8 +8469,11 @@ if (isDirectExecution) {
           new Promise((_, r) => setTimeout(() => r(new Error("timeout")), 5000)),
         ]);
         console.log("[db] connected");
+        startDatabaseKeepalive();
+        console.log("[db-keepalive] started (every 4min)");
       } catch (err) {
         console.warn(`[db] connection failed — ${err.message}. Will retry on first request.`);
+        startDatabaseKeepalive();
       }
 
       try {
@@ -8498,6 +8503,8 @@ if (isDirectExecution) {
     server.close(() => {
       console.log("[shutdown] HTTP server closed");
     });
+
+    stopDatabaseKeepalive();
 
     await Promise.allSettled([
       shutdownWorker(),
