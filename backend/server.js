@@ -48,6 +48,12 @@ import { invalidateOrderRelatedCache } from "./src/lib/cache-invalidation.js";
 import { logEvent, logger } from "./src/lib/logger.js";
 import { recordApiMetric, recordCatalogSearchMetric } from "./src/lib/metrics.js";
 import {
+  createTraceContext,
+  isPerfTraceEnabled,
+  runWithTraceContext,
+  summarizeTraceContext,
+} from "./src/lib/trace-context.js";
+import {
   adminLoginBodySchema,
   contactRequestBodySchema,
   forgotPasswordBodySchema,
@@ -206,6 +212,38 @@ function resolveRequestTimeoutMs(req) {
   return REQUEST_TIMEOUT_MS;
 }
 
+function isTraceableApiRequest(req) {
+  const requestPath = String(req?.path || req?.originalUrl || "");
+  return requestPath === "/api" || requestPath.startsWith("/api/");
+}
+
+function buildTraceQueryKeys(query) {
+  if (!query || typeof query !== "object") {
+    return [];
+  }
+
+  return Object.keys(query)
+    .map((key) => String(key || "").trim())
+    .filter(Boolean)
+    .sort()
+    .slice(0, 20);
+}
+
+function buildTraceSummaryPayload(req, traceContext, extra = {}) {
+  const summary = summarizeTraceContext(traceContext);
+
+  return {
+    traceId: req.requestContext?.traceId || null,
+    requestId: req.requestContext?.requestId || null,
+    method: req.method,
+    path: req.path,
+    queryKeys: buildTraceQueryKeys(req.query),
+    durationMs: Date.now() - (req.requestContext?.startedAt || Date.now()),
+    ...summary,
+    ...extra,
+  };
+}
+
 function isAllowedOrigin(origin) {
   if (!origin) {
     return true;
@@ -288,88 +326,128 @@ app.use(express.json({
   },
 }));
 app.use((req, res, next) => {
-  const requestId = String(req.headers["x-request-id"] || randomUUID());
+  const requestId = String(req.headers["x-request-id"] || randomUUID()).trim() || randomUUID();
+  const traceId = String(req.headers["x-trace-id"] || requestId || `trace_${randomUUID()}`).trim() || `trace_${randomUUID()}`;
   const controller = new AbortController();
   const timeoutMs = resolveRequestTimeoutMs(req);
-
-  req.requestContext = {
-    requestId,
-    signal: controller.signal,
-    isCancelled: false,
-    isTimedOut: false,
-    startedAt: Date.now(),
-    timeoutMs,
-  };
-
-  logger.info("HTTP_REQUEST", {
-    requestId,
-    method: req.method,
-    url: req.url,
-  });
-
-  logEvent("REQUEST_IN", "Incoming request", {
+  const perfEnabled = isPerfTraceEnabled();
+  const traceableApiRequest = isTraceableApiRequest(req);
+  const traceContext = createTraceContext({
+    traceId,
     requestId,
     method: req.method,
     path: req.path,
-    query: req.query || {},
-    body: buildRequestBodySnapshot(req),
+    startedAt: Date.now(),
   });
 
-  const abortRequest = (reason) => {
-    req.requestContext.isCancelled = true;
-    if (reason === "timeout") {
-      req.requestContext.isTimedOut = true;
-    }
-
-    if (!controller.signal.aborted) {
-      controller.abort(reason);
-    }
-  };
-
-  res.setHeader("X-Request-Id", requestId);
-  req.on("aborted", () => abortRequest("client_aborted"));
-  req.on("close", () => {
-    if (req.aborted) {
-      abortRequest("client_aborted");
-    }
-  });
-
-  res.setTimeout(timeoutMs, () => {
-    abortRequest("timeout");
-    logEvent("REQUEST_TIMEOUT", "Request timed out", {
+  return runWithTraceContext(traceContext, () => {
+    req.requestContext = {
       requestId,
-      method: req.method,
-      path: req.path,
+      traceId,
+      traceContext,
+      perfEnabled,
+      signal: controller.signal,
+      isCancelled: false,
+      isTimedOut: false,
+      abortLogged: false,
+      startedAt: traceContext.startedAt,
       timeoutMs,
-    });
-    if (!res.headersSent) {
-      res.status(408).json({
-        error: "Request timed out",
-        code: "REQUEST_TIMEOUT",
-        requestId,
-        timeout_ms: timeoutMs,
-      });
-    }
-  });
+    };
 
-  res.on("finish", () => {
-    const durationMs = Date.now() - (req.requestContext?.startedAt || Date.now());
-    logEvent("REQUEST_OUT", "Response sent", {
+    logger.info("HTTP_REQUEST", {
       requestId,
+      traceId,
+      method: req.method,
+      url: req.url,
+    });
+
+    logEvent("REQUEST_IN", "Incoming request", {
+      requestId,
+      traceId,
       method: req.method,
       path: req.path,
-      status: res.statusCode,
-      duration: durationMs,
+      query: req.query || {},
+      body: buildRequestBodySnapshot(req),
     });
-    void recordApiMetric({
-      method: req.method,
-      route: req.route?.path || req.path,
-      statusCode: res.statusCode,
-      durationMs,
-    });
-  });
 
-  next();
+    if (perfEnabled && traceableApiRequest) {
+      logEvent("REQUEST_RECEIVED", "Traceable request received", buildTraceSummaryPayload(req, traceContext));
+    }
+
+    const abortRequest = (reason) => {
+      req.requestContext.isCancelled = true;
+      if (reason === "timeout") {
+        req.requestContext.isTimedOut = true;
+      }
+
+      if (!req.requestContext.abortLogged && perfEnabled && traceableApiRequest) {
+        req.requestContext.abortLogged = true;
+        logEvent("REQUEST_ABORTED", "Request aborted", buildTraceSummaryPayload(req, traceContext, { reason }));
+      }
+
+      if (!controller.signal.aborted) {
+        controller.abort(reason);
+      }
+    };
+
+    res.setHeader("X-Request-Id", requestId);
+    res.setHeader("X-Trace-Id", traceId);
+    req.on("aborted", () => abortRequest("client_aborted"));
+    req.on("close", () => {
+      if (req.aborted) {
+        abortRequest("client_aborted");
+      }
+    });
+
+    res.setTimeout(timeoutMs, () => {
+      abortRequest("timeout");
+      logEvent("REQUEST_TIMEOUT", "Request timed out", {
+        requestId,
+        traceId,
+        method: req.method,
+        path: req.path,
+        timeoutMs,
+      });
+      if (!res.headersSent) {
+        res.status(408).json({
+          error: "Request timed out",
+          code: "REQUEST_TIMEOUT",
+          requestId,
+          timeout_ms: timeoutMs,
+        });
+      }
+    });
+
+    res.on("finish", () => {
+      const durationMs = Date.now() - (req.requestContext?.startedAt || Date.now());
+      logEvent("REQUEST_OUT", "Response sent", {
+        requestId,
+        traceId,
+        method: req.method,
+        path: req.path,
+        status: res.statusCode,
+        duration: durationMs,
+      });
+
+      if (perfEnabled && traceableApiRequest) {
+        logEvent("RESPONSE_SENT", "Traceable response sent", buildTraceSummaryPayload(req, traceContext, {
+          status: res.statusCode,
+        }));
+        logEvent("REQUEST_SUMMARY", "Trace summary", buildTraceSummaryPayload(req, traceContext, {
+          status: res.statusCode,
+        }));
+      }
+
+      void recordApiMetric({
+        method: req.method,
+        route: req.route?.path || req.path,
+        statusCode: res.statusCode,
+        durationMs,
+      });
+    });
+
+    next();
+  });
 });
 
 app.use([
@@ -661,10 +739,6 @@ const ORDER_HISTORY_CARD_SELECT = {
   image: true,
   setCode: true,
   rarity: true,
-  price: true,
-  stock: true,
-  lowStockThreshold: true,
-  updatedAt: true,
 };
 
 const ORDER_HISTORY_ITEM_SELECT = {
@@ -683,24 +757,17 @@ const ORDER_HISTORY_SELECT = {
   shippingCost: true,
   total: true,
   currency: true,
-  exchange_rate: true,
   total_ars: true,
   status: true,
   payment_id: true,
   payment_status: true,
-  payment_status_detail: true,
-  preference_id: true,
-  payment_approved_at: true,
   expires_at: true,
   shippingZone: true,
   shippingLabel: true,
   trackingCode: true,
   trackingVisibleToUser: true,
   carrier: true,
-  shippingLabelUrl: true,
   shipmentStatus: true,
-  shipmentId: true,
-  estimatedDelivery: true,
   customerName: true,
   customerEmail: true,
   customerPhone: true,
@@ -708,9 +775,7 @@ const ORDER_HISTORY_SELECT = {
   shippingCity: true,
   shippingProvince: true,
   shippingPostalCode: true,
-  notes: true,
   createdAt: true,
-  updatedAt: true,
   items: { select: ORDER_HISTORY_ITEM_SELECT },
 };
 

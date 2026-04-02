@@ -32,6 +32,7 @@ const nextPublicEnv = {
   NEXT_PUBLIC_ENABLE_CART: typeof process !== "undefined" ? process.env.NEXT_PUBLIC_ENABLE_CART : undefined,
   NEXT_PUBLIC_ENABLE_ORDERS: typeof process !== "undefined" ? process.env.NEXT_PUBLIC_ENABLE_ORDERS : undefined,
   NEXT_PUBLIC_ENABLE_ANALYTICS: typeof process !== "undefined" ? process.env.NEXT_PUBLIC_ENABLE_ANALYTICS : undefined,
+  NEXT_PUBLIC_ENABLE_PERF_TRACE: typeof process !== "undefined" ? process.env.NEXT_PUBLIC_ENABLE_PERF_TRACE : undefined,
 };
 
 /**
@@ -96,6 +97,7 @@ export const ENV = {
     CART: readFlag("VITE_ENABLE_CART", "NEXT_PUBLIC_ENABLE_CART", true),
     ORDERS: readFlag("VITE_ENABLE_ORDERS", "NEXT_PUBLIC_ENABLE_ORDERS", true),
     ANALYTICS: readFlag("VITE_ENABLE_ANALYTICS", "NEXT_PUBLIC_ENABLE_ANALYTICS", false),
+    PERF_TRACE: readFlag("VITE_ENABLE_PERF_TRACE", "NEXT_PUBLIC_ENABLE_PERF_TRACE", false),
   },
 };
 

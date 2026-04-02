@@ -1,1 +1,0 @@
-"use strict";exports.id=479,exports.ids=[479],exports.modules={4479:(e,r,s)=>{s.r(r),s.d(r,{default:()=>t});let t=(0,s(8570).createProxy)(String.raw`C:\Users\franc\OneDrive\Escritorio\MARCOS\src\next\pages\CartPage.jsx#default`)}};

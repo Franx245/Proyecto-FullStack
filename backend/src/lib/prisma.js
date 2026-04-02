@@ -2,7 +2,7 @@ import "./load-env.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import prismaPkg from "@prisma/client";
 import { logEvent } from "./logger.js";
-import { getTraceContext, isPerfTraceEnabled, recordTraceQuery } from "./trace-context.js";
+import { isPerfTraceEnabled, recordTraceQuery } from "./trace-context.js";
 
 const { PrismaClient } = prismaPkg;
 
@@ -137,40 +137,33 @@ if (!globalForPrisma.__duelvaultPrisma) {
   globalForPrisma.__duelvaultPrisma = prisma;
 }
 
-if (!globalForPrisma.__duelvaultPrismaTraceMiddlewareAttached) {
-  prisma.$use(async (params, next) => {
-    if (!isPerfTraceEnabled() || !getTraceContext()) {
-      return next(params);
+if (!globalForPrisma.__duelvaultPrismaTraceListenerAttached) {
+  prisma.$on("query", (event) => {
+    if (!isPerfTraceEnabled()) {
+      return;
     }
 
-    const startedAt = Date.now();
+    const traceContext = recordTraceQuery({
+      durationMs: event?.duration,
+      target: event?.target || null,
+    });
 
-    try {
-      return await next(params);
-    } finally {
-      const durationMs = Date.now() - startedAt;
-      const target = [params?.model, params?.action]
-        .filter(Boolean)
-        .join(".") || "query";
-      const traceContext = recordTraceQuery({ durationMs, target });
-
-      if (!traceContext) {
-        return;
-      }
-
-      logEvent("PRISMA_QUERY", "Prisma query completed", {
-        traceId: traceContext.traceId,
-        requestId: traceContext.requestId,
-        method: traceContext.method,
-        path: traceContext.path,
-        durationMs,
-        target,
-        queryIndex: traceContext.queryCount,
-      });
+    if (!traceContext) {
+      return;
     }
+
+    logEvent("PRISMA_QUERY", "Prisma query completed", {
+      traceId: traceContext.traceId,
+      requestId: traceContext.requestId,
+      method: traceContext.method,
+      path: traceContext.path,
+      durationMs: Math.round(Number(event?.duration || 0)),
+      target: event?.target ? String(event.target).slice(0, 160) : null,
+      queryIndex: traceContext.queryCount,
+    });
   });
 
-  globalForPrisma.__duelvaultPrismaTraceMiddlewareAttached = true;
+  globalForPrisma.__duelvaultPrismaTraceListenerAttached = true;
 }
 
 export async function withDatabaseConnection(work, { maxWaitMs = DATABASE_QUEUE_WAIT_MS } = {}) {

@@ -1,15 +1,42 @@
 "use client";
 
+import { Suspense, useEffect } from "react";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
+import { usePathname, useSearchParams } from "next/navigation";
 import { Toaster } from "sonner";
 
 import { AuthProvider } from "@/lib/auth";
 import { CartProvider } from "@/lib/cartStore";
+import {
+  commitRouteNavigation,
+  ensureStorefrontPerfBootstrap,
+  reportHydrationReady,
+  trackComponentLifetime,
+} from "@/lib/perf-tracing";
 import { queryClientInstance, queryPersistOptions } from "@/lib/query-client";
 import { useRealtimeEvents } from "@/hooks/useRealtimeEvents";
 
 function RealtimeSync() {
   useRealtimeEvents();
+  return null;
+}
+
+function StorefrontPerfSync() {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const search = searchParams?.toString() || "";
+
+  useEffect(() => {
+    ensureStorefrontPerfBootstrap();
+    return trackComponentLifetime("StorefrontProviders", { pathname, search });
+  }, []);
+
+  useEffect(() => {
+    reportHydrationReady({ pathname, search });
+    const traceId = commitRouteNavigation({ pathname, search });
+    return trackComponentLifetime("RouteView", { traceId, pathname, search });
+  }, [pathname, search]);
+
   return null;
 }
 
@@ -19,6 +46,9 @@ export default function Providers({ children }) {
     <PersistQueryClientProvider client={queryClientInstance} persistOptions={queryPersistOptions}>
       <AuthProvider>
         <CartProvider>
+          <Suspense fallback={null}>
+            <StorefrontPerfSync />
+          </Suspense>
           <RealtimeSync />
           <Toaster
             position="top-right"

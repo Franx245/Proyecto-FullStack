@@ -1,6 +1,4 @@
 "use client";
-
-import { useEffect } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { ArrowRight, ShieldCheck, Sparkles, Star, Zap } from "lucide-react";
@@ -26,14 +24,6 @@ const STATS = [
 /** @param {{ initialFeaturedCards?: *[], initialLatestArrivalCards?: *[] }} props */
 export default function HomePage({ initialFeaturedCards = [], initialLatestArrivalCards = [] }) {
   const prefetchCatalog = useCatalogPrefetch();
-
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      void prefetchCatalog("/singles");
-    }, 120);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [prefetchCatalog]);
 
   const handleCatalogIntent = () => {
     void prefetchCatalog("/singles");
