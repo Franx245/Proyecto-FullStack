@@ -72,7 +72,7 @@ const isDirectExecution = process.argv[1]
   : false;
 
 const app = express();
-const PORT = Number(process.env.PORT || 3001);
+const PORT = process.env.PORT || 3000;
 const REQUEST_TIMEOUT_MS = Number(process.env.API_REQUEST_TIMEOUT_MS || 15000);
 const CHECKOUT_REQUEST_TIMEOUT_MS = Math.max(
   REQUEST_TIMEOUT_MS,
@@ -5629,9 +5629,11 @@ async function buildWorkbook(orders) {
   return workbook.xlsx.writeBuffer();
 }
 
-app.get("/api/health", async (_req, res) => {
-  /* ── Health always returns 200 so Railway / load-balancers treat the
-       process as alive.  Infrastructure status is informational. ── */
+app.get("/api/health", (_req, res) => {
+  res.status(200).send("OK");
+});
+
+app.get("/api/health/details", async (_req, res) => {
   let dbOk = false;
   let dbError = null;
   try {
@@ -10526,7 +10528,7 @@ if (isDirectExecution) {
   });
 
   const server = app.listen(PORT, () => {
-    logEvent("STARTUP", "DuelVault API listening", {
+    logEvent("STARTUP", "Server running on port", {
       port: PORT,
       url: `http://localhost:${PORT}`,
     });
