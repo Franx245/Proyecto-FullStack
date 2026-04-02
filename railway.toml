@@ -6,7 +6,7 @@ installCmd = "npm install"
 buildCmd = "npx prisma generate"
 
 [deploy]
-startCommand = "/bin/sh -lc 'node \"$START_FILE\"'"
+startCommand = "/bin/sh -lc 'node \"${START_FILE:-backend/server.js}\"'"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 30
 restartPolicyType = "on_failure"
