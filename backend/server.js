@@ -714,6 +714,13 @@ const ORDER_HISTORY_SELECT = {
   items: { select: ORDER_HISTORY_ITEM_SELECT },
 };
 
+const { items: _orderHistoryItems, ...ORDER_HISTORY_PAGE_SELECT } = ORDER_HISTORY_SELECT;
+
+const ORDER_HISTORY_PAGE_ITEM_SELECT = {
+  orderId: true,
+  ...ORDER_HISTORY_ITEM_SELECT,
+};
+
 const CATALOG_SCOPE_MODE = {
   ALL: "ALL",
   FIRST_N: "FIRST_N",
@@ -6321,10 +6328,10 @@ app.get("/api/auth/orders", requireAuth, async (req, res) => {
     });
 
     const queryStart = Date.now();
+    const orderRowsStart = Date.now();
     const ordersWithSentinel = await prisma.order.findMany({
-      relationLoadStrategy: "join",
       where: { userId },
-      select: ORDER_HISTORY_SELECT,
+      select: ORDER_HISTORY_PAGE_SELECT,
       orderBy: { createdAt: "desc" },
       skip,
       take: limit + 1,
@@ -6332,6 +6339,65 @@ app.get("/api/auth/orders", requireAuth, async (req, res) => {
     const hasMore = ordersWithSentinel.length > limit;
     const orders = hasMore ? ordersWithSentinel.slice(0, limit) : ordersWithSentinel;
     const total = skip + orders.length + (hasMore ? 1 : 0);
+    logger.info("ORDERS_ORDER_ROWS_TIME", {
+      userId,
+      page,
+      limit,
+      ms: Date.now() - orderRowsStart,
+      rawCount: ordersWithSentinel.length,
+      count: orders.length,
+      total,
+      hasMore,
+    });
+
+    const orderIds = orders.map((order) => order.id);
+    const itemRowsStart = Date.now();
+    const itemsByOrderId = new Map(orderIds.map((orderId) => [orderId, []]));
+
+    if (orderIds.length > 0) {
+      const orderItems = await prisma.orderItem.findMany({
+        relationLoadStrategy: "join",
+        where: {
+          orderId: { in: orderIds },
+        },
+        select: ORDER_HISTORY_PAGE_ITEM_SELECT,
+        orderBy: [
+          { orderId: "asc" },
+          { id: "asc" },
+        ],
+      });
+
+      for (const item of orderItems) {
+        const orderItemsForOrder = itemsByOrderId.get(item.orderId);
+        if (orderItemsForOrder) {
+          orderItemsForOrder.push(item);
+        }
+      }
+
+      logger.info("ORDERS_ITEM_ROWS_TIME", {
+        userId,
+        page,
+        limit,
+        ms: Date.now() - itemRowsStart,
+        count: orderItems.length,
+        orderCount: orderIds.length,
+      });
+    } else {
+      logger.info("ORDERS_ITEM_ROWS_TIME", {
+        userId,
+        page,
+        limit,
+        ms: 0,
+        count: 0,
+        orderCount: 0,
+      });
+    }
+
+    const ordersWithItems = orders.map((order) => ({
+      ...order,
+      items: itemsByOrderId.get(order.id) || [],
+    }));
+
     logger.info("ORDERS_QUERY_TIME", {
       userId,
       page,
@@ -6353,7 +6419,7 @@ app.get("/api/auth/orders", requireAuth, async (req, res) => {
     const cardsById = new Map(
       attachMetadata(
         [...new Map(
-          orders
+          ordersWithItems
             .flatMap((order) => order.items)
             .filter((item) => item.card)
             .map((item) => [item.cardId, item.card]),
@@ -6370,7 +6436,7 @@ app.get("/api/auth/orders", requireAuth, async (req, res) => {
     });
 
     const serializeStart = Date.now();
-    const responseOrders = orders.map((order) => toOrderResponse(order, cardsById));
+    const responseOrders = ordersWithItems.map((order) => toOrderResponse(order, cardsById));
     logger.info("ORDERS_SERIALIZE_TIME", {
       userId,
       page,
