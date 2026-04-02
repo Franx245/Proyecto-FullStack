@@ -6321,16 +6321,16 @@ app.get("/api/auth/orders", requireAuth, async (req, res) => {
     });
 
     const queryStart = Date.now();
-    const [orders, total] = await Promise.all([
-      prisma.order.findMany({
-        where: { userId },
-        select: ORDER_HISTORY_SELECT,
-        orderBy: { createdAt: "desc" },
-        skip,
-        take: limit,
-      }),
-      prisma.order.count({ where: { userId } }),
-    ]);
+    const ordersWithSentinel = await prisma.order.findMany({
+      where: { userId },
+      select: ORDER_HISTORY_SELECT,
+      orderBy: { createdAt: "desc" },
+      skip,
+      take: limit + 1,
+    });
+    const hasMore = ordersWithSentinel.length > limit;
+    const orders = hasMore ? ordersWithSentinel.slice(0, limit) : ordersWithSentinel;
+    const total = skip + orders.length + (hasMore ? 1 : 0);
     logger.info("ORDERS_QUERY_TIME", {
       userId,
       page,
@@ -6338,6 +6338,7 @@ app.get("/api/auth/orders", requireAuth, async (req, res) => {
       ms: Date.now() - queryStart,
       count: orders.length,
       total,
+      hasMore,
     });
     logger.info("AFTER_DB_QUERY", {
       requestId: req.requestContext?.requestId || null,
