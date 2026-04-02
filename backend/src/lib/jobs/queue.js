@@ -47,8 +47,7 @@ export async function enqueueJob(jobName, data, opts = {}) {
   const queue = getQueue();
 
   if (!queue) {
-    // Inline fallback — run synchronously (serverless / dev)
-    logEvent("JOB_INLINE_FALLBACK", "Redis TCP unavailable; running job inline", {
+    logEvent("USING_INLINE_FALLBACK", "Redis TCP unavailable; running job inline", {
       jobName,
       options: opts,
     });
@@ -57,13 +56,18 @@ export async function enqueueJob(jobName, data, opts = {}) {
     return null;
   }
 
+  logEvent("USING_BULLMQ", "Redis TCP configured; enqueuing job", {
+    jobName,
+    options: opts,
+  });
+
   const job = await queue.add(jobName, data, {
     priority: opts.priority,
     delay: opts.delay,
     ...(opts.jobId ? { jobId: opts.jobId } : {}),
   });
 
-  logEvent("JOB_ENQUEUED", "Job enqueued", {
+  logEvent("QUEUE_JOB_ADDED", "Job added to BullMQ", {
     jobName,
     id: job.id,
     priority: opts.priority ?? null,

@@ -4454,6 +4454,80 @@ async function reconcileMercadoPagoPayment(req, { payment, paymentIdOverride = n
   };
 }
 
+function buildBackgroundJobRequest({ requestId = null, source = "bullmq", headers = {} } = {}) {
+  return {
+    method: "JOB",
+    path: `/jobs/${source}`,
+    body: null,
+    headers: {
+      "user-agent": headers?.["user-agent"] || `bullmq/${source}`,
+    },
+    requestContext: {
+      requestId: requestId || `job_${randomUUID()}`,
+      signal: null,
+    },
+  };
+}
+
+async function scheduleMercadoPagoReconciliation(req, { payment, paymentIdOverride = null, providerRequestId = null, source = "payments_create" } = {}) {
+  const requestId = req.requestContext?.requestId || `job_${randomUUID()}`;
+  const paymentId = String(paymentIdOverride || payment?.id || "").trim() || `payment_${Date.now()}`;
+
+  if (isRedisTcpConfigured()) {
+    const job = await enqueueJob("reconcile-mercadopago-payment", {
+      payment,
+      paymentIdOverride,
+      providerRequestId,
+      requestId,
+      source,
+      headers: {
+        "user-agent": req.headers?.["user-agent"] || null,
+      },
+    }, {
+      jobId: `reconcile-mercadopago-payment:${paymentId}`,
+    });
+
+    return {
+      queued: Boolean(job),
+      jobId: job?.id || null,
+      result: null,
+    };
+  }
+
+  logEvent("USING_INLINE_FALLBACK", "Redis TCP not configured; processing payment reconciliation inline", {
+    orderId: Number(payment?.metadata?.order_id || payment?.external_reference || 0) || null,
+    paymentId,
+    source,
+    requestId,
+  });
+
+  const result = await reconcileMercadoPagoPayment(req, {
+    payment,
+    paymentIdOverride,
+    providerRequestId,
+  });
+
+  return {
+    queued: false,
+    jobId: null,
+    result,
+  };
+}
+
+export async function processQueuedMercadoPagoReconciliation(data = {}) {
+  const req = buildBackgroundJobRequest({
+    requestId: data?.requestId || null,
+    source: data?.source || "bullmq",
+    headers: data?.headers || {},
+  });
+
+  return reconcileMercadoPagoPayment(req, {
+    payment: data?.payment,
+    paymentIdOverride: data?.paymentIdOverride || null,
+    providerRequestId: data?.providerRequestId || null,
+  });
+}
+
 async function createCheckoutPreferenceForOrder(req, { orderId, userId }) {
   assertMercadoPagoCheckoutConfigured();
 
@@ -6950,11 +7024,7 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
 
     let webhookPending = true;
 
-    if (isSandbox && paymentStatus === "approved") {
-      logEvent("WEBHOOK_SIMULATION_START", "Sandbox webhook simulation start", {
-        requestId: req.requestContext?.requestId || null,
-        orderId: updatedOrder.id,
-      });
+    if (paymentStatus === "approved") {
       const simulatedPayment = {
         id: payment?.id,
         status: paymentStatus,
@@ -6968,18 +7038,44 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
         },
         external_reference: String(updatedOrder.id),
       };
-      const simulationResult = await reconcileMercadoPagoPayment(req, {
+
+      if (isSandbox) {
+        logEvent("WEBHOOK_SIMULATION_START", "Sandbox webhook simulation start", {
+          requestId: req.requestContext?.requestId || null,
+          orderId: updatedOrder.id,
+        });
+      }
+
+      const reconciliationJob = await scheduleMercadoPagoReconciliation(req, {
         payment: simulatedPayment,
         paymentIdOverride: String(payment?.id || "").trim() || null,
-        providerRequestId: `sandbox_${req.requestContext?.requestId || Date.now()}`,
+        providerRequestId: isSandbox
+          ? `sandbox_${req.requestContext?.requestId || Date.now()}`
+          : req.requestContext?.requestId || null,
+        source: isSandbox ? "payments_create_sandbox" : "payments_create",
       });
-      updatedOrder = simulationResult.order || updatedOrder;
-      webhookPending = false;
-      logEvent("WEBHOOK_SIMULATION_DONE", "Sandbox webhook simulation done", {
-        requestId: req.requestContext?.requestId || null,
-        orderId: updatedOrder.id,
-        appliedStatus: simulationResult.outcome?.appliedStatus || updatedOrder.status,
-      });
+
+      if (reconciliationJob.queued) {
+        webhookPending = true;
+        logEvent("QUEUE_JOB_ADDED", "Approved payment queued for reconciliation", {
+          requestId: req.requestContext?.requestId || null,
+          orderId: updatedOrder.id,
+          jobId: reconciliationJob.jobId,
+          source: isSandbox ? "payments_create_sandbox" : "payments_create",
+        });
+      } else {
+        webhookPending = false;
+        updatedOrder = reconciliationJob.result?.order || updatedOrder;
+      }
+
+      if (isSandbox) {
+        logEvent("WEBHOOK_SIMULATION_DONE", "Sandbox webhook simulation done", {
+          requestId: req.requestContext?.requestId || null,
+          orderId: updatedOrder.id,
+          appliedStatus: reconciliationJob.result?.outcome?.appliedStatus || updatedOrder.status,
+          queued: reconciliationJob.queued,
+        });
+      }
     }
 
     const cardsById = await getOrderCardsMap([updatedOrder]);
@@ -7140,14 +7236,24 @@ app.post(MERCADOPAGO_WEBHOOK_PATHS, async (req, res) => {
 
     const paymentResponse = await mercadoPagoPaymentClient.get({ id: paymentId });
     const payment = unwrapMercadoPagoBody(paymentResponse);
-    const reconciliation = await reconcileMercadoPagoPayment(req, {
+    const reconciliationJob = await scheduleMercadoPagoReconciliation(req, {
       payment,
       paymentIdOverride: paymentId,
       providerRequestId: signatureMeta.providerRequestId,
+      source: "mercadopago_webhook",
     });
+
+    const reconciliation = reconciliationJob.result || {
+      received: true,
+      ignored: false,
+      reason: null,
+      order: null,
+      outcome: null,
+    };
 
     return res.status(200).json({
       received: true,
+      ...(reconciliationJob.queued ? { queued: true, jobId: reconciliationJob.jobId } : {}),
       ...(reconciliation.ignored ? { ignored: true, reason: reconciliation.reason } : {}),
     });
   } catch (error) {

@@ -6,6 +6,7 @@
 import { prisma, withDatabaseConnection } from "../prisma.js";
 import { invalidateOrderRelatedCache } from "../cache-invalidation.js";
 import { publishEvent } from "../events.js";
+import { logEvent } from "../logger.js";
 
 /**
  * Expire pending orders whose `expires_at` has passed.
@@ -110,6 +111,33 @@ export async function processOrderPostCheckout(data) {
   }
 
   return { ok: true, orderId };
+}
+
+/**
+ * Background reconciliation for Mercado Pago payments.
+ * Reuses the same reconciliation code path as the API/webhook.
+ * @param {{ payment: any, paymentIdOverride?: string | null, providerRequestId?: string | null, requestId?: string | null, source?: string | null, headers?: Record<string, string | null> }} data
+ */
+export async function processQueuedMercadoPagoPayment(data) {
+  logEvent("JOB_PAYMENT_RECONCILIATION_START", "Processing queued Mercado Pago reconciliation", {
+    orderId: Number(data?.payment?.metadata?.order_id || data?.payment?.external_reference || 0) || null,
+    paymentId: String(data?.paymentIdOverride || data?.payment?.id || "").trim() || null,
+    source: data?.source || "bullmq",
+    requestId: data?.requestId || null,
+  });
+
+  const { processQueuedMercadoPagoReconciliation } = await import("../../../server.js");
+  const result = await processQueuedMercadoPagoReconciliation(data);
+
+  logEvent("JOB_PAYMENT_RECONCILIATION_DONE", "Queued Mercado Pago reconciliation completed", {
+    orderId: result?.order?.id || null,
+    paymentId: String(data?.paymentIdOverride || data?.payment?.id || "").trim() || null,
+    source: data?.source || "bullmq",
+    requestId: data?.requestId || null,
+    ignored: Boolean(result?.ignored),
+  });
+
+  return result;
 }
 
 /**

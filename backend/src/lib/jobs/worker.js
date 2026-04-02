@@ -29,6 +29,10 @@ const JOB_HANDLERS = {
     const { processOrderPostCheckout } = await import("./order-jobs.js");
     return processOrderPostCheckout(data);
   },
+  "reconcile-mercadopago-payment": async (data) => {
+    const { processQueuedMercadoPagoPayment } = await import("./order-jobs.js");
+    return processQueuedMercadoPagoPayment(data);
+  },
   "sync-stock-cache": async (data) => {
     const { syncStockCache } = await import("./order-jobs.js");
     return syncStockCache(data);
