@@ -640,6 +640,101 @@ const DASHBOARD_ORDER_SUMMARY_SELECT = {
   },
 };
 
+const ORDER_HISTORY_USER_SELECT = {
+  id: true,
+  username: true,
+  fullName: true,
+  avatarUrl: true,
+};
+
+const ORDER_HISTORY_ADDRESS_SELECT = {
+  id: true,
+  label: true,
+  recipientName: true,
+  phone: true,
+  line1: true,
+  line2: true,
+  city: true,
+  state: true,
+  postalCode: true,
+  zone: true,
+  notes: true,
+  isDefault: true,
+  createdAt: true,
+  updatedAt: true,
+};
+
+const ORDER_HISTORY_ITEM_SELECT = {
+  id: true,
+  cardId: true,
+  quantity: true,
+  price: true,
+};
+
+const ORDER_HISTORY_SELECT = {
+  id: true,
+  subtotal: true,
+  shippingCost: true,
+  total: true,
+  currency: true,
+  exchange_rate: true,
+  total_ars: true,
+  status: true,
+  payment_id: true,
+  payment_status: true,
+  payment_status_detail: true,
+  preference_id: true,
+  payment_approved_at: true,
+  expires_at: true,
+  shippingZone: true,
+  shippingLabel: true,
+  trackingCode: true,
+  trackingVisibleToUser: true,
+  carrier: true,
+  shippingLabelUrl: true,
+  shipmentStatus: true,
+  shipmentId: true,
+  estimatedDelivery: true,
+  customerName: true,
+  customerEmail: true,
+  customerPhone: true,
+  shippingAddress: true,
+  shippingCity: true,
+  shippingProvince: true,
+  shippingPostalCode: true,
+  notes: true,
+  createdAt: true,
+  updatedAt: true,
+  user: { select: ORDER_HISTORY_USER_SELECT },
+  address: { select: ORDER_HISTORY_ADDRESS_SELECT },
+  items: { select: ORDER_HISTORY_ITEM_SELECT },
+};
+
+const ORDER_HISTORY_CARD_SELECT = {
+  id: true,
+  ygoproId: true,
+  name: true,
+  image: true,
+  description: true,
+  cardType: true,
+  race: true,
+  attribute: true,
+  atk: true,
+  def: true,
+  level: true,
+  setName: true,
+  setCode: true,
+  rarity: true,
+  price: true,
+  stock: true,
+  lowStockThreshold: true,
+  isVisible: true,
+  isFeatured: true,
+  isNewArrival: true,
+  salesCount: true,
+  updatedAt: true,
+};
+
 const CATALOG_SCOPE_MODE = {
   ALL: "ALL",
   FIRST_N: "FIRST_N",
@@ -3499,6 +3594,7 @@ async function getOrderCardsMap(orders, options = {}) {
 
   const cards = await prisma.card.findMany({
     where: { id: { in: cardIds } },
+    ...(options.cardSelect ? { select: options.cardSelect } : {}),
   });
 
   const enrichedCards = attachMetadata(cards, options);
@@ -6213,20 +6309,51 @@ app.get("/api/auth/orders", requireAuth, async (req, res) => {
     const skip = (page - 1) * limit;
     const userId = Number(req.user.sub);
 
+    const queryStart = Date.now();
     const [orders, total] = await Promise.all([
       prisma.order.findMany({
         where: { userId },
-        include: { items: true, user: true, address: true },
+        select: ORDER_HISTORY_SELECT,
         orderBy: { createdAt: "desc" },
         skip,
         take: limit,
       }),
       prisma.order.count({ where: { userId } }),
     ]);
+    logger.info("ORDERS_QUERY_TIME", {
+      userId,
+      page,
+      limit,
+      ms: Date.now() - queryStart,
+      count: orders.length,
+      total,
+    });
 
-    const cardsById = await getOrderCardsMap(orders, { adminThumbnail: true });
+    const cardsMapStart = Date.now();
+    const cardsById = await getOrderCardsMap(orders, {
+      adminThumbnail: true,
+      cardSelect: ORDER_HISTORY_CARD_SELECT,
+    });
+    logger.info("ORDERS_CARDS_MAP_TIME", {
+      userId,
+      page,
+      limit,
+      ms: Date.now() - cardsMapStart,
+      cardCount: cardsById.size,
+    });
+
+    const serializeStart = Date.now();
+    const responseOrders = orders.map((order) => toOrderResponse(order, cardsById));
+    logger.info("ORDERS_SERIALIZE_TIME", {
+      userId,
+      page,
+      limit,
+      ms: Date.now() - serializeStart,
+      count: responseOrders.length,
+    });
+
     res.json({
-      orders: orders.map((order) => toOrderResponse(order, cardsById)),
+      orders: responseOrders,
       page,
       totalPages: Math.ceil(total / limit),
       total,
