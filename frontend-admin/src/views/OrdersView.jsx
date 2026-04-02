@@ -540,7 +540,7 @@ export default memo(function OrdersView({ orders, summary, pagination, filters, 
             ? `Cancelar pedido #${confirmState?.orderId || ""}`
             : `Eliminar pedido #${confirmState?.orderId || ""}`}
         description={confirmState?.type === "clear"
-          ? "Se eliminarán todos los pedidos y se revertirá stock/ventas asociados. La acción no se bloquea con el navegador y mantiene el contexto del operador."
+          ? "Se eliminarán solo los pedidos de prueba detectados por email o buyer sandbox, y se revertirán stock y ventas asociados cuando corresponda."
           : confirmState?.type === "cancel"
             ? "El pedido pasará a cancelado y el backend devolverá stock y ajustará métricas cuando corresponda."
           : "Se eliminará el pedido y se devolverán stock y ventas a su estado anterior."

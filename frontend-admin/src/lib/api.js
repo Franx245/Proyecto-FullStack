@@ -576,7 +576,7 @@ export async function clearOrders(payload = {}) {
     body: payload,
     requestLabel: "clear-orders",
     idempotencyKey: payload?.mutation_id,
-    dedupeKey: "clear-orders",
+    dedupeKey: `clear-orders:${payload?.scope || "test"}`,
   });
 }
 

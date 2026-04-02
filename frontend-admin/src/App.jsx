@@ -436,6 +436,65 @@ function applyCardUpdates(card, updates) {
   return nextCard;
 }
 
+function parseAdminDecimalValue(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const normalized = typeof value === "string"
+    ? value.trim().replace(",", ".")
+    : value;
+  const nextValue = Number(normalized);
+  if (!Number.isFinite(nextValue) || nextValue < 0) {
+    throw new Error("Precio inválido");
+  }
+
+  return Number(nextValue.toFixed(2));
+}
+
+function parseAdminIntegerValue(value, label) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const nextValue = Number(value);
+  if (!Number.isFinite(nextValue) || nextValue < 0) {
+    throw new Error(`${label} inválido`);
+  }
+
+  return Math.floor(nextValue);
+}
+
+function normalizeCardMutationUpdates(updates = {}) {
+  const normalizedUpdates = {};
+
+  if (Object.prototype.hasOwnProperty.call(updates, "price")) {
+    normalizedUpdates.price = parseAdminDecimalValue(updates.price);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(updates, "stock")) {
+    normalizedUpdates.stock = parseAdminIntegerValue(updates.stock, "Stock");
+  }
+
+  if (Object.prototype.hasOwnProperty.call(updates, "low_stock_threshold")) {
+    normalizedUpdates.low_stock_threshold = parseAdminIntegerValue(updates.low_stock_threshold, "Stock mínimo");
+  }
+
+  if (Object.prototype.hasOwnProperty.call(updates, "is_visible")) {
+    normalizedUpdates.is_visible = Boolean(updates.is_visible);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(updates, "is_featured")) {
+    normalizedUpdates.is_featured = Boolean(updates.is_featured);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(updates, "is_new_arrival")) {
+    normalizedUpdates.is_new_arrival = Boolean(updates.is_new_arrival);
+  }
+
+  return normalizedUpdates;
+}
+
 function findCardSnapshot(cardId, ...sources) {
   for (const source of sources) {
     const foundCard = source?.find?.((card) => card.id === cardId);
@@ -1566,7 +1625,7 @@ function AdminShell({ session, onLogout }) {
   const updateCardMutation = useMutation({
     mutationFn: ({ cardId, updates, expectedUpdatedAt }) => updateCard(
       cardId,
-      createMutationPayload(updates, {
+      createMutationPayload(normalizeCardMutationUpdates(updates), {
         resourceType: "card",
         action: "update",
         resourceId: cardId,
@@ -1604,6 +1663,23 @@ function AdminShell({ session, onLogout }) {
       restoreQuerySnapshots(queryClient, context?.previousInventory);
       restoreQuerySnapshots(queryClient, context?.previousAdminSearch);
       restoreExactQuerySnapshot(queryClient, context?.cardEntityQueryKey || getCardEntityQueryKey(variables.cardId), context?.previousCardDetail);
+
+      if (isConflictError(error) && error?.details?.current_resource && !variables?.conflictRetried) {
+        const currentCard = error.details.current_resource;
+        queryClient.setQueriesData({ queryKey: ["cards", session.admin.id] }, (current) => updateCardsResponse(current, (card) => (card.id === variables.cardId ? applyCardUpdates(card, currentCard) : card)));
+        queryClient.setQueriesData({ queryKey: homeCardsQueryPrefix }, (current) => updateCardsResponse(current, (card) => (card.id === variables.cardId ? applyCardUpdates(card, currentCard) : card)));
+        queryClient.setQueriesData({ queryKey: ["inventory-cards", session.admin.id] }, (current) => updateCardsResponse(current, (card) => (card.id === variables.cardId ? applyCardUpdates(card, currentCard) : card)));
+        queryClient.setQueriesData({ queryKey: ["admin-card-search", session.admin.id] }, (current) => updateCardsResponse(current, (card) => (card.id === variables.cardId ? applyCardUpdates(card, currentCard) : card)));
+        mergeEntityCache(queryClient, getCardEntityQueryKey(variables.cardId), "card", currentCard);
+        updateCardMutation.mutate({
+          ...variables,
+          expectedUpdatedAt: error.details.current_updated_at || getResourceUpdatedAt(currentCard),
+          conflictRetried: true,
+        });
+        publishNotice("info", `Carta #${variables.cardId}: se actualizó la versión más reciente y se reintentó el guardado.`);
+        return;
+      }
+
       publishNotice("error", `Carta #${variables.cardId}: ${getReadableMutationError(error)}`);
     },
     onSuccess: (data, variables) => {
@@ -1899,27 +1975,45 @@ function AdminShell({ session, onLogout }) {
   });
 
   const clearOrdersMutation = useMutation({
-    mutationFn: () => clearOrders(createMutationPayload({}, { resourceType: "orders", action: "clear" })),
+    mutationFn: () => clearOrders(createMutationPayload({ scope: "test" }, { resourceType: "orders", action: "clear-test" })),
     onMutate: async () => {
       setIsClearingOrders(true);
-      await queryClient.cancelQueries({ queryKey: ordersQueryKey });
-
-      const previousOrders = queryClient.getQueryData(ordersQueryKey);
-      queryClient.setQueryData(ordersQueryKey, (current) => (current ? { ...current, orders: [] } : current));
-
-      return { previousOrders };
+      await queryClient.cancelQueries({ queryKey: ["orders", session.admin.id] });
+      return {
+        previousOrders: queryClient.getQueriesData({ queryKey: ["orders", session.admin.id] }),
+      };
     },
     onError: (error, _variables, context) => {
-      queryClient.setQueryData(ordersQueryKey, context?.previousOrders);
+      restoreQuerySnapshots(queryClient, context?.previousOrders);
       publishNotice("error", getReadableMutationError(error));
+    },
+    onSuccess: (data) => {
+      const deletedOrderIds = Array.isArray(data?.deletedOrderIds) ? data.deletedOrderIds.map(Number).filter(Number.isFinite) : [];
+      const deletedIds = new Set(deletedOrderIds);
+
+      if (deletedIds.size > 0) {
+        for (const [queryKey] of queryClient.getQueriesData({ queryKey: ["orders", session.admin.id] })) {
+          queryClient.setQueryData(queryKey, (current) => removeOrdersFromResponse(current, (order) => deletedIds.has(order.id)));
+        }
+        for (const orderId of deletedIds) {
+          queryClient.removeQueries({ queryKey: getOrderEntityQueryKey(orderId), exact: true });
+        }
+        persistAdminQueryCacheNow();
+        publishNotice("success", `Se limpiaron ${deletedIds.size} pedidos de prueba.`);
+        return;
+      }
+
+      publishNotice("info", "No había pedidos de prueba para limpiar.");
     },
     onSettled: () => {
       setIsClearingOrders(false);
       void Promise.allSettled([
-        queryClient.invalidateQueries({ queryKey: ordersQueryKey }),
+        queryClient.invalidateQueries({ queryKey: ["orders", session.admin.id] }),
         queryClient.invalidateQueries({ queryKey: dashboardQueryKey }),
         queryClient.invalidateQueries({ queryKey: cardsQueryKey }),
         queryClient.invalidateQueries({ queryKey: homeCardsQueryPrefix }),
+        queryClient.invalidateQueries({ queryKey: ["inventory-cards", session.admin.id] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-card-search", session.admin.id] }),
       ]);
     },
   });
@@ -2346,13 +2440,7 @@ function AdminShell({ session, onLogout }) {
             onSave={(cardId, draft) => updateCardMutation.mutateAsync({
               cardId,
               expectedUpdatedAt: getResourceUpdatedAt(findCardSnapshot(cardId, inventoryPageData?.cards, inventoryCardsQuery.data?.cards, adminCatalogSearchQuery.data?.cards, cards)),
-              updates: {
-                price: Number(draft.price),
-                stock: Number(draft.stock),
-                low_stock_threshold: Number(draft.low_stock_threshold),
-                is_visible: Boolean(draft.is_visible),
-                is_featured: Boolean(draft.is_featured),
-              },
+              updates: normalizeCardMutationUpdates(draft),
             })}
           />
         </Suspense>

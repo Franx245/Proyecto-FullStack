@@ -126,6 +126,7 @@ const ORDER_SCHEMA_CACHE_TTL_MS = 1000 * 60;
 const MERCADOPAGO_ACCOUNT_CACHE_TTL_MS = 1000 * 60 * 10;
 const MERCADOPAGO_WEBHOOK_PATHS = ["/api/checkout/webhook", "/api/webhook/mercadopago"];
 const MERCADOPAGO_TEST_ACCESS_TOKEN_PREFIX = "TEST-";
+const MERCADOPAGO_TEST_PAYER_EMAIL_DOMAIN = "example.com";
 const mercadoPagoClient = MERCADOPAGO_ACCESS_TOKEN
   ? new MercadoPagoConfig({ accessToken: MERCADOPAGO_ACCESS_TOKEN })
   : null;
@@ -214,6 +215,10 @@ const ORDER_TRANSITIONS = {
   [OrderStatus.CANCELLED]: [],
 };
 const BILLABLE_ORDER_STATUSES = [OrderStatus.PAID, OrderStatus.SHIPPED, OrderStatus.COMPLETED];
+const ORDER_PAYMENT_RECONCILIATION_FAILURE_DETAILS = new Set([
+  "amount_mismatch",
+  "stock_conflict_after_approval",
+]);
 const DEFAULT_ADMIN_USERS_PAGE_SIZE = 8;
 const DEFAULT_ADMIN_ORDERS_PAGE_SIZE = 10;
 const MAX_ADMIN_PAGE_SIZE = 50;
@@ -751,6 +756,36 @@ function hasMercadoPagoPaymentAttempt(order) {
   return Boolean(String(order?.payment_id || "").trim());
 }
 
+function hasApprovedMercadoPagoPayment(order) {
+  return hasMercadoPagoPaymentAttempt(order)
+    && normalizeMercadoPagoPaymentStatus(order?.payment_status) === "approved";
+}
+
+function isApprovedPaymentReconciliationFailure(order) {
+  return order?.status === OrderStatus.FAILED
+    && hasApprovedMercadoPagoPayment(order)
+    && ORDER_PAYMENT_RECONCILIATION_FAILURE_DETAILS.has(
+      normalizeMercadoPagoPaymentStatusDetail(order?.payment_status_detail) || ""
+    );
+}
+
+function resolveMercadoPagoPaymentAmount(payment) {
+  const candidates = [
+    payment?.transaction_amount,
+    payment?.transaction_details?.total_paid_amount,
+    payment?.transaction_details?.net_received_amount,
+  ];
+
+  for (const candidate of candidates) {
+    const amount = Number(candidate);
+    if (Number.isFinite(amount) && amount > 0) {
+      return formatCurrency(amount);
+    }
+  }
+
+  return null;
+}
+
 function canCancelOrder(role) {
   return role === UserRole.ADMIN;
 }
@@ -1002,8 +1037,26 @@ function splitMercadoPagoFullName(fullName) {
   };
 }
 
-function resolveMercadoPagoPayer(order) {
+function buildMercadoPagoSandboxPayerEmail(order) {
+  const orderId = Number(order?.id);
+  if (Number.isInteger(orderId) && orderId > 0) {
+    return `checkout+order-${orderId}@${MERCADOPAGO_TEST_PAYER_EMAIL_DOMAIN}`;
+  }
+
+  return `checkout@${MERCADOPAGO_TEST_PAYER_EMAIL_DOMAIN}`;
+}
+
+function resolveMercadoPagoPayerEmail(order, accountDetails = null) {
   const email = String(order?.customerEmail || order?.user?.email || "").trim().toLowerCase();
+  if (!shouldUseMercadoPagoSandbox(accountDetails) && !MERCADOPAGO_ACCESS_TOKEN.startsWith(MERCADOPAGO_TEST_ACCESS_TOKEN_PREFIX)) {
+    return email;
+  }
+
+  return buildMercadoPagoSandboxPayerEmail(order);
+}
+
+function resolveMercadoPagoPayer(order, options = {}) {
+  const email = resolveMercadoPagoPayerEmail(order, options.accountDetails ?? null);
   const fullName = order?.customerName || order?.address?.recipientName || order?.user?.fullName || "";
   const { firstName, lastName } = splitMercadoPagoFullName(fullName);
 
@@ -1011,6 +1064,14 @@ function resolveMercadoPagoPayer(order) {
     ...(email ? { email } : {}),
     ...(firstName ? { first_name: firstName } : {}),
     ...(lastName ? { last_name: lastName } : {}),
+    ...((options.identificationType && options.identificationNumber)
+      ? {
+          identification: {
+            type: options.identificationType,
+            number: options.identificationNumber,
+          },
+        }
+      : {}),
   };
 
   return Object.keys(payer).length > 0 ? payer : undefined;
@@ -1725,6 +1786,28 @@ function toOrderResponse(order, cardsById, options = {}) {
   };
 }
 
+function isTestOrderEmail(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized || !normalized.includes("@")) {
+    return false;
+  }
+
+  return normalized.endsWith("@test.com") || normalized.endsWith("@example.com");
+}
+
+function isAdminTestOrder(order) {
+  if (!order) {
+    return false;
+  }
+
+  if (isTestOrderEmail(order.customerEmail) || isTestOrderEmail(order.user?.email)) {
+    return true;
+  }
+
+  const customerName = String(order.customerName || order.user?.fullName || "").trim().toLowerCase();
+  return customerName.includes("smoke buyer");
+}
+
 function buildCustomCategoryTree(categories) {
   const byId = new Map();
   const roots = [];
@@ -2417,9 +2500,6 @@ async function rollbackOrderEffects(tx, order) {
         where: { id: item.cardId },
         data: { salesCount: { decrement: item.quantity } },
       });
-    }
-
-    if (order.status !== OrderStatus.CANCELLED) {
       await tx.card.update({
         where: { id: item.cardId },
         data: { stock: { increment: item.quantity } },
@@ -2432,42 +2512,107 @@ async function lockOrderForUpdate(tx, orderId) {
   await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${orderId} FOR UPDATE`;
 }
 
-async function reserveStockForOrder(tx, order) {
+async function assertOrderItemsAvailableForPayment(tx, order) {
   const cardIds = [...new Set(order.items.map((item) => item.cardId))];
   const cards = await tx.card.findMany({ where: { id: { in: cardIds } } });
   const cardsById = new Map(cards.map((card) => [card.id, card]));
+  const unavailableCardIds = [];
 
   for (const item of order.items) {
     const card = cardsById.get(item.cardId);
-    if (!card || !card.isVisible) {
-      throw createAppError("Hay cartas del pedido que ya no están disponibles", {
-        statusCode: 409,
-        code: "CARD_UNAVAILABLE",
-        unavailableCardIds: [item.cardId],
+    if (!card || !card.isVisible || Number(card.stock) < Number(item.quantity)) {
+      unavailableCardIds.push(item.cardId);
+    }
+  }
+
+  if (unavailableCardIds.length > 0) {
+    throw createAppError("Hay cartas del pedido sin stock suficiente", {
+      statusCode: 409,
+      code: "INSUFFICIENT_STOCK",
+      unavailableCardIds: [...new Set(unavailableCardIds)],
+    });
+  }
+}
+
+async function applyOrderInventoryTransition(tx, order, { decrementStock = false, incrementStock = false } = {}) {
+  if (!decrementStock && !incrementStock) {
+    return;
+  }
+
+  let cardsById = null;
+  if (decrementStock) {
+    const cardIds = [...new Set(order.items.map((item) => item.cardId))];
+    const cards = await tx.card.findMany({ where: { id: { in: cardIds } } });
+    cardsById = new Map(cards.map((card) => [card.id, card]));
+  }
+
+  for (const item of order.items) {
+    if (decrementStock) {
+      const card = cardsById.get(item.cardId);
+      if (!card || !card.isVisible) {
+        throw createAppError("Hay cartas del pedido que ya no están disponibles", {
+          statusCode: 409,
+          code: "CARD_UNAVAILABLE",
+          unavailableCardIds: [item.cardId],
+        });
+      }
+
+      const updated = await tx.card.updateMany({
+        where: { id: item.cardId, stock: { gte: item.quantity } },
+        data: { stock: { decrement: item.quantity } },
       });
+
+      if (updated.count === 0) {
+        throw createAppError(`Insufficient stock for ${card.name}`, {
+          statusCode: 409,
+          code: "INSUFFICIENT_STOCK",
+          unavailableCardIds: [item.cardId],
+        });
+      }
     }
 
-    // Atomic stock reservation: decrement only if stock >= quantity (prevents overselling)
-    const updated = await tx.card.updateMany({
-      where: { id: item.cardId, stock: { gte: item.quantity } },
-      data: { stock: { decrement: item.quantity } },
-    });
-
-    if (updated.count === 0) {
-      throw createAppError(`Insufficient stock for ${card.name}`, {
-        statusCode: 409,
-        code: "INSUFFICIENT_STOCK",
-        unavailableCardIds: [item.cardId],
+    if (incrementStock) {
+      await tx.card.update({
+        where: { id: item.cardId },
+        data: { stock: { increment: item.quantity } },
       });
     }
   }
 }
 
+function getOrderInventoryChangeReason(previousStatus, nextStatus) {
+  const wasBillable = isBillableStatus(previousStatus);
+  const willBeBillable = isBillableStatus(nextStatus);
+
+  if (!wasBillable && willBeBillable) {
+    return "order_paid";
+  }
+
+  if (wasBillable && !willBeBillable) {
+    if (nextStatus === OrderStatus.CANCELLED) {
+      return "order_cancelled";
+    }
+
+    if (nextStatus === OrderStatus.EXPIRED) {
+      return "order_expired";
+    }
+
+    return "order_reverted";
+  }
+
+  return null;
+}
+
 async function updateOrderStatusWithEffects(tx, order, nextStatus, extraData = {}) {
   const wasBillable = isBillableStatus(order.status);
   const willBeBillable = isBillableStatus(nextStatus);
-  const releasesReservation = [OrderStatus.CANCELLED, OrderStatus.EXPIRED].includes(nextStatus)
-    && ![OrderStatus.CANCELLED, OrderStatus.EXPIRED].includes(order.status);
+  const decrementStock = !wasBillable && willBeBillable;
+  const incrementStock = wasBillable && !willBeBillable;
+
+  await applyOrderInventoryTransition(tx, order, {
+    decrementStock,
+    incrementStock,
+  });
 
   for (const item of order.items) {
     if (!wasBillable && willBeBillable) {
@@ -2483,13 +2628,6 @@ async function updateOrderStatusWithEffects(tx, order, nextStatus, extraData = {
         data: { salesCount: { decrement: item.quantity } },
       });
     }
-
-    if (releasesReservation) {
-      await tx.card.update({
-        where: { id: item.cardId },
-        data: { stock: { increment: item.quantity } },
-      });
-    }
   }
 
   return tx.order.update({
@@ -2503,12 +2641,14 @@ async function updateOrderStatusWithEffects(tx, order, nextStatus, extraData = {
 }
 
 function buildOrderStatusPostCommitEffect(order, nextStatus) {
+  const inventoryReason = getOrderInventoryChangeReason(order.status, nextStatus);
+
   return {
     orderId: order.id,
     previousStatus: order.status,
     nextStatus,
-    releasesReservation: [OrderStatus.CANCELLED, OrderStatus.EXPIRED].includes(nextStatus)
-      && ![OrderStatus.CANCELLED, OrderStatus.EXPIRED].includes(order.status),
+    inventoryChanged: Boolean(inventoryReason),
+    inventoryReason,
     items: order.items.map((item) => ({
       cardId: item.cardId,
       quantity: item.quantity,
@@ -2532,11 +2672,11 @@ async function applyOrderStatusPostCommitEffect(effect) {
     order: effect.orderSnapshot || null,
   });
 
-  if (effect.releasesReservation) {
+  if (effect.inventoryChanged) {
     for (const item of effect.items) {
       publishEvent("stock-update", {
         cardId: item.cardId,
-        reason: effect.nextStatus === "EXPIRED" ? "order_expired" : "order_cancelled",
+        reason: effect.inventoryReason,
         orderId: effect.orderId,
       });
     }
@@ -2590,7 +2730,7 @@ async function expirePendingOrders({ orderIds = null, source = "system", request
   }
 
   if (expired.length > 0) {
-    console.info("Expired pending orders released", {
+    console.info("Expired pending orders updated", {
       requestId,
       source,
       orderIds: expired,
@@ -2673,6 +2813,13 @@ async function prepareOrderForPreference(req, { orderId, userId }) {
     });
   }
 
+  if (hasApprovedMercadoPagoPayment(existingOrder)) {
+    throw createAppError("Order already has an approved payment", {
+      statusCode: 409,
+      code: "ORDER_ALREADY_PAID",
+    });
+  }
+
   if ([OrderStatus.CANCELLED, OrderStatus.SHIPPED, OrderStatus.COMPLETED].includes(existingOrder.status)) {
     throw createAppError("Order cannot restart Checkout Pro from the current state", {
       statusCode: 409,
@@ -2708,6 +2855,13 @@ async function prepareOrderForPreference(req, { orderId, userId }) {
       });
     }
 
+    if (hasApprovedMercadoPagoPayment(order)) {
+      throw createAppError("Order already has an approved payment", {
+        statusCode: 409,
+        code: "ORDER_ALREADY_PAID",
+      });
+    }
+
     if ([OrderStatus.CANCELLED, OrderStatus.SHIPPED, OrderStatus.COMPLETED].includes(order.status)) {
       throw createAppError("Order cannot restart Checkout Pro from the current state", {
         statusCode: 409,
@@ -2715,10 +2869,7 @@ async function prepareOrderForPreference(req, { orderId, userId }) {
       });
     }
 
-    const shouldReserveStock = [OrderStatus.FAILED, OrderStatus.EXPIRED].includes(order.status);
-    if (shouldReserveStock) {
-      await reserveStockForOrder(tx, order);
-    }
+    await assertOrderItemsAvailableForPayment(tx, order);
 
     return tx.order.update({
       where: { id: order.id },
@@ -2775,6 +2926,13 @@ async function prepareOrderForDirectPayment(req, { orderId, userId }) {
     });
   }
 
+  if (hasApprovedMercadoPagoPayment(existingOrder)) {
+    throw createAppError("Order already has an approved payment", {
+      statusCode: 409,
+      code: "ORDER_ALREADY_PAID",
+    });
+  }
+
   if ([OrderStatus.CANCELLED, OrderStatus.EXPIRED, OrderStatus.SHIPPED, OrderStatus.COMPLETED].includes(existingOrder.status)) {
     throw createAppError("Order cannot be paid from the current state", {
       statusCode: 409,
@@ -2817,6 +2975,13 @@ async function prepareOrderForDirectPayment(req, { orderId, userId }) {
       });
     }
 
+    if (hasApprovedMercadoPagoPayment(order)) {
+      throw createAppError("Order already has an approved payment", {
+        statusCode: 409,
+        code: "ORDER_ALREADY_PAID",
+      });
+    }
+
     if ([OrderStatus.CANCELLED, OrderStatus.EXPIRED, OrderStatus.SHIPPED, OrderStatus.COMPLETED].includes(order.status)) {
       throw createAppError("Order cannot be paid from the current state", {
         statusCode: 409,
@@ -2842,6 +3007,8 @@ async function prepareOrderForDirectPayment(req, { orderId, userId }) {
         code: "ORDER_NOT_PAYABLE",
       });
     }
+
+    await assertOrderItemsAvailableForPayment(tx, order);
 
     if (order.payment_id && isMercadoPagoProcessingStatus(order.payment_status)) {
       throw createAppError("Order already has a payment in progress", {
@@ -2982,7 +3149,7 @@ async function createCheckoutPreferenceForOrder(req, { orderId, userId }) {
     expires: true,
     expiration_date_from: new Date().toISOString(),
     expiration_date_to: prepared.expiresAt.toISOString(),
-    payer: resolveMercadoPagoPayer(prepared.order),
+    payer: resolveMercadoPagoPayer(prepared.order, { accountDetails: mercadoPagoAccount }),
     metadata: {
       order_id: prepared.order.id,
       request_id: req.requestContext?.requestId || null,
@@ -4981,25 +5148,22 @@ app.post("/api/checkout", requireAuth, checkoutRateLimit, async (req, res) => {
         });
       }
 
+      const insufficientStockItems = normalizedItems.filter((item) => {
+        const card = cardMap.get(item.cardId);
+        return !card || Number(card.stock) < item.quantity;
+      });
+
+      if (insufficientStockItems.length > 0) {
+        throw createAppError("Hay cartas del carrito sin stock suficiente", {
+          statusCode: 409,
+          code: "INSUFFICIENT_STOCK",
+          unavailableCardIds: insufficientStockItems.map((item) => item.cardId),
+        });
+      }
+
       for (const item of normalizedItems) {
         const card = cardMap.get(item.cardId);
         subtotal += card.price * item.quantity;
-      }
-
-      // Atomic stock reservation: decrement only if stock >= quantity (prevents overselling)
-      for (const item of normalizedItems) {
-        const card = cardMap.get(item.cardId);
-        const updated = await tx.card.updateMany({
-          where: { id: item.cardId, stock: { gte: item.quantity } },
-          data: { stock: { decrement: item.quantity } },
-        });
-
-        if (updated.count === 0) {
-          throw createAppError(`Insufficient stock for ${card.name}`, {
-            code: "INSUFFICIENT_STOCK",
-            unavailableCardIds: [item.cardId],
-          });
-        }
       }
 
       const delivery = await buildCheckoutAddress(tx, userId, req.body || {}, fallbackPhone);
@@ -5275,17 +5439,11 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
       description: `DuelVault order #${prepared.order.id}`,
       external_reference: String(prepared.order.id),
       ...(notificationUrl ? { notification_url: notificationUrl } : {}),
-      payer: {
-        email: String(prepared.order.customerEmail || prepared.order.user?.email || "").trim().toLowerCase(),
-        ...((identificationType && identificationNumber)
-          ? {
-              identification: {
-                type: identificationType,
-                number: identificationNumber,
-              },
-            }
-          : {}),
-      },
+      payer: resolveMercadoPagoPayer(prepared.order, {
+        accountDetails: mercadoPagoAccount,
+        identificationType,
+        identificationNumber,
+      }),
       ...(issuerId ? { issuer_id: issuerId } : {}),
       metadata: {
         order_id: prepared.order.id,
@@ -5432,6 +5590,7 @@ app.post(MERCADOPAGO_WEBHOOK_PATHS, async (req, res) => {
     const payment = unwrapMercadoPagoBody(paymentResponse);
     const paymentStatus = normalizeMercadoPagoPaymentStatus(payment?.status);
     const orderId = resolveMercadoPagoOrderId(payment);
+    const paymentAmount = resolveMercadoPagoPaymentAmount(payment);
 
     if (!Number.isFinite(orderId)) {
       console.warn("Mercado Pago payment without valid external_reference", {
@@ -5477,14 +5636,54 @@ app.post(MERCADOPAGO_WEBHOOK_PATHS, async (req, res) => {
           : order.payment_approved_at,
       };
       const staleWebhook = order.payment_id && order.payment_id !== paymentData.payment_id;
+      const expectedAmount = formatCurrency(order.total_ars ?? order.total);
 
-      if (staleWebhook && paymentStatus !== "approved") {
+      if (staleWebhook) {
         return {
           order,
           duplicate: false,
           ignored: true,
           appliedStatus: order.status,
           paymentStatus,
+          ignoreReason: "stale_payment_id",
+        };
+      }
+
+      if (paymentStatus === "approved" && isApprovedPaymentReconciliationFailure(order)) {
+        return {
+          order,
+          duplicate: false,
+          ignored: true,
+          appliedStatus: order.status,
+          paymentStatus,
+          ignoreReason: "approved_payment_already_reconciled",
+        };
+      }
+
+      if (paymentStatus === "approved" && paymentAmount !== expectedAmount) {
+        const mismatchData = {
+          ...paymentData,
+          payment_status_detail: "amount_mismatch",
+        };
+        const mismatchOrder = order.status === OrderStatus.FAILED
+          ? await tx.order.update({
+            where: { id: order.id },
+            data: mismatchData,
+            include: { items: true, user: true, address: true },
+          })
+          : await updateOrderStatusWithEffects(tx, order, OrderStatus.FAILED, mismatchData);
+
+        return {
+          order: mismatchOrder,
+          duplicate: false,
+          appliedStatus: order.status === OrderStatus.FAILED ? order.status : OrderStatus.FAILED,
+          paymentStatus,
+          paymentAmount,
+          expectedAmount,
+          amountMismatch: true,
+          postCommitEffect: order.status === OrderStatus.FAILED
+            ? null
+            : buildOrderStatusPostCommitEffect(order, OrderStatus.FAILED),
         };
       }
 
@@ -5504,14 +5703,48 @@ app.post(MERCADOPAGO_WEBHOOK_PATHS, async (req, res) => {
       }
 
       if (nextStatus && order.status !== nextStatus) {
-        const updatedOrder = await updateOrderStatusWithEffects(tx, order, nextStatus, paymentData);
-        return {
-          order: updatedOrder,
-          duplicate: false,
-          appliedStatus: nextStatus,
-          paymentStatus,
-          postCommitEffect: buildOrderStatusPostCommitEffect(order, nextStatus),
-        };
+        try {
+          const updatedOrder = await updateOrderStatusWithEffects(tx, order, nextStatus, paymentData);
+          return {
+            order: updatedOrder,
+            duplicate: false,
+            appliedStatus: nextStatus,
+            paymentStatus,
+            paymentAmount,
+            expectedAmount,
+            postCommitEffect: buildOrderStatusPostCommitEffect(order, nextStatus),
+          };
+        } catch (transitionError) {
+          if (paymentStatus === "approved" && transitionError?.code === "INSUFFICIENT_STOCK") {
+            const stockConflictData = {
+              ...paymentData,
+              payment_status_detail: "stock_conflict_after_approval",
+            };
+            const conflictOrder = order.status === OrderStatus.FAILED
+              ? await tx.order.update({
+                where: { id: order.id },
+                data: stockConflictData,
+                include: { items: true, user: true, address: true },
+              })
+              : await updateOrderStatusWithEffects(tx, order, OrderStatus.FAILED, stockConflictData);
+
+            return {
+              order: conflictOrder,
+              duplicate: false,
+              appliedStatus: order.status === OrderStatus.FAILED ? order.status : OrderStatus.FAILED,
+              paymentStatus,
+              paymentAmount,
+              expectedAmount,
+              stockConflict: true,
+              unavailableCardIds: transitionError.unavailableCardIds || [],
+              postCommitEffect: order.status === OrderStatus.FAILED
+                ? null
+                : buildOrderStatusPostCommitEffect(order, OrderStatus.FAILED),
+            };
+          }
+
+          throw transitionError;
+        }
       }
 
       const updatedOrder = await tx.order.update({
@@ -5525,6 +5758,8 @@ app.post(MERCADOPAGO_WEBHOOK_PATHS, async (req, res) => {
         duplicate: false,
         appliedStatus: order.status,
         paymentStatus,
+        paymentAmount,
+        expectedAmount,
         postCommitEffect: null,
       };
     });
@@ -5545,7 +5780,11 @@ app.post(MERCADOPAGO_WEBHOOK_PATHS, async (req, res) => {
       ? "CHECKOUT_WEBHOOK_DUPLICATE"
       : outcome.ignored
         ? "CHECKOUT_WEBHOOK_IGNORED"
-      : outcome.paymentStatus === "approved"
+        : outcome.amountMismatch
+          ? "CHECKOUT_PAYMENT_AMOUNT_MISMATCH"
+          : outcome.stockConflict
+            ? "CHECKOUT_PAYMENT_STOCK_CONFLICT"
+      : outcome.paymentStatus === "approved" && outcome.appliedStatus === OrderStatus.PAID
         ? "CHECKOUT_PAYMENT_APPROVED"
         : outcome.appliedStatus === OrderStatus.EXPIRED
           ? "CHECKOUT_PAYMENT_EXPIRED"
@@ -5562,6 +5801,12 @@ app.post(MERCADOPAGO_WEBHOOK_PATHS, async (req, res) => {
         appliedStatus: outcome.appliedStatus,
         duplicate: outcome.duplicate,
         ignored: Boolean(outcome.ignored),
+        ignoreReason: outcome.ignoreReason || null,
+        paymentAmount: outcome.paymentAmount || null,
+        expectedAmount: outcome.expectedAmount || null,
+        amountMismatch: Boolean(outcome.amountMismatch),
+        stockConflict: Boolean(outcome.stockConflict),
+        unavailableCardIds: outcome.unavailableCardIds || [],
         providerRequestId: signatureMeta.providerRequestId,
       });
     } catch (activityError) {
@@ -5576,6 +5821,12 @@ app.post(MERCADOPAGO_WEBHOOK_PATHS, async (req, res) => {
       paymentStatus: outcome.paymentStatus,
       appliedStatus: outcome.appliedStatus,
       duplicate: outcome.duplicate,
+      ignored: Boolean(outcome.ignored),
+      ignoreReason: outcome.ignoreReason || null,
+      paymentAmount: outcome.paymentAmount || null,
+      expectedAmount: outcome.expectedAmount || null,
+      amountMismatch: Boolean(outcome.amountMismatch),
+      stockConflict: Boolean(outcome.stockConflict),
     });
 
     invalidatePublicCatalogCaches();
@@ -8369,9 +8620,16 @@ app.delete("/api/admin/orders", requireAdminAuth, requireAdminRole([UserRole.ADM
 
   try {
     const mutationMeta = getMutationMetadata(req);
+    const clearScope = String(req.body?.scope || "test").trim().toLowerCase();
+    if (!["test", "all"].includes(clearScope)) {
+      res.status(400).json({ error: "Invalid clear scope" });
+      return;
+    }
+
     idempotency = await beginIdempotentMutation(req, {
       payload: {
         clear: true,
+        scope: clearScope,
       },
     });
 
@@ -8383,7 +8641,20 @@ app.delete("/api/admin/orders", requireAdminAuth, requireAdminRole([UserRole.ADM
     const responsePayload = await prisma.$transaction(async (tx) => {
       assertRequestActive(req);
 
-      const orders = await tx.order.findMany({ include: { items: true } });
+      const allOrders = await tx.order.findMany({ include: { items: true, user: true } });
+      const orders = clearScope === "all"
+        ? allOrders
+        : allOrders.filter((order) => isAdminTestOrder(order));
+
+      if (!orders.length) {
+        return {
+          deletedCount: 0,
+          deletedOrderIds: [],
+          scope: clearScope,
+        };
+      }
+
+      const deletedOrderIds = orders.map((order) => order.id);
 
       for (const order of orders) {
         assertRequestActive(req);
@@ -8400,13 +8671,21 @@ app.delete("/api/admin/orders", requireAdminAuth, requireAdminRole([UserRole.ADM
           metadata: {
             mutationId: mutationMeta.mutationId,
             requestId: mutationMeta.requestId,
-            clearAll: true,
+            clearScope,
           },
         });
       }
 
-      const result = await tx.order.deleteMany({});
-      return { deletedCount: result.count };
+      const result = await tx.order.deleteMany({
+        where: {
+          id: { in: deletedOrderIds },
+        },
+      });
+      return {
+        deletedCount: result.count,
+        deletedOrderIds,
+        scope: clearScope,
+      };
     });
 
     invalidatePublicCatalogCaches();
@@ -8415,6 +8694,8 @@ app.delete("/api/admin/orders", requireAdminAuth, requireAdminRole([UserRole.ADM
         mutationId: mutationMeta.mutationId,
         requestId: mutationMeta.requestId,
         deletedCount: responsePayload.deletedCount,
+        deletedOrderIds: responsePayload.deletedOrderIds,
+        scope: responsePayload.scope,
       });
     } catch (activityError) {
       console.error("Failed to record clear orders activity", activityError);

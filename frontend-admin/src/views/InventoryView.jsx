@@ -127,6 +127,88 @@ function numberField(value, fallback = 0) {
   return Number.isFinite(nextValue) ? nextValue : fallback;
 }
 
+function parseLocalizedPrice(value) {
+  const normalized = String(value ?? "").trim().replace(",", ".");
+  if (!normalized) {
+    return null;
+  }
+
+  const nextValue = Number(normalized);
+  if (!Number.isFinite(nextValue) || nextValue < 0) {
+    return null;
+  }
+
+  return Number(nextValue.toFixed(2));
+}
+
+function parseNonNegativeInteger(value) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const nextValue = Number(normalized);
+  if (!Number.isFinite(nextValue) || nextValue < 0) {
+    return null;
+  }
+
+  return Math.floor(nextValue);
+}
+
+function buildInventoryDraftSavePayload(draft, committed) {
+  const updates = {};
+  const nextCommitted = { ...committed };
+
+  const nextPrice = parseLocalizedPrice(draft.price);
+  const committedPrice = parseLocalizedPrice(committed.price);
+  if (nextPrice === null) {
+    return { error: "Precio inválido" };
+  }
+  if (nextPrice !== committedPrice) {
+    updates.price = nextPrice;
+    nextCommitted.price = String(nextPrice);
+  }
+
+  const nextStock = parseNonNegativeInteger(draft.stock);
+  const committedStock = parseNonNegativeInteger(committed.stock);
+  if (nextStock === null) {
+    return { error: "Stock inválido" };
+  }
+  if (nextStock !== committedStock) {
+    updates.stock = nextStock;
+    nextCommitted.stock = String(nextStock);
+  }
+
+  const nextThreshold = parseNonNegativeInteger(draft.low_stock_threshold);
+  const committedThreshold = parseNonNegativeInteger(committed.low_stock_threshold);
+  if (nextThreshold === null) {
+    return { error: "Stock mínimo inválido" };
+  }
+  if (nextThreshold !== committedThreshold) {
+    updates.low_stock_threshold = nextThreshold;
+    nextCommitted.low_stock_threshold = String(nextThreshold);
+  }
+
+  const nextVisible = Boolean(draft.is_visible);
+  const committedVisible = Boolean(committed.is_visible);
+  if (nextVisible !== committedVisible) {
+    updates.is_visible = nextVisible;
+    nextCommitted.is_visible = nextVisible;
+  }
+
+  const nextFeatured = Boolean(draft.is_featured);
+  const committedFeatured = Boolean(committed.is_featured);
+  if (nextFeatured !== committedFeatured) {
+    updates.is_featured = nextFeatured;
+    nextCommitted.is_featured = nextFeatured;
+  }
+
+  return {
+    updates,
+    nextCommitted,
+  };
+}
+
 function ToggleCell({ checked, disabled, onChange, activeLabel, inactiveLabel }) {
   return (
     <button
@@ -192,8 +274,13 @@ const InventoryRow = memo(function InventoryRow({
       return undefined;
     }
 
-    const hasChanges = JSON.stringify(draft) !== JSON.stringify(committedRef.current);
-    if (!hasChanges) {
+    const nextSave = buildInventoryDraftSavePayload(draft, committedRef.current);
+    if (nextSave.error) {
+      setSaveState({ status: "error", message: nextSave.error });
+      return undefined;
+    }
+
+    if (Object.keys(nextSave.updates).length === 0) {
       return undefined;
     }
 
@@ -204,14 +291,9 @@ const InventoryRow = memo(function InventoryRow({
     saveTimerRef.current = window.setTimeout(async () => {
       try {
         setSaveState({ status: "saving", message: "Guardando..." });
-        await onSave(card.id, {
-          price: numberField(draft.price, card.price),
-          stock: numberField(draft.stock, card.stock),
-          low_stock_threshold: numberField(draft.low_stock_threshold, card.low_stock_threshold),
-          is_visible: Boolean(draft.is_visible),
-          is_featured: Boolean(draft.is_featured),
-        });
-        committedRef.current = draft;
+        await onSave(card.id, nextSave.updates);
+        committedRef.current = nextSave.nextCommitted;
+        setDraft(nextSave.nextCommitted);
         setSaveState({ status: "saved", message: "Guardado" });
         window.setTimeout(() => {
           setSaveState((current) => (current.status === "saved" ? { status: "idle", message: "" } : current));
@@ -226,7 +308,7 @@ const InventoryRow = memo(function InventoryRow({
         window.clearTimeout(saveTimerRef.current);
       }
     };
-  }, [canEditInventory, card.id, card.low_stock_threshold, card.price, card.stock, draft, onSave]);
+  }, [canEditInventory, card.id, draft, onSave]);
 
   const statusMeta = getStatusMeta({
     stock: numberField(draft.stock, card.stock),
@@ -270,8 +352,8 @@ const InventoryRow = memo(function InventoryRow({
 
       <div className="flex items-center px-3">
         <input
-          type="number"
-          step="0.01"
+          type="text"
+          inputMode="decimal"
           disabled={!canEditInventory}
           value={draft.price}
           onClick={(event) => event.stopPropagation()}
