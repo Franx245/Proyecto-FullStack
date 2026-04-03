@@ -355,66 +355,105 @@ async function createOrderShipmentWithEffects(order, { carrier = null, service =
 
   const resolvedService = resolveOrderShipmentService(order, service);
   const isSandbox = isMercadoPagoSandboxMode();
-  const enviaPayload = buildEnviaShipmentPayloadLog(order, {
-    carrier: normalizedCarrier,
-    service: resolvedService,
-  });
+  const shipmentOutcome = await prisma.$transaction(async (tx) => {
+    await lockOrderForUpdate(tx, order.id);
+    const freshOrder = await tx.order.findUnique({
+      where: { id: order.id },
+      include: { items: true, user: true, address: true },
+    });
 
-  logEvent("SHIPMENT_FLOW_START", "Starting shipment flow", {
-    requestId,
-    source,
-    orderId: order.id,
-    carrier: normalizedCarrier,
-    service: resolvedService,
-    isSandbox,
-  });
+    if (!freshOrder) {
+      return { order: null, shipment: null, skipped: true, reason: "missing_order" };
+    }
 
-  logEvent("ENVIACOM_REQUEST", "Creating shipment", {
-    requestId,
-    orderId: order.id,
-    payload: enviaPayload,
-    isSandbox,
-  });
+    if (freshOrder.shipmentId) {
+      logger.info("SHIPMENT_ALREADY_CREATED", {
+        requestId,
+        source,
+        orderId: order.id,
+        shipmentId: freshOrder.shipmentId,
+      });
+      return { order: freshOrder, shipment: null, skipped: true, reason: "shipment_exists" };
+    }
 
-  let shipment;
-  try {
-    shipment = await createShipment({
-      order,
+    const enviaPayload = buildEnviaShipmentPayloadLog(freshOrder, {
+      carrier: normalizedCarrier,
+      service: resolvedService,
+    });
+
+    logEvent("SHIPMENT_FLOW_START", "Starting shipment flow", {
+      requestId,
+      source,
+      orderId: freshOrder.id,
       carrier: normalizedCarrier,
       service: resolvedService,
       isSandbox,
     });
-  } catch (error) {
-    logEvent("ENVIACOM_ERROR", "Shipment failed", {
+
+    logEvent("ENVIACOM_REQUEST", "Creating shipment", {
       requestId,
-      orderId: order.id,
+      orderId: freshOrder.id,
       payload: enviaPayload,
-      status: error?.statusCode || null,
-      body: error?.enviaBody || null,
-      message: error?.message || "Shipment failed",
-      stack: error?.stack || null,
+      isSandbox,
     });
-    throw error;
+
+    let shipment;
+    try {
+      shipment = await createShipment({
+        order: freshOrder,
+        carrier: normalizedCarrier,
+        service: resolvedService,
+        isSandbox,
+      });
+    } catch (error) {
+      logEvent("ENVIACOM_ERROR", "Shipment failed", {
+        requestId,
+        orderId: freshOrder.id,
+        payload: enviaPayload,
+        status: error?.statusCode || null,
+        body: error?.enviaBody || null,
+        message: error?.message || "Shipment failed",
+        stack: error?.stack || null,
+      });
+      throw error;
+    }
+
+    const persistedTrackingNumber = shipment?.trackingNumber || null;
+    const persistedCarrier = shipment?.carrier || normalizedCarrier;
+    const persistedLabelUrl = shipment?.labelUrl || shipment?.label || null;
+    const persistedStatus = mapShipmentLifecycleStatus(shipment?.status) || "created";
+
+    const updatedOrder = await tx.order.update({
+      where: { id: freshOrder.id },
+      data: {
+        shipmentId: shipment.shipmentId || null,
+        trackingCode: persistedTrackingNumber,
+        shippingLabelUrl: persistedLabelUrl,
+        carrier: persistedCarrier,
+        shipmentStatus: persistedStatus,
+        estimatedDelivery: null,
+        trackingVisibleToUser: true,
+      },
+      include: { items: true, user: true, address: true },
+    });
+
+    return {
+      order: updatedOrder,
+      shipment,
+      skipped: false,
+      reason: null,
+      persistedTrackingNumber,
+      persistedCarrier,
+      persistedLabelUrl,
+    };
+  });
+
+  if (shipmentOutcome?.skipped || !shipmentOutcome?.order) {
+    return shipmentOutcome;
   }
 
-  const persistedTrackingNumber = shipment?.trackingNumber || null;
-  const persistedCarrier = shipment?.carrier || normalizedCarrier;
-  const persistedLabelUrl = shipment?.labelUrl || shipment?.label || null;
-  const persistedStatus = mapShipmentLifecycleStatus(shipment?.status) || "created";
-
-  const updatedOrder = await prisma.order.update({
-    where: { id: order.id },
-    data: {
-      shipmentId: shipment.shipmentId || null,
-      trackingCode: persistedTrackingNumber,
-      shippingLabelUrl: persistedLabelUrl,
-      carrier: persistedCarrier,
-      shipmentStatus: persistedStatus,
-      estimatedDelivery: null,
-      trackingVisibleToUser: true,
-    },
-    include: { items: true, user: true, address: true },
-  });
+  const updatedOrder = shipmentOutcome.order;
+  const { shipment, persistedTrackingNumber, persistedCarrier, persistedLabelUrl } = shipmentOutcome;
 
   logDbUpdate("order", updatedOrder.id, [
     "shipmentId",
