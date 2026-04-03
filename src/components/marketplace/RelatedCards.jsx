@@ -23,8 +23,10 @@ import RarityBadge from "./RarityBadge";
 const MOBILE_INITIAL = 4;
 const DESKTOP_INITIAL = 8;
 
-/** @param {{ card: RelatedCard, index: number }} props */
-const RelatedCardItem = memo(function RelatedCardItem({ card, index }) {
+/** @typedef {{ card: RelatedCard, index: number }} RelatedCardItemProps */
+
+/** @param {RelatedCardItemProps} props */
+function RelatedCardItemBase({ card, index }) {
   return (
     <Link
       href={buildCardPath({ id: card.id }, card.name)}
@@ -66,7 +68,9 @@ const RelatedCardItem = memo(function RelatedCardItem({ card, index }) {
       </div>
     </Link>
   );
-});
+}
+
+const RelatedCardItem = memo(RelatedCardItemBase);
 
 /** @param {{ cards: RelatedCard[], currentCardId?: number | string }} props */
 export default function RelatedCards({ cards, currentCardId: _currentCardId }) {

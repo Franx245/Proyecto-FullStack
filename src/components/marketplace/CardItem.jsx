@@ -16,7 +16,8 @@ import QuantitySelector from "./QuantitySelector";
  *  image?: string,
  *  price?: number,
  *  rarity?: string,
- *  stock?: number
+ *  stock?: number,
+ *  version_count?: number,
  * }} Card
  */
 

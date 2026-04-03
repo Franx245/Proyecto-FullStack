@@ -6,14 +6,16 @@ const MAX_SITEMAP_PAGES = 100;
 
 export const revalidate = 3600;
 
+/** @typedef {RequestInit & { next?: { revalidate?: number } }} NextFetchOptions */
+
 /**
  * @param {string} url
  * @param {number} revalidate
  */
 async function fetchJson(url, revalidate) {
-  const response = await fetch(url, {
+  const response = await fetch(url, /** @type {NextFetchOptions} */ ({
     next: { revalidate },
-  });
+  }));
 
   if (!response.ok) {
     return null;

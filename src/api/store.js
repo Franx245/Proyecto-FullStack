@@ -244,6 +244,9 @@ const clearScheduledTimeout = typeof globalThis.clearTimeout === "function"
 
 const CHECKOUT_API_TIMEOUT_MS = Math.max(ENV.API_TIMEOUT, 70000);
 
+/** @typedef {RequestInit & { timeoutMs?: number }} StoreRequestOptions */
+/** @typedef {{ method?: string, body?: any, retryOnAuthError?: boolean, idempotencyKey?: string | null, timeoutMs?: number }} AuthRequestOptions */
+
 export function createStoreMutationId(prefix = "store") {
   const randomPart = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
     ? crypto.randomUUID()
@@ -254,24 +257,25 @@ export function createStoreMutationId(prefix = "store") {
 
 /**
  * @param {string} path
- * @param {RequestInit} [options]
+ * @param {StoreRequestOptions} [options]
  */
 async function request(path, options = {}) {
-  const timeoutMs = Number(options.timeoutMs || ENV.API_TIMEOUT) || ENV.API_TIMEOUT;
+  const { timeoutMs: timeoutOverride, ...fetchOptions } = options;
+  const timeoutMs = Number(timeoutOverride || ENV.API_TIMEOUT) || ENV.API_TIMEOUT;
   const controller = new AbortController();
   const timeoutId = scheduleTimeout(() => controller.abort("timeout"), timeoutMs);
-  const method = String(options.method || "GET").toUpperCase();
-  const hasJsonBody = options.body != null && method !== "GET" && method !== "HEAD";
+  const method = String(fetchOptions.method || "GET").toUpperCase();
+  const hasJsonBody = fetchOptions.body != null && method !== "GET" && method !== "HEAD";
   const t0 = performance.now();
 
   try {
     const response = await fetch(buildApiUrl(path), {
       headers: {
         ...(hasJsonBody ? { "Content-Type": "application/json" } : {}),
-        ...(options.headers || {}),
+        ...(fetchOptions.headers || {}),
       },
       signal: controller.signal,
-      ...options,
+      ...fetchOptions,
     });
 
     const payload = await response.json().catch(() => ({}));
@@ -334,7 +338,7 @@ async function refreshUserAccessToken() {
 
 /**
  * @param {string} path
- * @param {{ method?: string, body?: any, retryOnAuthError?: boolean, idempotencyKey?: string | null }} [options]
+ * @param {AuthRequestOptions} [options]
  */
 async function authRequest(path, { method = "GET", body, retryOnAuthError = true, idempotencyKey = null, timeoutMs = ENV.API_TIMEOUT } = {}) {
   const session = getUsableStoredUserSession();

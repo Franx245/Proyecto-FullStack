@@ -155,8 +155,8 @@ cd Proyecto-FullStack
 npm install
 
 # 2. Configurar variables de entorno
-cp .env.example .env
-# Editar .env con tus credenciales (ver sección Variables de Entorno)
+cp .env.example .env.local
+# Editar .env.local con tus credenciales (ver sección Variables de Entorno)
 
 # 3. Preparar base de datos y seed
 npm run setup
@@ -172,6 +172,12 @@ El orquestador imprime las URLs reales:
 [boot] Admin: http://127.0.0.1:5182
 [boot] API:   http://127.0.0.1:3001
 ```
+
+Notas:
+
+- El backend carga primero `.env.local`; usar sólo `.env` no es el flujo principal del repo.
+- `npm run dev` sobreescribe en runtime las URLs locales del API, store y admin.
+- `REDIS_TCP_URL` sólo hace falta si querés BullMQ/pub/sub reales o levantar el worker; sin eso el API usa fallback inline.
 
 ---
 

@@ -12,6 +12,7 @@ import { buildRemoteCardImageUrl, extractCardIdFromImageUrl, getCardImage } from
  *  sizes?: string,
  *  variant?: "thumb" | "detail",
  *  alt?: string,
+ *  loading?: "eager" | "lazy",
  * }} props
  */
 function CardImageBase({
@@ -23,6 +24,7 @@ function CardImageBase({
   sizes,
   variant = "thumb",
   alt,
+  loading,
 }) {
   const resolvedId = id ?? extractCardIdFromImageUrl(fallbackSrc);
   const sources = getCardImage(resolvedId, variant);
@@ -47,7 +49,7 @@ function CardImageBase({
       width={sources?.width}
       height={sources?.height}
       alt={resolvedAlt}
-      loading={priority ? "eager" : "lazy"}
+      loading={loading || (priority ? "eager" : "lazy")}
       fetchPriority={priority ? "high" : "auto"}
       decoding={priority ? "sync" : "async"}
       onError={() => {

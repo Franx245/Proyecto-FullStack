@@ -124,6 +124,8 @@ function isWebhookConfirmationPending(order) {
  *    card: OrderItem
  *  }>
  * }} Order
+ *
+ * @typedef {{ orders?: Order[] }} OrdersPayload
  */
 
 // 🧠 WhatsApp message
@@ -198,16 +200,19 @@ export default function Orders() {
 
   const myOrdersQuery = useQuery({
     queryKey: ["my-orders"],
-    queryFn: fetchMyOrders,
+    queryFn: () => fetchMyOrders(),
     staleTime: 1000 * 30,
     refetchInterval: pendingPaymentFeedback ? 4000 : false,
     enabled: !isBootstrapping && isAuthenticated,
   });
 
+  const trackedOrdersData = /** @type {OrdersPayload | undefined} */ (trackedOrdersQuery.data);
+  const myOrdersData = /** @type {OrdersPayload | undefined} */ (myOrdersQuery.data);
+
   const orders = useMemo(() => {
     const merged = new Map();
-    const publicOrders = /** @type {Order[]} */ (isAuthenticated ? trackedOrdersQuery.data?.orders ?? [] : []);
-    const myOrders = /** @type {Order[]} */ (isAuthenticated ? myOrdersQuery.data?.orders ?? [] : []);
+    const publicOrders = /** @type {Order[]} */ (isAuthenticated ? trackedOrdersData?.orders ?? [] : []);
+    const myOrders = /** @type {Order[]} */ (isAuthenticated ? myOrdersData?.orders ?? [] : []);
 
     for (const order of publicOrders) {
       merged.set(String(order.id), order);
@@ -220,7 +225,7 @@ export default function Orders() {
     return Array.from(merged.values()).sort(
       (left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime()
     );
-  }, [isAuthenticated, myOrdersQuery.data?.orders, trackedOrdersQuery.data?.orders]);
+  }, [isAuthenticated, myOrdersData?.orders, trackedOrdersData?.orders]);
 
   const isLoading = isBootstrapping || trackedOrdersQuery.isLoading || myOrdersQuery.isLoading;
   const supportWhatsappNumber = normalizeWhatsappNumber(storefrontConfigQuery.data?.storefront?.support_whatsapp_number || "");

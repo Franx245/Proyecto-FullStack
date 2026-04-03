@@ -22,7 +22,8 @@ import CardImage from "./CardImage";
  *  rarity?: string,
  *  price?: number,
  *  stock?: number,
- *  condition?: string
+ *  condition?: string,
+ *  language?: string,
  * }} CardVersion
  */
 

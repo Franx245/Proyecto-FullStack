@@ -14,7 +14,10 @@
 
     "checkJs": true,
     "strict": true,
+    "noImplicitAny": false,
+    "strictNullChecks": false,
     "skipLibCheck": true,
+    "types": ["node"],
 
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,

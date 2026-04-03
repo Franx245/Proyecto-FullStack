@@ -244,7 +244,12 @@ function resolveTraceId(headers) {
   return traceId;
 }
 
-function markNavigationStart(kind, href, { startedAt } = {}) {
+/**
+ * @param {string} kind
+ * @param {string | URL | null | undefined} href
+ * @param {{ startedAt?: number }} [options]
+ */
+function markNavigationStart(kind, href, options = {}) {
   const state = getPerfState();
   if (!state) {
     return null;
@@ -252,6 +257,7 @@ function markNavigationStart(kind, href, { startedAt } = {}) {
 
   const url = normalizeBrowserUrl(href);
   const traceId = createFrontendTraceId(kind === "app_load" ? "load" : "nav");
+  const startedAt = options.startedAt;
   const navigationStartedAt = Number.isFinite(startedAt) ? startedAt : nowMs();
   const route = buildRouteLabelFromUrl(url);
 
@@ -347,14 +353,15 @@ function patchFetch() {
 
       return response;
     } catch (error) {
+      const errorLike = /** @type {{ name?: string, message?: string }} */ (error && typeof error === "object" ? error : {});
       emitPerfEvent("API_ERROR", {
         traceId,
         method,
         ...requestMeta,
         status: null,
         durationMs: roundMs(nowMs() - startedAt),
-        errorName: error?.name || "Error",
-        errorMessage: error?.message || "Request failed",
+        errorName: errorLike.name || "Error",
+        errorMessage: errorLike.message || "Request failed",
       });
       throw error;
     }
@@ -412,7 +419,7 @@ function scheduleInitialLoadReport() {
     }
 
     nextState.loadReported = true;
-    const navigationEntry = performance.getEntriesByType("navigation")[0];
+    const navigationEntry = /** @type {PerformanceNavigationTiming | undefined} */ (performance.getEntriesByType("navigation")[0]);
     const paintEntries = performance.getEntriesByType("paint");
     const fcpEntry = paintEntries.find((entry) => entry.name === "first-contentful-paint");
 

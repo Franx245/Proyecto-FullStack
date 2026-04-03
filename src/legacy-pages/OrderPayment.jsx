@@ -32,6 +32,7 @@ import { toast } from "sonner";
  * @typedef {{ status?: string | null, status_detail?: string | null, order_id?: number | string | null }} PaymentAttempt
  * @typedef {{ id?: number | string | null }} PaymentOrder
  * @typedef {{ payment?: PaymentAttempt | null, order?: PaymentOrder | null }} DirectPaymentResponse
+ * @typedef {{ orders?: StoreOrder[] }} StoreOrdersPayload
  * @typedef {{ type: string, number: string }} PaymentIdentification
  * @typedef {{ orderId: number, token: string, payment_method_id: string, issuer_id?: string | number | null, installments: number, identification?: PaymentIdentification }} DirectPaymentPayload
  * @typedef {{ token: string, payment_method_id: string, issuer_id?: string | number | null, installments?: number | string | null, payer?: { identification?: { type?: string | null, number?: string | null } | null } | null }} CardPaymentBrickData
@@ -152,16 +153,19 @@ export default function OrderPayment() {
 
   const ordersQuery = useQuery({
     queryKey: ["my-orders"],
-    queryFn: fetchMyOrders,
+    queryFn: () => fetchMyOrders(),
     enabled: !isBootstrapping && isAuthenticated,
   });
+
+  const trackedOrdersData = /** @type {StoreOrdersPayload | undefined} */ (trackedOrdersQuery.data);
+  const myOrdersData = /** @type {StoreOrdersPayload | undefined} */ (ordersQuery.data);
 
   const order = useMemo(() => {
     const merged = new Map();
     /** @type {StoreOrder[]} */
-    const trackedOrders = Array.isArray(trackedOrdersQuery.data?.orders) ? trackedOrdersQuery.data.orders : [];
+    const trackedOrders = Array.isArray(trackedOrdersData?.orders) ? trackedOrdersData.orders : [];
     /** @type {StoreOrder[]} */
-    const myOrders = Array.isArray(ordersQuery.data?.orders) ? ordersQuery.data.orders : [];
+    const myOrders = Array.isArray(myOrdersData?.orders) ? myOrdersData.orders : [];
 
     for (const entry of trackedOrders) {
       merged.set(String(entry.id), entry);
@@ -172,7 +176,7 @@ export default function OrderPayment() {
     }
 
     return merged.get(String(numericOrderId)) || null;
-  }, [numericOrderId, ordersQuery.data?.orders, trackedOrdersQuery.data?.orders]);
+  }, [myOrdersData?.orders, numericOrderId, trackedOrdersData?.orders]);
 
   const ownsOrder = useMemo(() => {
     if (!order || !user) {

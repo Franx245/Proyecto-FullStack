@@ -78,6 +78,7 @@ import { formatPrice } from "@/utils/currency";
  *  customer_name: string,
  *  phone: string,
  *  shipping_zone: string,
+ *  shipping_carrier?: string,
  *  notes: string,
  *  mutation_id?: string,
  *  accepted: boolean,

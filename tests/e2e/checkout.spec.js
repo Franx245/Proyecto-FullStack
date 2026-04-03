@@ -1,6 +1,10 @@
 // @ts-check
 import { test, expect } from "@playwright/test";
 
+/**
+ * @param {import("@playwright/test").Page} page
+ * @param {string} path
+ */
 async function gotoLive(page, path) {
   const separator = path.includes("?") ? "&" : "?";
   await page.goto(`${path}${separator}ts=${Date.now()}`, {
@@ -8,6 +12,7 @@ async function gotoLive(page, path) {
   });
 }
 
+/** @param {import("@playwright/test").Page} page */
 async function expectCartPage(page) {
   await expect(page.getByRole("heading", { name: "Tu Carrito" })).toBeVisible({ timeout: 10_000 });
 }
@@ -86,7 +91,7 @@ test.describe("Checkout — shipping + total consistency", () => {
 
     // Total text should contain a currency symbol (not "Calculando..." forever)
     const totalEl = page.locator("text=Total").locator("..").locator("span.text-primary").first();
-    const totalText = await totalEl.textContent({ timeout: 5000 }).catch(() => "");
+    const totalText = (await totalEl.textContent({ timeout: 5000 }).catch(() => "")) || "";
     // Total should be a formatted price or a loading state, never empty
     expect(totalText.length).toBeGreaterThan(0);
   });
