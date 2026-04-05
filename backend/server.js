@@ -3355,6 +3355,49 @@ function setPublicCardDetailCacheHeaders(res) {
   res.set("Vercel-CDN-Cache-Control", `public, s-maxage=${PUBLIC_CARD_DETAIL_CACHE_TTL_SECONDS}, stale-while-revalidate=1800`);
 }
 
+function buildCatalogDetailEtag(serializedPayload) {
+  return `"${createHash("md5").update(serializedPayload).digest("hex")}"`;
+}
+
+function normalizeCatalogDetailCacheEntry(cachedValue) {
+  if (!cachedValue) {
+    return null;
+  }
+
+  if (typeof cachedValue === "string") {
+    return {
+      body: cachedValue,
+      etag: buildCatalogDetailEtag(cachedValue),
+      upgraded: false,
+    };
+  }
+
+  if (typeof cachedValue !== "object") {
+    return null;
+  }
+
+  if (typeof cachedValue.body === "string") {
+    return {
+      body: cachedValue.body,
+      etag: typeof cachedValue.etag === "string" && cachedValue.etag.trim()
+        ? cachedValue.etag.trim()
+        : buildCatalogDetailEtag(cachedValue.body),
+      upgraded: false,
+    };
+  }
+
+  const serializedBody = safeJsonStringify(cachedValue);
+  if (!serializedBody) {
+    return null;
+  }
+
+  return {
+    body: serializedBody,
+    etag: buildCatalogDetailEtag(serializedBody),
+    upgraded: true,
+  };
+}
+
 function buildPublicCardListCacheKey(query, searchOverride) {
   const segments = ["scope=stock"];
 
@@ -5650,6 +5693,7 @@ async function handlePublicCatalogSearch(req, res) {
 }
 
 async function handlePublicCatalogDetail(req, res) {
+  const requestId = req.requestContext?.requestId || null;
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) {
     res.status(400).json({ error: "Invalid card id" });
@@ -5657,8 +5701,38 @@ async function handlePublicCatalogDetail(req, res) {
   }
 
   const cacheKey = `${PUBLIC_CARD_DETAIL_CACHE_PREFIX}:stock:${id}`;
+  const cachedValue = await cacheGet(cacheKey);
+  const cachedEntry = normalizeCatalogDetailCacheEntry(cachedValue);
 
-  const payload = await cacheGetOrFetch(cacheKey, PUBLIC_CARD_DETAIL_CACHE_TTL_SECONDS, async () => {
+  if (cachedEntry) {
+    if (cachedEntry.upgraded) {
+      void cacheSet(cacheKey, {
+        body: cachedEntry.body,
+        etag: cachedEntry.etag,
+      }, PUBLIC_CARD_DETAIL_CACHE_TTL_SECONDS);
+    }
+
+    setPublicCardDetailCacheHeaders(res);
+    res.set("X-Cache", "HIT");
+    res.set("ETag", cachedEntry.etag);
+    logEvent("CACHE_HIT", "Catalog detail cache hit", {
+      requestId,
+      path: req.path,
+      cacheKey,
+      cardId: id,
+    });
+    res.type("application/json").send(cachedEntry.body);
+    return;
+  }
+
+  logEvent("CACHE_MISS", "Catalog detail cache miss", {
+    requestId,
+    path: req.path,
+    cacheKey,
+    cardId: id,
+  });
+
+  const payload = await (async () => {
     const card = await prisma.card.findFirst({
       where: {
         id,
@@ -5851,15 +5925,41 @@ async function handlePublicCatalogDetail(req, res) {
         level: publicCard.level,
       },
     };
-  });
+  })();
 
   if (!payload) {
     res.status(404).json({ error: "Card not found" });
     return;
   }
 
+  const serializedPayload = safeJsonStringify(payload);
+  if (!serializedPayload) {
+    res.status(500).json({ error: "Failed to load card" });
+    return;
+  }
+
+  const etag = buildCatalogDetailEtag(serializedPayload);
+  const cacheStored = await cacheSet(cacheKey, {
+    body: serializedPayload,
+    etag,
+  }, PUBLIC_CARD_DETAIL_CACHE_TTL_SECONDS);
+
   setPublicCardDetailCacheHeaders(res);
-  res.json(payload);
+  res.set("X-Cache", "MISS");
+  res.set("ETag", etag);
+
+  if (cacheStored) {
+    logEvent("CACHE_SET", "Catalog detail cache stored", {
+      requestId,
+      path: req.path,
+      cacheKey,
+      cardId: id,
+      ttlSeconds: PUBLIC_CARD_DETAIL_CACHE_TTL_SECONDS,
+      bytes: Buffer.byteLength(serializedPayload, "utf8"),
+    });
+  }
+
+  res.type("application/json").send(serializedPayload);
 }
 
 app.get("/api/catalog", async (req, res) => {
