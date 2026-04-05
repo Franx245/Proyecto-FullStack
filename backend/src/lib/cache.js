@@ -3,6 +3,9 @@ import { recordCacheHit, recordCacheMiss } from "./metrics.js";
 
 const PREFIX_SCAN_COUNT = 200;
 const CACHE_LOG_ENABLED = process.env.NODE_ENV !== "production" || process.env.REDIS_CACHE_LOGS === "true";
+const PUBLIC_CACHE_TTL_IN_DEV_SECONDS = 0;
+const IS_DEVELOPMENT = process.env.NODE_ENV === "development";
+const MEMORY_MIRROR_TTL_SECONDS = IS_DEVELOPMENT ? 1 : 120;
 
 /** @type {Map<string, Promise<any>>} */
 const inflightRequests = new Map();
@@ -54,12 +57,30 @@ export const PUBLIC_CARD_FILTERS_CACHE_PREFIX = `filters:${PUBLIC_CATALOG_CACHE_
 export const PUBLIC_CARD_DETAIL_CACHE_PREFIX = `card-detail:${PUBLIC_CATALOG_CACHE_VERSION}`;
 export const PUBLIC_CARD_RANKINGS_CACHE_KEY = `rankings:${PUBLIC_CATALOG_CACHE_VERSION}`;
 export const PUBLIC_CARD_FILTERS_CACHE_KEY = PUBLIC_CARD_FILTERS_CACHE_PREFIX;
-export const PUBLIC_CARD_LIST_CACHE_TTL_SECONDS = 45;
-export const PUBLIC_CARD_DETAIL_CACHE_TTL_SECONDS = 120;
-export const PUBLIC_CARD_FILTERS_CACHE_TTL_SECONDS = 60 * 60;
-export const PUBLIC_CARD_RANKINGS_CACHE_TTL_SECONDS = 60 * 15;
+export const PUBLIC_CARD_LIST_CACHE_TTL_SECONDS = IS_DEVELOPMENT ? PUBLIC_CACHE_TTL_IN_DEV_SECONDS : 120;
+export const PUBLIC_CARD_DETAIL_CACHE_TTL_SECONDS = IS_DEVELOPMENT ? PUBLIC_CACHE_TTL_IN_DEV_SECONDS : 120;
+export const PUBLIC_CARD_FILTERS_CACHE_TTL_SECONDS = IS_DEVELOPMENT ? PUBLIC_CACHE_TTL_IN_DEV_SECONDS : 60 * 60;
+export const PUBLIC_CARD_RANKINGS_CACHE_TTL_SECONDS = IS_DEVELOPMENT ? PUBLIC_CACHE_TTL_IN_DEV_SECONDS : 60 * 15;
 export const DASHBOARD_CACHE_KEY = "dashboard:v1";
-export const DASHBOARD_CACHE_TTL_SECONDS = 30;
+export const DASHBOARD_CACHE_TTL_SECONDS = IS_DEVELOPMENT ? PUBLIC_CACHE_TTL_IN_DEV_SECONDS : 30;
+
+/** @param {string} key */
+function shouldUseMemoryMirror(key) {
+  return key.startsWith(PUBLIC_CARD_LIST_CACHE_PREFIX)
+    || key.startsWith(PUBLIC_CARD_FILTERS_CACHE_PREFIX)
+    || key.startsWith(PUBLIC_CARD_DETAIL_CACHE_PREFIX)
+    || key === PUBLIC_CARD_RANKINGS_CACHE_KEY
+    || key === DASHBOARD_CACHE_KEY;
+}
+
+/** @param {string} key @param {number} ttlSeconds */
+function resolveMemoryMirrorTtlSeconds(key, ttlSeconds) {
+  if (!shouldUseMemoryMirror(key)) {
+    return 0;
+  }
+
+  return Math.max(1, Math.min(ttlSeconds, MEMORY_MIRROR_TTL_SECONDS));
+}
 
 /**
  * Structured JSON log for cache operations.
@@ -102,13 +123,19 @@ function parseCachedValue(key, value) {
 }
 
 export async function cacheGet(key) {
-  if (!isRedisEnabled()) {
+  const redisEnabled = isRedisEnabled();
+  const useMemoryMirror = !redisEnabled || shouldUseMemoryMirror(key);
+
+  if (useMemoryMirror) {
     const memValue = memoryCacheGet(key);
     if (memValue !== null) {
-      logCache("hit", { key, latency_ms: 0, backend: "memory" });
+      logCache("hit", { key, latency_ms: 0, backend: redisEnabled ? "memory-mirror" : "memory" });
       void recordCacheHit();
       return memValue;
     }
+  }
+
+  if (!redisEnabled) {
     logCache("miss", { key, latency_ms: 0, backend: "memory" });
     void recordCacheMiss();
     return null;
@@ -132,6 +159,10 @@ export async function cacheGet(key) {
     }
 
     logCache("hit", { key, latency_ms: latencyMs });
+    const memoryMirrorTtlSeconds = resolveMemoryMirrorTtlSeconds(key, MEMORY_MIRROR_TTL_SECONDS);
+    if (memoryMirrorTtlSeconds > 0) {
+      memoryCacheSet(key, parsedValue, memoryMirrorTtlSeconds);
+    }
     void recordCacheHit();
     return parsedValue;
   } catch (error) {
@@ -144,13 +175,22 @@ export async function cacheGet(key) {
 }
 
 export async function cacheSet(key, value, ttlSeconds) {
-  if (!isRedisEnabled()) {
+  if (ttlSeconds <= 0) {
+    return true;
+  }
+
+  const redisEnabled = isRedisEnabled();
+  if (!redisEnabled) {
     memoryCacheSet(key, value, ttlSeconds);
     return true;
   }
 
   try {
     await redis.set(key, JSON.stringify(value), { ex: ttlSeconds });
+    const memoryMirrorTtlSeconds = resolveMemoryMirrorTtlSeconds(key, ttlSeconds);
+    if (memoryMirrorTtlSeconds > 0) {
+      memoryCacheSet(key, value, memoryMirrorTtlSeconds);
+    }
     logCache("set", { key, ttl: ttlSeconds });
     return true;
   } catch (error) {
@@ -175,6 +215,20 @@ export async function cacheSet(key, value, ttlSeconds) {
  * @returns {Promise<T>}
  */
 export async function cacheGetOrFetch(key, ttlSeconds, fetchFn) {
+  if (ttlSeconds <= 0) {
+    const inflight = inflightRequests.get(key);
+    if (inflight) {
+      return inflight;
+    }
+
+    const promise = Promise.resolve(fetchFn()).finally(() => {
+      inflightRequests.delete(key);
+    });
+
+    inflightRequests.set(key, promise);
+    return promise;
+  }
+
   const cached = await cacheGet(key);
   if (cached !== null) {
     return cached;

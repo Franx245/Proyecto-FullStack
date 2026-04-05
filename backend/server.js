@@ -9,6 +9,7 @@ import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto
 import prismaPkg from "@prisma/client";
 import path from "path";
 import { fileURLToPath } from "url";
+import { cacheMode, redisConfig, shippingMode, workerMode } from "./config/env.js";
 import { prisma, withDatabaseConnection, startDatabaseKeepalive, stopDatabaseKeepalive, withRetry } from "./src/lib/prisma.js";
 import { syncCatalogFromScope } from "./src/lib/catalogSync.js";
 import {
@@ -109,9 +110,10 @@ const configuredOrigins = new Set(
 );
 const allowedPorts = new Set([
   String(process.env.STORE_PORT || 5173),
-  String(process.env.ADMIN_PORT || 5174),
+  String(process.env.ADMIN_PORT || 5198),
   String(process.env.NEXT_STORE_PORT || 3000),
   "5173",
+  "5198",
   "5174",
   "3000",
 ]);
@@ -147,15 +149,31 @@ const SHIPPING_TRACKING_SYNC_BATCH_SIZE = Math.max(
   Number(process.env.SHIPPING_TRACKING_SYNC_BATCH_SIZE || 20)
 );
 const SHIPPING_SNAPSHOT_TTL_SECONDS = 5 * 60;
-const ENABLE_SHIPPING_TRACKING_SYNC_LOOP = String(process.env.ENABLE_SHIPPING_TRACKING_SYNC_LOOP || "true")
+const ENABLE_SHIPPING_TRACKING_SYNC_LOOP = String(process.env.ENABLE_SHIPPING_TRACKING_SYNC_LOOP || "false")
   .trim()
-  .toLowerCase() !== "false";
+  .toLowerCase() === "true";
 const ORDER_SCHEMA_CACHE_TTL_MS = 1000 * 60 * 15;
 const MERCADOPAGO_ACCOUNT_CACHE_TTL_MS = 1000 * 60 * 10;
 const MERCADOPAGO_WEBHOOK_PATHS = ["/api/checkout/webhook", "/api/webhook/mercadopago"];
 const ENVIA_WEBHOOK_PATH = "/api/webhooks/envia";
 const MERCADOPAGO_TEST_ACCESS_TOKEN_PREFIX = "TEST-";
 const MP_TEST_BUYER_EMAIL = "test_user_3309000128@testuser.com";
+const SUPPORTED_PAYMENT_MODES = new Set(["fake", "real"]);
+const SUPPORTED_FAKE_PAYMENT_STATUSES = new Set(["approved", "rejected", "pending"]);
+
+function resolveConfiguredPaymentMode() {
+  const configured = String(process.env.PAYMENT_MODE || "")
+    .trim()
+    .toLowerCase();
+
+  if (SUPPORTED_PAYMENT_MODES.has(configured)) {
+    return configured;
+  }
+
+  return process.env.NODE_ENV === "production" ? "real" : "fake";
+}
+
+const PAYMENT_MODE = resolveConfiguredPaymentMode();
 const mercadoPagoClient = MERCADOPAGO_ACCESS_TOKEN
   ? new MercadoPagoConfig({ accessToken: MERCADOPAGO_ACCESS_TOKEN })
   : null;
@@ -172,6 +190,30 @@ const mercadoPagoAccountState = {
   details: null,
 };
 let shippingTrackingSyncInterval = null;
+
+function maskConnectionUrl(value) {
+  const rawValue = String(value || "").trim();
+  if (!rawValue) {
+    return "";
+  }
+
+  try {
+    const parsed = new URL(rawValue);
+    const auth = parsed.username ? `${parsed.username}:***@` : "";
+    const port = parsed.port ? `:${parsed.port}` : "";
+    return `${parsed.protocol}//${auth}${parsed.hostname}${port}${parsed.pathname}`;
+  } catch {
+    return rawValue;
+  }
+}
+
+function resolveRedisTargetForLogs() {
+  if (!redisConfig.target) {
+    return "";
+  }
+
+  return maskConnectionUrl(redisConfig.target);
+}
 
 function buildRequestBodySnapshot(req) {
   if (typeof req.rawBody === "string" && req.rawBody) {
@@ -296,9 +338,9 @@ const ORDER_TRANSITIONS = {
   [OrderStatus.PENDING_PAYMENT]: [OrderStatus.PAID, OrderStatus.FAILED, OrderStatus.EXPIRED, OrderStatus.CANCELLED],
   [OrderStatus.FAILED]: [OrderStatus.PENDING_PAYMENT, OrderStatus.CANCELLED],
   [OrderStatus.EXPIRED]: [OrderStatus.PENDING_PAYMENT, OrderStatus.CANCELLED],
-  [OrderStatus.PAID]: [OrderStatus.SHIPPED, OrderStatus.CANCELLED],
-  [OrderStatus.SHIPPED]: [OrderStatus.COMPLETED, OrderStatus.CANCELLED],
-  [OrderStatus.COMPLETED]: [],
+  [OrderStatus.PAID]: [OrderStatus.PENDING_PAYMENT, OrderStatus.SHIPPED, OrderStatus.CANCELLED],
+  [OrderStatus.SHIPPED]: [OrderStatus.PENDING_PAYMENT, OrderStatus.PAID, OrderStatus.COMPLETED, OrderStatus.CANCELLED],
+  [OrderStatus.COMPLETED]: [OrderStatus.SHIPPED],
   [OrderStatus.CANCELLED]: [],
 };
 const BILLABLE_ORDER_STATUSES = [OrderStatus.PAID, OrderStatus.SHIPPED, OrderStatus.COMPLETED];
@@ -307,6 +349,15 @@ const DEFAULT_ADMIN_ORDERS_PAGE_SIZE = 10;
 const MAX_ADMIN_PAGE_SIZE = 50;
 const ADMIN_ORDER_CLEAR_BATCH_SIZE = 15;
 const ADMIN_ORDER_CLEAR_RESPONSE_GRACE_MS = 5000;
+const CORS_ALLOWED_HEADERS = [
+  "Authorization",
+  "Content-Type",
+  "Accept",
+  "X-Request-Id",
+  "X-Trace-Id",
+  "X-Idempotency-Key",
+];
+const CORS_ALLOWED_METHODS = ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"];
 
 app.use(cors({
   origin(origin, callback) {
@@ -314,6 +365,9 @@ app.use(cors({
     callback(allowedOrigin ? null : new Error("Origin not allowed by CORS"), allowedOrigin);
   },
   credentials: true,
+  allowedHeaders: CORS_ALLOWED_HEADERS,
+  methods: CORS_ALLOWED_METHODS,
+  optionsSuccessStatus: 204,
 }));
 app.set("trust proxy", 1);
 app.use(compression());
@@ -535,7 +589,10 @@ const adminAuthRateLimit = createRateLimitMiddleware({
 /* ── Global rate limiter (all /api/* routes) ── */
 const GLOBAL_RATE_LIMIT_SKIP = new Set([
   "/api/health",
+  "/api/catalog",
+  "/api/checkout/create-preference",
   "/api/checkout/webhook",
+  "/api/payments/create",
   "/api/webhook/mercadopago",
 ]);
 
@@ -554,6 +611,16 @@ const checkoutRateLimit = createRateLimitMiddleware({
   maxRequests: 5,
   message: "Too many checkout requests. Please try again later.",
   code: "CHECKOUT_RATE_LIMIT_EXCEEDED",
+});
+
+const publicCatalogRateLimit = createRateLimitMiddleware({
+  keyPrefix: "rl:catalog",
+  windowMs: 60 * 1000,
+  maxRequests: 100,
+  message: "Too many requests. Please try again later.",
+  code: "GLOBAL_RATE_LIMIT_EXCEEDED",
+  buildKey: (req) => getRequestIp(req),
+  useMemoryOnly: true,
 });
 
 app.use("/api", (req, res, next) => {
@@ -888,6 +955,47 @@ function getCheckoutCarrierLabel(carrier) {
   return null;
 }
 
+const FALLBACK_SHIPPING_CARRIERS = ["correo-argentino", "andreani"];
+
+function buildFallbackShippingRate(carrier, zone, { reason = "provider_unavailable" } = {}) {
+  const normalizedCarrier = normalizeCheckoutCarrier(carrier) || FALLBACK_SHIPPING_CARRIERS[0];
+  const shippingInfo = getShippingInfo(zone);
+
+  return {
+    carrier: normalizedCarrier,
+    carrierLabel: getCheckoutCarrierLabel(normalizedCarrier) || shippingInfo.label,
+    service: "Estimado",
+    price: formatCurrency(Number(shippingInfo.cost || 0)),
+    estimatedDays: shippingInfo.eta,
+    currency: "ARS",
+    fallback: true,
+    fallbackReason: reason,
+  };
+}
+
+function buildFallbackShippingRates(zone, options = {}) {
+  const carriers = Array.isArray(options.carriers) && options.carriers.length
+    ? options.carriers
+    : FALLBACK_SHIPPING_CARRIERS;
+
+  return [...new Set(carriers.map((carrier) => normalizeCheckoutCarrier(carrier)).filter(Boolean))]
+    .filter((carrier) => carrier !== "showroom")
+    .map((carrier) => buildFallbackShippingRate(carrier, zone, options));
+}
+
+function buildFallbackCheckoutShippingQuote(carrier, zone, snapshotId, options = {}) {
+  const fallbackRate = buildFallbackShippingRate(carrier, zone, options);
+
+  return {
+    carrier: fallbackRate.carrier,
+    cost: formatCurrency(Number(fallbackRate.price || 0)),
+    label: buildCheckoutShippingLabel(fallbackRate, zone),
+    snapshotId: snapshotId || null,
+    snapshotSource: "fallback",
+    fallbackReason: options.reason || null,
+  };
+}
+
 function normalizeShippingSnapshotText(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -1012,6 +1120,7 @@ async function resolveCheckoutShippingQuote({ userId, payload, delivery, items, 
       || payload.snapshotId
       || computedSnapshotId,
   ).trim();
+  const fallbackSnapshotId = requestedSnapshotId || computedSnapshotId;
 
   if (requestedSnapshotId) {
     const snapshot = await cacheGet(getShippingSnapshotCacheKey(requestedSnapshotId));
@@ -1071,12 +1180,16 @@ async function resolveCheckoutShippingQuote({ userId, payload, delivery, items, 
       : null;
 
     if (!selectedRate || !Number.isFinite(Number(selectedRate.price)) || Number(selectedRate.price) < 0) {
-      throw createAppError("Selected shipping rate unavailable", {
-        statusCode: 409,
-        code: "SHIPPING_RATE_UNAVAILABLE",
-        details: {
-          carrier: selectedCarrier,
-        },
+      logEvent("SHIPPING_FALLBACK", "Selected shipping rate unavailable, using fallback quote", {
+        requestId,
+        carrier: selectedCarrier,
+        shippingZone: delivery.shippingZone,
+        snapshotId: fallbackSnapshotId,
+        reason: "rate_unavailable",
+      });
+
+      return buildFallbackCheckoutShippingQuote(selectedCarrier, delivery.shippingZone, fallbackSnapshotId, {
+        reason: "rate_unavailable",
       });
     }
 
@@ -1084,17 +1197,20 @@ async function resolveCheckoutShippingQuote({ userId, payload, delivery, items, 
       carrier: selectedCarrier,
       cost: formatCurrency(Number(selectedRate.price)),
       label: buildCheckoutShippingLabel(selectedRate, delivery.shippingZone),
-      snapshotId: requestedSnapshotId || computedSnapshotId,
+      snapshotId: fallbackSnapshotId,
       snapshotSource: "live",
     };
   } catch (error) {
-    if (error?.statusCode) {
-      throw error;
-    }
+    logEvent("SHIPPING_FALLBACK", "Live shipping quote failed, using fallback quote", {
+      requestId,
+      carrier: selectedCarrier,
+      shippingZone: delivery.shippingZone,
+      snapshotId: fallbackSnapshotId,
+      reason: error?.code || error?.message || "provider_unavailable",
+    });
 
-    throw createAppError("Shipping unavailable", {
-      statusCode: 503,
-      code: "SHIPPING_UNAVAILABLE",
+    return buildFallbackCheckoutShippingQuote(selectedCarrier, delivery.shippingZone, fallbackSnapshotId, {
+      reason: error?.code || "provider_unavailable",
     });
   }
 }
@@ -1263,11 +1379,34 @@ function assertMercadoPagoWebhookConfigured() {
 }
 
 function assertMercadoPagoDirectPaymentsConfigured() {
+  if (PAYMENT_MODE === "fake") {
+    return;
+  }
+
   assertMercadoPagoWebhookConfigured();
 }
 
 function buildCheckoutBackUrl(statusPath, orderId) {
   return `${FRONTEND_PUBLIC_URL}/checkout/${statusPath}?orderId=${encodeURIComponent(String(orderId))}`;
+}
+
+function isMercadoPagoCheckoutAutoReturnAllowed(value) {
+  if (!value) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(value);
+    const hostname = String(parsed.hostname || "").trim().toLowerCase();
+
+    if (!hostname || localHosts.has(hostname) || hostname === "0.0.0.0") {
+      return false;
+    }
+
+    return parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 async function inspectMercadoPagoAccount() {
@@ -1408,34 +1547,6 @@ async function resolveMercadoPagoPayer(order, options = {}) {
   return Object.keys(payer).length > 0 ? payer : undefined;
 }
 
-function resolvePaymentResult({ isSandbox, payload }) {
-  if (!isSandbox) {
-    return null;
-  }
-
-  // WARNING: Sandbox bypass. Remove or disable before production.
-  logEvent("PAYMENT_FLOW", "Sandbox mode forcing approved payment", {
-    paymentMethodId: payload?.payment_method_id ?? null,
-    amount: payload?.transaction_amount ?? null,
-  });
-
-  const paymentResult = {
-    id: `debug_${Date.now()}`,
-    status: "approved",
-    status_detail: "accredited",
-    transaction_amount: payload?.transaction_amount ?? null,
-    installments: payload?.installments ?? null,
-    payment_method_id: payload?.payment_method_id ?? null,
-  };
-
-  if (payload?.payer?.first_name === "REJECT") {
-    paymentResult.status = "rejected";
-    paymentResult.status_detail = "cc_rejected_other_reason";
-  }
-
-  return paymentResult;
-}
-
 function buildMercadoPagoPreferenceItems(order, cardsById, exchangeRate) {
   const items = order.items.map((item) => {
     const card = cardsById.get(item.cardId);
@@ -1504,6 +1615,139 @@ function resolveMercadoPagoCheckoutUrl(preference, { useSandbox }) {
   }
 
   return preference?.init_point || preference?.sandbox_init_point || null;
+}
+
+function normalizeFakePaymentStatus(value) {
+  const normalized = String(value || "approved")
+    .trim()
+    .toLowerCase();
+
+  return SUPPORTED_FAKE_PAYMENT_STATUSES.has(normalized)
+    ? normalized
+    : "approved";
+}
+
+function buildFakePaymentId({ orderId, idempotencyKey, status }) {
+  const hash = createHash("sha1")
+    .update(JSON.stringify({
+      orderId,
+      idempotencyKey: String(idempotencyKey || "").trim() || "anonymous",
+      status,
+      provider: "fake",
+    }))
+    .digest("hex")
+    .slice(0, 16);
+
+  return `fake_${orderId}_${hash}`;
+}
+
+function buildFakeDirectPaymentResult({ orderId, idempotencyKey, transactionAmount, paymentMethodId, issuerId, installments, requestedStatus }) {
+  const status = normalizeFakePaymentStatus(requestedStatus);
+
+  return {
+    id: buildFakePaymentId({ orderId, idempotencyKey, status }),
+    provider: "fake",
+    status,
+    status_detail: status === "approved"
+      ? "accredited"
+      : status === "rejected"
+        ? "insufficient_funds"
+        : null,
+    transaction_amount: formatCurrency(Number(transactionAmount || 0)),
+    installments: Number.isInteger(Number(installments)) && Number(installments) > 0
+      ? Number(installments)
+      : 1,
+    payment_method_id: paymentMethodId || null,
+    issuer_id: issuerId || null,
+    external_reference: String(orderId),
+    metadata: {
+      order_id: orderId,
+      provider: "fake",
+    },
+  };
+}
+
+async function createFakeDirectPayment({ prepared, idempotencyKey, paymentMethodId, issuerId, installments, requestedStatus }) {
+  const payment = buildFakeDirectPaymentResult({
+    orderId: prepared.order.id,
+    idempotencyKey,
+    transactionAmount: prepared.totalArs,
+    paymentMethodId,
+    issuerId,
+    installments,
+    requestedStatus,
+  });
+
+  logEvent("PAYMENT_FLOW", "Fake payment resolved", {
+    orderId: prepared.order.id,
+    paymentId: payment.id,
+    paymentStatus: payment.status,
+    paymentStatusDetail: payment.status_detail,
+    paymentMode: PAYMENT_MODE,
+  });
+
+  return payment;
+}
+
+async function createRealMercadoPagoPayment({ paymentPayload, providerIdempotencyKey, requestSignal }) {
+  const payment = await createMercadoPagoDirectPayment({
+    accessToken: MERCADOPAGO_ACCESS_TOKEN,
+    idempotencyKey: providerIdempotencyKey,
+    body: paymentPayload,
+    timeoutMs: CHECKOUT_REQUEST_TIMEOUT_MS,
+    signal: requestSignal,
+  });
+
+  return {
+    ...payment,
+    provider: "mercadopago",
+  };
+}
+
+async function finalizeApprovedFakePayment(req, { orderId, userId, paymentId, paymentStatus, paymentStatusDetail, exchangeRate, totalArs, expiresAt }) {
+  const result = await prisma.$transaction(async (tx) => {
+    await lockOrderForUpdate(tx, orderId);
+    const order = await tx.order.findFirst({
+      where: {
+        id: orderId,
+        ...(Number.isFinite(userId) ? { userId } : {}),
+      },
+      include: { items: true, user: true, address: true },
+    });
+
+    if (!order) {
+      throw createAppError("Order not found", {
+        statusCode: 404,
+        code: "ORDER_NOT_FOUND",
+      });
+    }
+
+    const updatedOrder = await updateOrderStatusWithEffects(tx, order, OrderStatus.PAID, {
+      currency: "ARS",
+      exchange_rate: exchangeRate,
+      total_ars: totalArs,
+      expires_at: expiresAt,
+      payment_id: paymentId,
+      payment_status: paymentStatus || order.payment_status || "approved",
+      payment_status_detail: paymentStatusDetail || order.payment_status_detail || "accredited",
+      payment_approved_at: order.payment_approved_at || new Date(),
+      preference_id: null,
+    });
+
+    return {
+      order: updatedOrder,
+      postCommitEffect: buildOrderStatusPostCommitEffect(order, OrderStatus.PAID),
+    };
+  });
+
+  await applyOrderStatusPostCommitEffect(result.postCommitEffect);
+
+  const shipmentResult = await createOrderShipmentWithEffects(result.order, {
+    requestId: req.requestContext?.requestId || null,
+    source: "fake_payment",
+  });
+
+  return shipmentResult?.order || result.order;
 }
 
 function createAppError(message, extra = {}) {
@@ -1730,6 +1974,140 @@ function buildSandboxShippingLabelUrl(orderId) {
   return BACKEND_PUBLIC_URL ? `${BACKEND_PUBLIC_URL}${labelPath}` : labelPath;
 }
 
+const LOCALHOST_SIMULATED_SHIPMENT_ID_PREFIX = "localhost_simulated_";
+
+function extractRequestHostnames(req) {
+  const rawValues = [
+    req?.get?.("origin"),
+    req?.get?.("referer"),
+    req?.get?.("x-forwarded-host"),
+    req?.get?.("host"),
+  ].filter(Boolean);
+
+  const hostnames = new Set();
+  for (const rawValue of rawValues) {
+    for (const value of String(rawValue).split(",").map((entry) => entry.trim()).filter(Boolean)) {
+      try {
+        const parsed = value.includes("://") ? new URL(value) : new URL(`http://${value}`);
+        const hostname = String(parsed.hostname || "").trim().toLowerCase();
+        if (hostname) {
+          hostnames.add(hostname);
+        }
+      } catch {
+        // Ignore malformed host values.
+      }
+    }
+  }
+
+  return hostnames;
+}
+
+function isLocalhostShippingSimulationRequest(req) {
+  if (process.env.NODE_ENV === "production") {
+    return false;
+  }
+
+  for (const hostname of extractRequestHostnames(req)) {
+    if (localHosts.has(hostname) || hostname === "0.0.0.0") {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function buildLocalhostSimulatedShipmentId(orderId) {
+  return `${LOCALHOST_SIMULATED_SHIPMENT_ID_PREFIX}${orderId}`;
+}
+
+function buildLocalhostSimulatedTrackingCode(order) {
+  return `SIM-${order?.id || 0}-${Date.now()}`;
+}
+
+function isShowroomShippingOrder(order) {
+  return order?.shippingZone === ShippingZone.PICKUP || normalizeCheckoutCarrier(order?.carrier) === "showroom";
+}
+
+function buildLocalhostSimulatedShippingUpdate(order) {
+  if (!order || isShowroomShippingOrder(order)) {
+    return {};
+  }
+
+  const updateData = {};
+  const trackingCode = String(order.trackingCode || "").trim();
+  const shipmentId = String(order.shipmentId || "").trim();
+  const shippingLabelUrl = String(order.shippingLabelUrl || "").trim();
+  const shipmentStatus = String(order.shipmentStatus || "").trim();
+
+  if (!trackingCode) {
+    updateData.trackingCode = buildLocalhostSimulatedTrackingCode(order);
+    updateData.trackingVisibleToUser = true;
+  }
+
+  if (!shipmentId) {
+    updateData.shipmentId = buildLocalhostSimulatedShipmentId(order.id);
+  }
+
+  if (!shippingLabelUrl) {
+    updateData.shippingLabelUrl = buildSandboxShippingLabelUrl(order.id);
+  }
+
+  if (!shipmentStatus) {
+    updateData.shipmentStatus = "created";
+  }
+
+  return updateData;
+}
+
+async function ensureLocalhostSimulatedShipping(order, options = {}) {
+  const req = options.req;
+  if (!order || !isLocalhostShippingSimulationRequest(req)) {
+    return order;
+  }
+
+  const updateData = buildLocalhostSimulatedShippingUpdate(order);
+  if (!Object.keys(updateData).length) {
+    return order;
+  }
+
+  const db = options.tx || prisma;
+  const updatedOrder = await db.order.update({
+    where: { id: order.id },
+    data: updateData,
+    include: { items: true, user: true, address: true },
+  });
+
+  logDbUpdate("order", updatedOrder.id, Object.keys(updateData), {
+    requestId: req?.requestContext?.requestId || null,
+    source: "localhost_shipping_simulation",
+  });
+
+  if (updateData.trackingCode) {
+    logEvent("SIMULATED_TRACKING_CREATED", "Localhost simulated tracking created", {
+      requestId: req?.requestContext?.requestId || null,
+      orderId: updatedOrder.id,
+      trackingNumber: updatedOrder.trackingCode || null,
+      shipmentId: updatedOrder.shipmentId || null,
+      carrier: updatedOrder.carrier || null,
+    });
+  }
+
+  return updatedOrder;
+}
+
+async function ensureLocalhostSimulatedShippingForOrders(orders, req) {
+  if (!Array.isArray(orders) || orders.length === 0 || !isLocalhostShippingSimulationRequest(req)) {
+    return orders;
+  }
+
+  const nextOrders = [];
+  for (const order of orders) {
+    nextOrders.push(await ensureLocalhostSimulatedShipping(order, { req }));
+  }
+
+  return nextOrders;
+}
+
 const MANUAL_SHIPMENT_STATUS_OPTIONS = new Set([
   "created",
   "picked_up",
@@ -1761,16 +2139,17 @@ function mapShipmentLifecycleStatus(value) {
     return null;
   }
 
-  if (["created", "pending", "label_created", "label_generated", "ready", "ready_to_ship", "pre_transit", "processing"].includes(normalized)) {
+  if (["created", "pending", "label_created", "label_generated", "ready", "ready_to_ship", "pre_transit", "processing", "preparando", "preparacion", "en_preparacion"].includes(normalized)) {
     return "created";
   }
 
   if (
-    ["pickup", "picked_up", "pickedup", "collected", "collection", "collection_successful", "recibido", "recibida", "colectado", "colectada"].includes(normalized)
+    ["pickup", "picked_up", "pickedup", "collected", "collection", "collection_successful", "recibido", "recibida", "colectado", "colectada", "retirado", "retirada"].includes(normalized)
     || normalized.includes("picked_up")
     || normalized.includes("pickup")
     || normalized.includes("collect")
     || normalized.includes("recib")
+    || normalized.includes("retir")
   ) {
     return "picked_up";
   }
@@ -1836,22 +2215,44 @@ function deriveOrderStatusFromShipmentStatus(currentOrderStatus, shipmentStatus)
   return null;
 }
 
-function publishShipmentOrderUpdate(order) {
+function buildPublicOrderEventData(order) {
+  if (!order?.id) {
+    return null;
+  }
+
+  const trackingVisibleToUser = Boolean(order.trackingVisibleToUser && order.trackingCode && order.shippingZone !== ShippingZone.PICKUP);
+
+  return {
+    id: order.id,
+    status: String(order.status || "").trim().toLowerCase(),
+    payment_status: order.payment_status || null,
+    payment_status_detail: order.payment_status_detail || null,
+    payment_approved_at: order.payment_approved_at || null,
+    tracking_code: trackingVisibleToUser ? order.trackingCode || null : null,
+    trackingNumber: trackingVisibleToUser ? order.trackingCode || null : null,
+    tracking_visible_to_user: trackingVisibleToUser,
+    carrier: order.carrier || null,
+    shipment_status: order.shipmentStatus || null,
+    shippingStatus: order.shipmentStatus || null,
+    estimated_delivery: order.estimatedDelivery || null,
+    updated_at: order.updatedAt || null,
+  };
+}
+
+function publishShipmentOrderUpdate(order, orderSnapshot = buildPublicOrderEventData(order)) {
   if (!order?.id) {
     return;
   }
 
-  publishEvent("admin", {
-    type: "order-update",
+  publishEvent("order-update", {
     orderId: order.id,
     status: order.status,
     shipmentStatus: order.shipmentStatus || null,
-  });
-  publishEvent("public", {
-    type: "order-update",
-    orderId: order.id,
-    status: order.status,
-    shipmentStatus: order.shipmentStatus || null,
+    carrier: orderSnapshot?.carrier ?? null,
+    tracking_code: orderSnapshot?.tracking_code ?? null,
+    trackingVisibleToUser: orderSnapshot?.tracking_visible_to_user ?? false,
+    updated_at: orderSnapshot?.updated_at ?? null,
+    order: orderSnapshot,
   });
 }
 
@@ -2108,6 +2509,9 @@ async function syncShipmentStatuses({ source = "poller", requestId = null, limit
           shipmentId: order.shipmentId || null,
           trackingCode: order.trackingCode || null,
         };
+      } else if (String(order.shipmentId || "").startsWith(LOCALHOST_SIMULATED_SHIPMENT_ID_PREFIX)) {
+        ignoredCount += 1;
+        continue;
       } else {
         const trackingCode = String(order.trackingCode || "").trim();
         if (!trackingCode) {
@@ -2282,7 +2686,7 @@ function buildSimplePdfBuffer(lines) {
 function buildSandboxShippingLabelPdf(order) {
   const destination = buildAddressSummary(order) || "Direccion no disponible";
   const carrier = String(order?.carrier || order?.shippingLabel || "andreani").trim() || "andreani";
-  const trackingNumber = String(order?.trackingCode || `TRACK-${order?.id || Date.now()}`).trim();
+  const trackingNumber = String(order?.trackingCode || buildLocalhostSimulatedTrackingCode(order)).trim();
   const recipient = String(order?.customerName || order?.address?.recipientName || "Cliente DuelVault").trim();
 
   return buildSimplePdfBuffer({
@@ -2302,12 +2706,14 @@ function buildSandboxShippingLabelPdf(order) {
 
 async function createShipment({ order, carrier = null, service = null, isSandbox = false }) {
   const resolvedCarrier = normalizeCheckoutCarrier(carrier || order?.carrier) || normalizeEnviaCarrier(carrier || order?.carrier) || "andreani";
+  const useFallbackShipment = isSandbox || shippingMode === "fallback";
 
-  if (isSandbox) {
+  if (useFallbackShipment) {
     logEvent("ENVIACOM_REQUEST", "Creating sandbox shipment", {
       orderId: order?.id || null,
       carrier: resolvedCarrier,
       service: service || null,
+      shippingMode,
     });
 
     const fakeShipment = {
@@ -3260,7 +3666,7 @@ function buildConditionWhere(conditions) {
   return null;
 }
 
-function buildCardFilters(query, options = {}) {
+async function buildCardFilters(query, options = {}) {
   const minPrice = query.minPrice ? Number(query.minPrice) : undefined;
   const maxPrice = query.maxPrice ? Number(query.maxPrice) : undefined;
   const q = typeof query.q === "string" ? query.q.trim() : "";
@@ -3296,13 +3702,15 @@ function buildCardFilters(query, options = {}) {
       : null,
   ].filter(Boolean);
 
+  const baseWhere = await buildPublicCatalogBaseWhere(options);
+
   return {
-    where: {
-      ...buildPublicCatalogBaseWhere(options),
-      ...(featuredOnly ? { isFeatured: true } : {}),
-      ...(latestOnly ? { isNewArrival: true } : {}),
-      ...(and.length ? { AND: and } : {}),
-    },
+    where: combineWhereClauses(
+      baseWhere,
+      featuredOnly ? { isFeatured: true } : undefined,
+      latestOnly ? { isNewArrival: true } : undefined,
+      ...and,
+    ),
     orderBy: latestOnly
       ? [
           { isNewArrival: "desc" },
@@ -3334,11 +3742,53 @@ function buildCatalogVersion(total, updatedAt) {
   return `v${total}-${updatedAtMs}`;
 }
 
+const PUBLIC_CATALOG_BROWSER_CACHE_TTL_SECONDS = 60;
+const PUBLIC_CATALOG_BROWSER_STALE_WHILE_REVALIDATE_SECONDS = 30;
+const PUBLIC_CATALOG_DEFAULT_PAGE = 1;
+const PUBLIC_CATALOG_DEFAULT_PAGE_SIZE = 20;
+const PUBLIC_CATALOG_CACHE_QUERY_KEY_ALIASES = {
+  rarity: "rarities",
+  set: "sets",
+  condition: "conditions",
+  cardType: "cardTypes",
+};
+const PUBLIC_CATALOG_CACHE_QUERY_KEYS = new Set([
+  "page",
+  "pageSize",
+  "q",
+  "featured",
+  "latest",
+  "rarities",
+  "sets",
+  "conditions",
+  "cardTypes",
+  "category",
+  "minPrice",
+  "maxPrice",
+]);
+const PUBLIC_CATALOG_CACHE_LIST_QUERY_KEYS = new Set([
+  "rarities",
+  "sets",
+  "conditions",
+  "cardTypes",
+]);
+
 function setPublicCatalogCacheHeaders(res) {
-  const browserMaxAge = process.env.NODE_ENV === "production" ? 0 : PUBLIC_CARD_LIST_CACHE_TTL_SECONDS;
-  res.set("Cache-Control", `public, max-age=${browserMaxAge}, must-revalidate`);
-  res.set("CDN-Cache-Control", `public, s-maxage=${PUBLIC_CARD_LIST_CACHE_TTL_SECONDS}, stale-while-revalidate=300`);
-  res.set("Vercel-CDN-Cache-Control", `public, s-maxage=${PUBLIC_CARD_LIST_CACHE_TTL_SECONDS}, stale-while-revalidate=300`);
+  const browserMaxAge = process.env.NODE_ENV === "production"
+    ? PUBLIC_CATALOG_BROWSER_CACHE_TTL_SECONDS
+    : PUBLIC_CARD_LIST_CACHE_TTL_SECONDS;
+  res.set(
+    "Cache-Control",
+    `public, max-age=${browserMaxAge}, stale-while-revalidate=${PUBLIC_CATALOG_BROWSER_STALE_WHILE_REVALIDATE_SECONDS}`,
+  );
+  res.set(
+    "CDN-Cache-Control",
+    `public, s-maxage=${PUBLIC_CARD_LIST_CACHE_TTL_SECONDS}, stale-while-revalidate=${PUBLIC_CATALOG_BROWSER_STALE_WHILE_REVALIDATE_SECONDS}`,
+  );
+  res.set(
+    "Vercel-CDN-Cache-Control",
+    `public, s-maxage=${PUBLIC_CARD_LIST_CACHE_TTL_SECONDS}, stale-while-revalidate=${PUBLIC_CATALOG_BROWSER_STALE_WHILE_REVALIDATE_SECONDS}`,
+  );
 }
 
 function setPublicFiltersCacheHeaders(res) {
@@ -3355,52 +3805,243 @@ function setPublicCardDetailCacheHeaders(res) {
   res.set("Vercel-CDN-Cache-Control", `public, s-maxage=${PUBLIC_CARD_DETAIL_CACHE_TTL_SECONDS}, stale-while-revalidate=1800`);
 }
 
-function buildPublicCardListCacheKey(query, searchOverride) {
-  const segments = ["scope=stock"];
+function normalizePublicCatalogCacheQuery(query, searchOverride, options = {}) {
+  const normalized = {
+    page: String(PUBLIC_CATALOG_DEFAULT_PAGE),
+    pageSize: String(PUBLIC_CATALOG_DEFAULT_PAGE_SIZE),
+    scope: options.stockOnly === false ? "visible" : "stock",
+  };
 
-  Object.entries(query)
-    .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
-    .forEach(([key, value]) => {
-      if (searchOverride !== undefined && key === "q") {
+  const appendNormalizedValue = (key, rawValue) => {
+    if (!PUBLIC_CATALOG_CACHE_QUERY_KEYS.has(key)) {
+      return;
+    }
+
+    if (PUBLIC_CATALOG_CACHE_LIST_QUERY_KEYS.has(key)) {
+      const nextValues = parseListParam(rawValue)
+        .map((value) => String(value || "").trim())
+        .filter(Boolean);
+
+      if (!nextValues.length) {
         return;
       }
 
-      if (Array.isArray(value)) {
-        value
-          .map((entry) => String(entry))
-          .sort((left, right) => left.localeCompare(right))
-          .forEach((entry) => {
-            if (entry) {
-              segments.push(`${encodeURIComponent(key)}=${encodeURIComponent(entry)}`);
-            }
-          });
-        return;
-      }
+      normalized[key] = [...new Set([...(normalized[key] || []), ...nextValues])]
+        .sort((left, right) => left.localeCompare(right));
+      return;
+    }
 
-      if (value !== undefined && value !== null && value !== "") {
-        segments.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`);
+    if (key === "featured" || key === "latest") {
+      if (String(rawValue || "").trim().toLowerCase() === "true") {
+        normalized[key] = true;
       }
-    });
+      return;
+    }
+
+    if (key === "page") {
+      normalized.page = String(Math.max(PUBLIC_CATALOG_DEFAULT_PAGE, Number(rawValue || PUBLIC_CATALOG_DEFAULT_PAGE)));
+      return;
+    }
+
+    if (key === "pageSize") {
+      normalized.pageSize = String(Math.min(50, Math.max(1, Number(rawValue || PUBLIC_CATALOG_DEFAULT_PAGE_SIZE))));
+      return;
+    }
+
+    if (key === "minPrice" || key === "maxPrice") {
+      const numericValue = Number(rawValue);
+      if (Number.isFinite(numericValue)) {
+        normalized[key] = formatCurrency(numericValue);
+      }
+      return;
+    }
+
+    const normalizedValue = String(rawValue || "").trim();
+    if (!normalizedValue) {
+      return;
+    }
+
+    normalized[key] = normalizedValue;
+  };
+
+  Object.entries(query || {}).forEach(([rawKey, rawValue]) => {
+    const canonicalKey = PUBLIC_CATALOG_CACHE_QUERY_KEY_ALIASES[rawKey] || rawKey;
+    if (searchOverride !== undefined && canonicalKey === "q") {
+      return;
+    }
+    appendNormalizedValue(canonicalKey, rawValue);
+  });
 
   if (searchOverride !== undefined) {
-    segments.push(`q=${encodeURIComponent(String(searchOverride))}`);
+    appendNormalizedValue("q", searchOverride);
   }
 
-  return `${PUBLIC_CARD_LIST_CACHE_PREFIX}:${segments.join(":") || "default"}`;
+  return Object.fromEntries(
+    Object.entries(normalized).sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey)),
+  );
 }
 
-function buildPublicCatalogBaseWhere(options = {}) {
+function resolvePublicCardListCacheContext(query, searchOverride, options = {}) {
+  const normalizedQuery = normalizePublicCatalogCacheQuery(query, searchOverride, options);
   return {
-    isVisible: true,
-    ...(options.stockOnly === false ? {} : { stock: { gt: 0 } }),
+    normalizedQuery,
+    cacheKey: `${PUBLIC_CARD_LIST_CACHE_PREFIX}:${JSON.stringify(normalizedQuery)}`,
   };
+}
+
+function resolvePublicCatalogSnapshotCacheContext(normalizedQuery) {
+  const { page: _page, pageSize: _pageSize, ...snapshotQuery } = normalizedQuery;
+  return {
+    snapshotQuery,
+    cacheKey: `${PUBLIC_CARD_LIST_CACHE_PREFIX}:snapshot:v2:${JSON.stringify(snapshotQuery)}`,
+  };
+}
+
+function buildPublicCatalogSnapshot(cards) {
+  const identityCounts = {};
+  const orderedCards = [];
+  let maxUpdatedAtMs = 0;
+
+  for (const card of cards) {
+    orderedCards.push(card);
+
+    if (card.cardIdentity) {
+      identityCounts[card.cardIdentity] = (identityCounts[card.cardIdentity] || 0) + 1;
+    }
+
+    const updatedAtMs = new Date(card.updatedAt || 0).getTime();
+    if (Number.isFinite(updatedAtMs)) {
+      maxUpdatedAtMs = Math.max(maxUpdatedAtMs, updatedAtMs);
+    }
+  }
+
+  return {
+    orderedCards,
+    total: orderedCards.length,
+    identityCounts,
+    maxUpdatedAt: maxUpdatedAtMs > 0 ? new Date(maxUpdatedAtMs).toISOString() : null,
+  };
+}
+
+function buildPublicCatalogResponsePayload({
+  pageCards,
+  identityCounts,
+  total,
+  page,
+  pageSize,
+  filterOptions,
+  maxUpdatedAt,
+}) {
+  const resolvedIdentityCounts = identityCounts && typeof identityCounts === "object"
+    ? identityCounts
+    : {};
+  const publicCards = attachMetadata(pageCards).map((card, index) => {
+    const identity = pageCards[index]?.cardIdentity;
+    const count = identity ? Number(resolvedIdentityCounts[identity] || 1) : 1;
+    return { ...card, version_count: count };
+  });
+  const versionUpdatedAt = maxUpdatedAt ? new Date(maxUpdatedAt) : null;
+
+  return {
+    cards: publicCards,
+    total,
+    page,
+    pageSize,
+    totalPages: Math.ceil(total / pageSize),
+    filters: filterOptions,
+    version: buildCatalogVersion(total, versionUpdatedAt),
+  };
+}
+
+function buildCatalogResponseEtag(serializedPayload) {
+  return `"${createHash("md5").update(serializedPayload).digest("hex")}"`;
+}
+
+function hasMatchingEtag(requestEtag, responseEtag) {
+  if (!requestEtag || !responseEtag) {
+    return false;
+  }
+
+  const candidates = String(Array.isArray(requestEtag) ? requestEtag.join(",") : requestEtag)
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  if (candidates.includes("*")) {
+    return true;
+  }
+
+  return candidates.some((candidate) => (
+    candidate === responseEtag
+    || candidate === `W/${responseEtag}`
+    || `W/${candidate}` === responseEtag
+  ));
+}
+
+function normalizeCatalogCacheEntry(cachedValue) {
+  if (!cachedValue || typeof cachedValue !== "object") {
+    return null;
+  }
+
+  if (typeof cachedValue.body === "string") {
+    return {
+      body: cachedValue.body,
+      etag: typeof cachedValue.etag === "string" && cachedValue.etag.trim()
+        ? cachedValue.etag.trim()
+        : buildCatalogResponseEtag(cachedValue.body),
+      upgraded: false,
+    };
+  }
+
+  const serializedBody = safeJsonStringify(cachedValue);
+  if (!serializedBody) {
+    return null;
+  }
+
+  return {
+    body: serializedBody,
+    etag: buildCatalogResponseEtag(serializedBody),
+    upgraded: true,
+  };
+}
+
+function getRequestDurationMs(req) {
+  return Math.max(0, Date.now() - Number(req.requestContext?.startedAt || Date.now()));
+}
+
+function getPublicCatalogScopeContextCacheKey() {
+  return `${PUBLIC_CARD_LIST_CACHE_PREFIX}:scope-context`;
+}
+
+async function getPublicCatalogScopeContext() {
+  return cacheGetOrFetch(getPublicCatalogScopeContextCacheKey(), PUBLIC_CARD_LIST_CACHE_TTL_SECONDS, async () => {
+    const scopeSettings = await getCatalogScopeSettings();
+    const scopeWhere = await resolveCatalogScopeWhere(scopeSettings);
+
+    return {
+      scopeWhere: scopeWhere ?? null,
+    };
+  }).then((context) => ({
+    scopeWhere: context?.scopeWhere ?? undefined,
+  }));
+}
+
+async function buildPublicCatalogBaseWhere(options = {}) {
+  const { scopeWhere } = await getPublicCatalogScopeContext();
+
+  return combineWhereClauses(
+    scopeWhere,
+    { isVisible: true },
+    options.stockOnly === false ? undefined : { stock: { gt: 0 } },
+  );
 }
 
 async function getPublicCardFilters(options = {}) {
   const expectedScope = options.stockOnly === false ? "visible" : "stock";
+  const cacheKey = `${PUBLIC_CARD_FILTERS_CACHE_KEY}:admin_inventory_${expectedScope}`;
 
-  return cacheGetOrFetch(PUBLIC_CARD_FILTERS_CACHE_KEY, PUBLIC_CARD_FILTERS_CACHE_TTL_SECONDS, async () => {
-    const baseWhere = buildPublicCatalogBaseWhere(options);
+  return cacheGetOrFetch(cacheKey, PUBLIC_CARD_FILTERS_CACHE_TTL_SECONDS, async () => {
+    const baseWhere = await buildPublicCatalogBaseWhere(options);
 
     const [rarityRows, setRows] = await Promise.all([
       prisma.card.findMany({
@@ -3428,70 +4069,179 @@ async function getPublicCardFilters(options = {}) {
 }
 
 async function listPublicCards(req, res, searchOverride, options = {}) {
-  setPublicCatalogCacheHeaders(res);
+  const requestId = req.requestContext?.requestId || null;
+  const { cacheKey, normalizedQuery } = resolvePublicCardListCacheContext(req.query, searchOverride, options);
+  const cachedValue = await cacheGet(cacheKey);
+  const cachedEntry = normalizeCatalogCacheEntry(cachedValue);
 
-  const cacheKey = buildPublicCardListCacheKey(req.query, searchOverride);
-  const page = Math.max(1, Number(req.query.page || 1));
-  const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize || 20)));
-  const filters = buildCardFilters({
+  if (cachedEntry) {
+    setPublicCatalogCacheHeaders(res);
+    res.set("X-Cache", "HIT");
+    res.set("ETag", cachedEntry.etag);
+
+    if (cachedEntry.upgraded) {
+      void cacheSet(cacheKey, {
+        body: cachedEntry.body,
+        etag: cachedEntry.etag,
+      }, PUBLIC_CARD_LIST_CACHE_TTL_SECONDS);
+    }
+
+    const notModified = hasMatchingEtag(req.headers["if-none-match"], cachedEntry.etag);
+    logEvent("CACHE_HIT", notModified ? "Catalog cache hit (304)" : "Catalog cache hit", {
+      requestId,
+      path: req.path,
+      cacheKey,
+      query: normalizedQuery,
+      notModified,
+      durationMs: getRequestDurationMs(req),
+    });
+
+    if (notModified) {
+      res.status(304).end();
+      return;
+    }
+
+    res.type("application/json").send(cachedEntry.body);
+    return;
+  }
+
+  setPublicCatalogCacheHeaders(res);
+  res.set("X-Cache", "MISS");
+  logEvent("CACHE_MISS", "Catalog cache miss", {
+    requestId,
+    path: req.path,
+    cacheKey,
+    query: normalizedQuery,
+  });
+
+  const page = Math.max(1, Number(req.query.page || PUBLIC_CATALOG_DEFAULT_PAGE));
+  const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize || PUBLIC_CATALOG_DEFAULT_PAGE_SIZE)));
+  const filters = await buildCardFilters({
     ...req.query,
     ...(searchOverride !== undefined ? { q: searchOverride } : {}),
   }, options);
 
   const includeFilterMetadata = req.query.featured !== "true" && req.query.latest !== "true";
+  const catalogStartedAt = Date.now();
 
-  const responsePayload = await cacheGetOrFetch(cacheKey, PUBLIC_CARD_LIST_CACHE_TTL_SECONDS, async () => {
-    const [total, cards, filterOptions, versionAggregate] = await Promise.all([
-      prisma.card.count({ where: filters.where }),
-      prisma.card.findMany({
-        where: filters.where,
-        orderBy: filters.orderBy,
-        select: PUBLIC_CARD_LIST_SELECT,
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-      }),
-      includeFilterMetadata ? getPublicCardFilters(options) : Promise.resolve({ rarities: [], sets: [] }),
-      prisma.card.aggregate({
-        where: filters.where,
-        _max: { updatedAt: true },
-      }),
-    ]);
+  const { cacheKey: snapshotCacheKey } = resolvePublicCatalogSnapshotCacheContext(normalizedQuery);
+  const filterOptionsPromise = includeFilterMetadata
+    ? getPublicCardFilters(options)
+    : Promise.resolve({ rarities: [], sets: [] });
+  const catalogSnapshot = await cacheGet(snapshotCacheKey);
 
-    // Compute version_count for cards that have a cardIdentity (grouping siblings)
-    const identities = cards.map((c) => c.cardIdentity).filter(Boolean);
-    /** @type {Map<string, number>} */
-    const identityCountMap = new Map();
-    if (identities.length) {
-      const counts = await prisma.card.groupBy({
-        by: ["cardIdentity"],
-        where: { cardIdentity: { in: identities }, isVisible: true },
-        _count: { id: true },
-      });
-      for (const row of counts) {
-        if (row.cardIdentity) {
-          identityCountMap.set(row.cardIdentity, row._count.id);
-        }
-      }
-    }
+  let responsePayload;
 
-    const publicCards = attachMetadata(cards).map((card, i) => {
-      const identity = cards[i]?.cardIdentity;
-      const count = identity ? (identityCountMap.get(identity) || 1) : 1;
-      return { ...card, version_count: count };
-    });
+  if (catalogSnapshot?.orderedCards) {
+    const total = Number(catalogSnapshot.total || 0);
+    const orderedCards = Array.isArray(catalogSnapshot.orderedCards) ? catalogSnapshot.orderedCards : [];
+    const pageCards = orderedCards.slice((page - 1) * pageSize, page * pageSize);
+    const filterOptions = await filterOptionsPromise;
 
-    return {
-      cards: publicCards,
+    responsePayload = buildPublicCatalogResponsePayload({
+      pageCards,
+      identityCounts: catalogSnapshot.identityCounts,
       total,
       page,
       pageSize,
-      totalPages: Math.ceil(total / pageSize),
-      filters: filterOptions,
-      version: buildCatalogVersion(total, versionAggregate._max.updatedAt),
-    };
+      filterOptions,
+      maxUpdatedAt: catalogSnapshot.maxUpdatedAt,
+    });
+  } else {
+    const pageOffset = (page - 1) * pageSize;
+    const [pageCards, aggregate, filterOptions] = await Promise.all([
+      prisma.card.findMany({
+        where: filters.where,
+        orderBy: filters.orderBy,
+        skip: pageOffset,
+        take: pageSize,
+        select: PUBLIC_CARD_LIST_SELECT,
+      }),
+      prisma.card.aggregate({
+        where: filters.where,
+        _count: { _all: true },
+        _max: { updatedAt: true },
+      }),
+      filterOptionsPromise,
+    ]);
+
+    const pageIdentities = [...new Set(pageCards.map((card) => card.cardIdentity).filter(Boolean))];
+    const identityCountRows = pageIdentities.length
+      ? await prisma.card.groupBy({
+          by: ["cardIdentity"],
+          where: combineWhereClauses(filters.where, {
+            cardIdentity: { in: pageIdentities },
+          }),
+          _count: {
+            cardIdentity: true,
+          },
+        })
+      : [];
+    const identityCounts = Object.fromEntries(
+      identityCountRows
+        .filter((row) => row?.cardIdentity)
+        .map((row) => [row.cardIdentity, Number(row?._count?.cardIdentity || 1)]),
+    );
+
+    responsePayload = buildPublicCatalogResponsePayload({
+      pageCards,
+      identityCounts,
+      total: Number(aggregate?._count?._all || 0),
+      page,
+      pageSize,
+      filterOptions,
+      maxUpdatedAt: aggregate?._max?.updatedAt || null,
+    });
+
+    void cacheGetOrFetch(snapshotCacheKey, PUBLIC_CARD_LIST_CACHE_TTL_SECONDS, async () => {
+      const cards = await prisma.card.findMany({
+        where: filters.where,
+        orderBy: filters.orderBy,
+        select: PUBLIC_CARD_LIST_SELECT,
+      });
+
+      return buildPublicCatalogSnapshot(cards);
+    }).catch((error) => {
+      console.error("[catalog] snapshot warmup failed", {
+        cacheKey: snapshotCacheKey,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
+
+  const serializedPayload = JSON.stringify(responsePayload);
+  const etag = buildCatalogResponseEtag(serializedPayload);
+
+  await cacheSet(cacheKey, {
+    body: serializedPayload,
+    etag,
+  }, PUBLIC_CARD_LIST_CACHE_TTL_SECONDS);
+
+  logEvent("CACHE_SET", "Catalog cache stored", {
+    requestId,
+    path: req.path,
+    cacheKey,
+    ttlSeconds: PUBLIC_CARD_LIST_CACHE_TTL_SECONDS,
+    bytes: Buffer.byteLength(serializedPayload, "utf8"),
+  });
+  logEvent("CATALOG_DURATION", "Catalog request completed", {
+    requestId,
+    path: req.path,
+    cacheKey,
+    query: normalizedQuery,
+    total: responsePayload.total,
+    returnedCards: responsePayload.cards.length,
+    durationMs: Date.now() - catalogStartedAt,
   });
 
-  res.json(responsePayload);
+  res.set("ETag", etag);
+
+  if (hasMatchingEtag(req.headers["if-none-match"], etag)) {
+    res.status(304).end();
+    return;
+  }
+
+  res.type("application/json").send(serializedPayload);
 }
 
 function parseAdminCardUpdatePayload(payload) {
@@ -3598,7 +4348,9 @@ function parseAdminOrderShippingPayload(payload) {
 
   if (payload.carrier !== undefined) {
     data.carrier = normalizeCheckoutCarrier(payload.carrier) || null;
-    data.shippingLabel = getCheckoutCarrierLabel(data.carrier);
+    if (data.carrier) {
+      data.shippingLabel = getCheckoutCarrierLabel(data.carrier);
+    }
   }
 
   if (payload.tracking_code !== undefined) {
@@ -3621,13 +4373,56 @@ function parseAdminOrderShippingPayload(payload) {
   return { data };
 }
 
+function orderMatchesAdminShippingUpdate(order, data) {
+  if (!order || !data || typeof data !== "object") {
+    return false;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(data, "carrier")) {
+    const currentCarrier = normalizeCheckoutCarrier(order.carrier);
+    const nextCarrier = normalizeCheckoutCarrier(data.carrier);
+    if ((currentCarrier || null) !== (nextCarrier || null)) {
+      return false;
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(data, "trackingCode")) {
+    const currentTrackingCode = typeof (order.trackingCode ?? order.tracking_code) === "string"
+      ? String(order.trackingCode ?? order.tracking_code).trim()
+      : "";
+    const nextTrackingCode = typeof data.trackingCode === "string"
+      ? data.trackingCode.trim()
+      : "";
+    if ((currentTrackingCode || null) !== (nextTrackingCode || null)) {
+      return false;
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(data, "trackingVisibleToUser")) {
+    const currentTrackingVisibleToUser = Boolean(order.trackingVisibleToUser ?? order.tracking_visible_to_user);
+    if (currentTrackingVisibleToUser !== Boolean(data.trackingVisibleToUser)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 function parseAdminOrderShipmentStatusPayload(payload) {
-  const requestedStatus = mapShipmentLifecycleStatus(payload?.status ?? payload?.shipment_status);
+  const requestedStatus = mapShipmentLifecycleStatus(payload?.shippingStatus ?? payload?.status ?? payload?.shipment_status);
   if (!requestedStatus || !MANUAL_SHIPMENT_STATUS_OPTIONS.has(requestedStatus)) {
     return { error: "Invalid shipment status" };
   }
 
   return { status: requestedStatus };
+}
+
+function orderMatchesAdminShipmentStatus(order, status) {
+  if (!order || !status) {
+    return false;
+  }
+
+  return mapShipmentLifecycleStatus(order.shipmentStatus ?? order.shipment_status) === status;
 }
 
 async function getOrderCardsMap(orders, options = {}) {
@@ -3925,6 +4720,7 @@ async function applyOrderStatusPostCommitEffect(effect) {
     orderId: effect.orderId,
     previousStatus: effect.previousStatus,
     newStatus: effect.nextStatus,
+    updated_at: effect.orderSnapshot?.updated_at || null,
     order: effect.orderSnapshot || null,
   });
 
@@ -4459,16 +5255,18 @@ async function createCheckoutPreferenceForOrder(req, { orderId, userId }) {
     buildMercadoPagoPreferenceItems(prepared.order, preferenceCardsById, prepared.exchangeRate),
     prepared.totalArs
   );
+  const backUrls = {
+    success: buildCheckoutBackUrl("success", prepared.order.id),
+    failure: buildCheckoutBackUrl("failure", prepared.order.id),
+    pending: buildCheckoutBackUrl("pending", prepared.order.id),
+  };
+  const enableAutoReturn = isMercadoPagoCheckoutAutoReturnAllowed(backUrls.success);
   const preferencePayload = {
     items: preferenceItems,
     external_reference: String(prepared.order.id),
     ...(notificationUrl ? { notification_url: notificationUrl } : {}),
-    back_urls: {
-      success: buildCheckoutBackUrl("success", prepared.order.id),
-      failure: buildCheckoutBackUrl("failure", prepared.order.id),
-      pending: buildCheckoutBackUrl("pending", prepared.order.id),
-    },
-    auto_return: "approved",
+    back_urls: backUrls,
+    ...(enableAutoReturn ? { auto_return: "approved" } : {}),
     statement_descriptor: "DUELVAULT",
     expires: true,
     expiration_date_from: new Date().toISOString(),
@@ -4480,6 +5278,14 @@ async function createCheckoutPreferenceForOrder(req, { orderId, userId }) {
       checkout_mode: useSandboxCheckout ? "sandbox" : "production",
     },
   };
+
+  if (!enableAutoReturn) {
+    logEvent("PAYMENT_FLOW", "Mercado Pago auto_return disabled for non-public checkout URL", {
+      requestId: req.requestContext?.requestId || null,
+      orderId: prepared.order.id,
+      successBackUrl: backUrls.success,
+    });
+  }
 
   const preferenceResponse = await mercadoPagoPreferenceClient.create({ body: preferencePayload });
   const preference = unwrapMercadoPagoBody(preferenceResponse);
@@ -5028,7 +5834,11 @@ async function resolveRefreshSessionUser({ refreshToken, allowedRoles = null }) 
 
 function _parseCatalogScopeMode(value) {
   const normalized = String(value || "").trim().toUpperCase();
-  return Object.values(CATALOG_SCOPE_MODE).includes(normalized) ? normalized : CATALOG_SCOPE_MODE.ALL;
+  if (!Object.values(CATALOG_SCOPE_MODE).includes(normalized)) {
+    throw new Error("Invalid catalog scope mode");
+  }
+
+  return normalized;
 }
 
 function _normalizeSelectedCardIds(value) {
@@ -5343,6 +6153,10 @@ async function getPublicStorefrontConfig() {
       const snapshot = {
         support_whatsapp_number: supportWhatsappNumber,
         support_email: supportEmail,
+        storefront_url: FRONTEND_PUBLIC_URL || null,
+        storefront_port: String(process.env.NEXT_STORE_PORT || 3005).trim() || "3005",
+        admin_url: String(process.env.ADMIN_URL || "").trim().replace(/\/$/, "") || null,
+        admin_port: String(process.env.ADMIN_PORT || 5198).trim() || "5198",
       };
 
       publicStorefrontConfigState.snapshot = snapshot;
@@ -5362,6 +6176,10 @@ async function getPublicStorefrontConfig() {
     const fallbackSnapshot = {
       support_whatsapp_number: String(process.env.SUPPORT_WHATSAPP_NUMBER || "").trim(),
       support_email: String(process.env.SUPPORT_EMAIL || "").trim().toLowerCase(),
+      storefront_url: FRONTEND_PUBLIC_URL || null,
+      storefront_port: String(process.env.NEXT_STORE_PORT || 3005).trim() || "3005",
+      admin_url: String(process.env.ADMIN_URL || "").trim().replace(/\/$/, "") || null,
+      admin_port: String(process.env.ADMIN_PORT || 5198).trim() || "5198",
     };
 
     publicStorefrontConfigState.snapshot = fallbackSnapshot;
@@ -5601,6 +6419,7 @@ app.get("/api/storefront/config", async (_req, res) => {
 });
 
 /* ── SSE realtime streams ── */
+app.get("/api/events", publicSSEHandler);
 app.get("/api/events/stream", publicSSEHandler);
 app.get("/api/admin/events/stream", requireAdminEventStreamAuth, adminSSEHandler);
 
@@ -5650,6 +6469,7 @@ async function handlePublicCatalogSearch(req, res) {
 }
 
 async function handlePublicCatalogDetail(req, res) {
+  const requestId = req.requestContext?.requestId || null;
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) {
     res.status(400).json({ error: "Invalid card id" });
@@ -5657,8 +6477,52 @@ async function handlePublicCatalogDetail(req, res) {
   }
 
   const cacheKey = `${PUBLIC_CARD_DETAIL_CACHE_PREFIX}:stock:${id}`;
+  const cachedValue = await cacheGet(cacheKey);
+  const cachedEntry = normalizeCatalogCacheEntry(cachedValue);
 
-  const payload = await cacheGetOrFetch(cacheKey, PUBLIC_CARD_DETAIL_CACHE_TTL_SECONDS, async () => {
+  setPublicCardDetailCacheHeaders(res);
+
+  if (cachedEntry) {
+    res.set("X-Cache", "HIT");
+    res.set("ETag", cachedEntry.etag);
+
+    if (cachedEntry.upgraded) {
+      void cacheSet(cacheKey, {
+        body: cachedEntry.body,
+        etag: cachedEntry.etag,
+      }, PUBLIC_CARD_DETAIL_CACHE_TTL_SECONDS);
+    }
+
+    const notModified = hasMatchingEtag(req.headers["if-none-match"], cachedEntry.etag);
+    logEvent("CACHE_HIT", notModified ? "Catalog detail cache hit (304)" : "Catalog detail cache hit", {
+      requestId,
+      path: req.path,
+      cacheKey,
+      cardId: id,
+      notModified,
+      durationMs: getRequestDurationMs(req),
+    });
+
+    if (notModified) {
+      res.status(304).end();
+      return;
+    }
+
+    res.type("application/json").send(cachedEntry.body);
+    return;
+  }
+
+  res.set("X-Cache", "MISS");
+  logEvent("CACHE_MISS", "Catalog detail cache miss", {
+    requestId,
+    path: req.path,
+    cacheKey,
+    cardId: id,
+  });
+
+  const detailStartedAt = Date.now();
+
+  const detailPayload = await cacheGetOrFetch(cacheKey, PUBLIC_CARD_DETAIL_CACHE_TTL_SECONDS, async () => {
     const card = await prisma.card.findFirst({
       where: {
         id,
@@ -5668,7 +6532,7 @@ async function handlePublicCatalogDetail(req, res) {
     });
 
     if (!card) {
-      return null; // cacheGetOrFetch won't cache null
+      return null;
     }
 
     const publicCard = toPublicCard(card);
@@ -5678,7 +6542,6 @@ async function handlePublicCatalogDetail(req, res) {
       orderBy: [{ createdAt: "desc" }],
     });
 
-    // Sibling cards sharing the same card_identity (same logical card, different editions)
     const siblingCards = card.cardIdentity
       ? await prisma.card.findMany({
           where: {
@@ -5691,7 +6554,6 @@ async function handlePublicCatalogDetail(req, res) {
         })
       : [];
 
-    // Related cards from the same archetype/family — ONLY real inventory with stock
     const archPrefix = card.archetype || extractArchetypePrefix(card.name);
     const relatedCards = archPrefix
       ? await prisma.card.findMany({
@@ -5771,7 +6633,6 @@ async function handlePublicCatalogDetail(req, res) {
         return Number(a.price || 0) - Number(b.price || 0);
       });
 
-    // Filter related cards that are already in siblings (avoid duplicates)
     const siblingIdSet = new Set(siblingCards.map((s) => s.id));
     const uniqueRelated = relatedCards.filter((r) => r.id !== card.id && !siblingIdSet.has(r.id));
 
@@ -5780,7 +6641,6 @@ async function handlePublicCatalogDetail(req, res) {
     const baseName = normalizeForScore(card.name);
     const basePrefix = archPrefix ? normalizeForScore(archPrefix) : "";
 
-    /** Jaccard-like word overlap ratio (0..1) */
     function wordOverlap(a, b) {
       const setA = new Set(a.split(/\s+/).filter(Boolean));
       const setB = new Set(b.split(/\s+/).filter(Boolean));
@@ -5790,7 +6650,6 @@ async function handlePublicCatalogDetail(req, res) {
       return intersection / Math.max(setA.size, setB.size);
     }
 
-    // --- Phased ranking: exact → prefix → fuzzy ---
     const groups = { exact: [], prefix: [], fuzzy: [] };
     for (const r of uniqueRelated) {
       const otherName = normalizeForScore(r.name);
@@ -5836,7 +6695,7 @@ async function handlePublicCatalogDetail(req, res) {
       };
     });
 
-    return {
+    const payload = {
       card: { ...publicCard, version_count: allVersions.length },
       versions: allVersions,
       related_cards: relatedMapped,
@@ -5851,18 +6710,63 @@ async function handlePublicCatalogDetail(req, res) {
         level: publicCard.level,
       },
     };
+
+    const serializedPayload = safeJsonStringify(payload);
+    if (!serializedPayload) {
+      return payload;
+    }
+
+    return {
+      body: serializedPayload,
+      etag: buildCatalogResponseEtag(serializedPayload),
+    };
   });
 
-  if (!payload) {
+  if (!detailPayload) {
     res.status(404).json({ error: "Card not found" });
     return;
   }
 
-  setPublicCardDetailCacheHeaders(res);
-  res.json(payload);
+  const responseEntry = normalizeCatalogCacheEntry(detailPayload);
+  if (!responseEntry) {
+    res.status(500).json({ error: "Failed to load card" });
+    return;
+  }
+
+  if (responseEntry.upgraded) {
+    await cacheSet(cacheKey, {
+      body: responseEntry.body,
+      etag: responseEntry.etag,
+    }, PUBLIC_CARD_DETAIL_CACHE_TTL_SECONDS);
+  }
+
+  logEvent("CACHE_SET", "Catalog detail cache stored", {
+    requestId,
+    path: req.path,
+    cacheKey,
+    cardId: id,
+    ttlSeconds: PUBLIC_CARD_DETAIL_CACHE_TTL_SECONDS,
+    bytes: Buffer.byteLength(responseEntry.body, "utf8"),
+  });
+  logEvent("CATALOG_DETAIL_DURATION", "Catalog detail request completed", {
+    requestId,
+    path: req.path,
+    cacheKey,
+    cardId: id,
+    durationMs: Date.now() - detailStartedAt,
+  });
+
+  res.set("ETag", responseEntry.etag);
+
+  if (hasMatchingEtag(req.headers["if-none-match"], responseEntry.etag)) {
+    res.status(304).end();
+    return;
+  }
+
+  res.type("application/json").send(responseEntry.body);
 }
 
-app.get("/api/catalog", async (req, res) => {
+app.get("/api/catalog", publicCatalogRateLimit, async (req, res) => {
   try {
     await handlePublicCatalogList(req, res);
   } catch (error) {
@@ -6395,7 +7299,8 @@ app.get("/api/auth/orders", requireAuth, async (req, res) => {
       take: limit + 1,
     });
     const hasMore = ordersWithSentinel.length > limit;
-    const orders = hasMore ? ordersWithSentinel.slice(0, limit) : ordersWithSentinel;
+    let orders = hasMore ? ordersWithSentinel.slice(0, limit) : ordersWithSentinel;
+    orders = await ensureLocalhostSimulatedShippingForOrders(orders, req);
     const total = skip + orders.length + (hasMore ? 1 : 0);
 
     logger.info("ORDERS_QUERY_TIME", {
@@ -6416,17 +7321,7 @@ app.get("/api/auth/orders", requireAuth, async (req, res) => {
     });
 
     const cardsMapStart = Date.now();
-    const cardsById = new Map(
-      attachMetadata(
-        [...new Map(
-          orders
-            .flatMap((order) => order.items)
-            .filter((item) => item.card)
-            .map((item) => [item.cardId, item.card]),
-        ).values()],
-        { adminThumbnail: true },
-      ).map((card) => [card.id, card]),
-    );
+    const cardsById = await getOrderCardsMap(orders);
     logger.info("ORDERS_CARDS_MAP_TIME", {
       userId,
       page,
@@ -6435,8 +7330,17 @@ app.get("/api/auth/orders", requireAuth, async (req, res) => {
       cardCount: cardsById.size,
     });
 
+    for (const card of Array.from(cardsById.values()).slice(0, 20)) {
+      logger.info("ORDER_IMAGES_DEBUG", {
+        requestId: req.requestContext?.requestId || null,
+        userId,
+        cardId: card.id,
+        imageUrl: card.image || null,
+      });
+    }
+
     const serializeStart = Date.now();
-  const responseOrders = orders.map((order) => toOrderResponse(order, cardsById));
+    const responseOrders = orders.map((order) => toOrderResponse(order, cardsById));
     logger.info("ORDERS_SERIALIZE_TIME", {
       userId,
       page,
@@ -6811,7 +7715,9 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
   let prepared = null;
   let userId = null;
   let paymentDebugContext = {
+    paymentMode: PAYMENT_MODE,
     orderId: null,
+    testCard: null,
     token: null,
     paymentMethodId: null,
     issuerId: null,
@@ -6868,6 +7774,8 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
       orderPrepared: Boolean(preparedOrder?.id),
       orderStatus: preparedOrder?.status || null,
       orderPayable: Boolean(preparedOrder && isOrderPayableStatus(preparedOrder.status)),
+      paymentMode: paymentDebugContext.paymentMode,
+      testCard: paymentDebugContext.testCard,
       totalPositive: Number(paymentDebugContext.amount.transactionAmount || 0) > 0,
       notificationUrlConfigured: Boolean(paymentDebugContext.notificationUrl),
       providerIdempotencyKey: paymentDebugContext.providerIdempotencyKey || null,
@@ -6908,6 +7816,7 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
         issuer_id: req.body?.issuer_id ?? null,
         installments: req.body?.installments ?? null,
         identification: req.body?.identification ?? null,
+        test_card: req.body?.test_card ?? null,
       },
     });
 
@@ -6924,6 +7833,7 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
     const installments = Number(req.body?.installments);
     const identificationType = String(req.body?.identification?.type || "").trim();
     const identificationNumber = String(req.body?.identification?.number || "").trim();
+    const testCard = normalizeFakePaymentStatus(req.body?.test_card);
 
     logger.info("TOKEN_RECEIVED", {
       requestId: req.requestContext?.requestId || null,
@@ -6940,6 +7850,7 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
       installments,
       identificationType,
       identificationNumber,
+      testCard,
     };
 
     if (!Number.isFinite(orderId)) {
@@ -6963,10 +7874,13 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
     }
 
     prepared = await prepareOrderForDirectPayment(req, { orderId, userId });
-    const mercadoPagoAccount = await getMercadoPagoAccountDetails();
-    const notificationUrl = buildMercadoPagoNotificationUrl({
-      useSandboxWebhook: shouldUseMercadoPagoSandboxWebhook(mercadoPagoAccount),
-    });
+    const isFakePayment = PAYMENT_MODE === "fake";
+    const mercadoPagoAccount = isFakePayment ? null : await getMercadoPagoAccountDetails();
+    const notificationUrl = isFakePayment
+      ? null
+      : buildMercadoPagoNotificationUrl({
+          useSandboxWebhook: shouldUseMercadoPagoSandboxWebhook(mercadoPagoAccount),
+        });
     const providerIdempotencyKey = String(idempotency.key || req.body?.mutation_id || `${orderId}-${Date.now()}`);
 
     logger.info("PAYMENT_PAYLOAD_BUILD_START", {
@@ -6982,16 +7896,29 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
       description: `DuelVault order #${prepared.order.id}`,
       external_reference: String(prepared.order.id),
       ...(notificationUrl ? { notification_url: notificationUrl } : {}),
-      payer: await resolveMercadoPagoPayer(prepared.order, {
-        accountDetails: mercadoPagoAccount,
-        identificationType,
-        identificationNumber,
-      }),
+      payer: isFakePayment
+        ? {
+            ...(identificationType && identificationNumber
+              ? {
+                  identification: {
+                    type: identificationType,
+                    number: identificationNumber,
+                  },
+                }
+              : {}),
+          }
+        : await resolveMercadoPagoPayer(prepared.order, {
+            accountDetails: mercadoPagoAccount,
+            identificationType,
+            identificationNumber,
+          }),
       ...(issuerId ? { issuer_id: issuerId } : {}),
+      ...(isFakePayment ? { test_card: testCard } : {}),
       metadata: {
         order_id: prepared.order.id,
         request_id: req.requestContext?.requestId || null,
         user_id: prepared.order.userId ?? null,
+        payment_mode: PAYMENT_MODE,
       },
     };
 
@@ -7014,29 +7941,35 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
       amount: paymentPayload.transaction_amount,
       payment_method_id: paymentPayload.payment_method_id,
       issuer_id: paymentPayload.issuer_id || null,
+      paymentMode: PAYMENT_MODE,
+      testCard: isFakePayment ? testCard : null,
     });
 
-    const isSandbox = MERCADOPAGO_ACCESS_TOKEN?.startsWith("TEST");
+    const isSandbox = !isFakePayment && MERCADOPAGO_ACCESS_TOKEN?.startsWith("TEST");
 
     logger.info("PAYMENT_PROVIDER_CALL", {
       requestId: req.requestContext?.requestId || null,
       orderId: prepared.order.id,
       isSandbox,
+      paymentMode: PAYMENT_MODE,
       hasToken: Boolean(paymentPayload?.token),
       amount: paymentPayload.transaction_amount,
     });
 
-    let payment = resolvePaymentResult({ isSandbox, payload: paymentPayload });
-
-    if (!payment) {
-      payment = await createMercadoPagoDirectPayment({
-        accessToken: MERCADOPAGO_ACCESS_TOKEN,
-        idempotencyKey: providerIdempotencyKey,
-        body: paymentPayload,
-        timeoutMs: CHECKOUT_REQUEST_TIMEOUT_MS,
-        signal: req.requestContext?.signal,
-      });
-    }
+    const payment = isFakePayment
+      ? await createFakeDirectPayment({
+          prepared,
+          idempotencyKey: providerIdempotencyKey,
+          paymentMethodId,
+          issuerId,
+          installments,
+          requestedStatus: testCard,
+        })
+      : await createRealMercadoPagoPayment({
+          paymentPayload,
+          providerIdempotencyKey,
+          requestSignal: req.requestContext?.signal,
+        });
 
     logger.info("PAYMENT_RESULT_RAW", {
       requestId: req.requestContext?.requestId || null,
@@ -7054,6 +7987,7 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
       requestId: req.requestContext?.requestId || null,
       orderId: prepared.order.id,
       isSandbox,
+      paymentMode: PAYMENT_MODE,
       result: payment?.status || null,
     });
 
@@ -7100,66 +8034,86 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
       logger.info("PAYMENT_APPROVED_DETECTED", {
         requestId: req.requestContext?.requestId || null,
         orderId: updatedOrder.id,
+        paymentMode: PAYMENT_MODE,
       });
 
-      const simulatedPayment = {
-        id: payment?.id,
-        status: paymentStatus,
-        status_detail: paymentStatusDetail,
-        transaction_amount: Number(payment?.transaction_amount || prepared.totalArs),
-        transaction_details: {
-          total_paid_amount: Number(payment?.transaction_amount || prepared.totalArs),
-        },
-        metadata: {
-          order_id: updatedOrder.id,
-        },
-        external_reference: String(updatedOrder.id),
-      };
-
-      if (isSandbox) {
-        logEvent("WEBHOOK_SIMULATION_START", "Sandbox webhook simulation start", {
-          requestId: req.requestContext?.requestId || null,
+      if (isFakePayment) {
+        updatedOrder = await finalizeApprovedFakePayment(req, {
           orderId: updatedOrder.id,
+          userId,
+          paymentId: String(payment?.id || "").trim() || null,
+          paymentStatus,
+          paymentStatusDetail,
+          exchangeRate: prepared.exchangeRate,
+          totalArs: prepared.totalArs,
+          expiresAt: prepared.expiresAt,
         });
-      }
-
-      const reconciliationJob = await scheduleMercadoPagoReconciliation(req, {
-        payment: simulatedPayment,
-        paymentIdOverride: String(payment?.id || "").trim() || null,
-        providerRequestId: isSandbox
-          ? `sandbox_${req.requestContext?.requestId || Date.now()}`
-          : req.requestContext?.requestId || null,
-        source: isSandbox ? "payments_create_sandbox" : "payments_create",
-      });
-
-      logger.info("ENQUEUE_PAYMENT_JOB", {
-        requestId: req.requestContext?.requestId || null,
-        orderId: updatedOrder.id,
-        paymentId: String(payment?.id || "").trim() || null,
-        queued: reconciliationJob.queued,
-        jobId: reconciliationJob.jobId || null,
-      });
-
-      if (reconciliationJob.queued) {
-        webhookPending = true;
-        logEvent("QUEUE_JOB_ADDED", "Approved payment queued for reconciliation", {
+        webhookPending = false;
+        logEvent("PAYMENT_FLOW", "Fake approved payment finalized", {
           requestId: req.requestContext?.requestId || null,
           orderId: updatedOrder.id,
-          jobId: reconciliationJob.jobId,
-          source: isSandbox ? "payments_create_sandbox" : "payments_create",
+          paymentId: String(payment?.id || "").trim() || null,
         });
       } else {
-        webhookPending = false;
-        updatedOrder = reconciliationJob.result?.order || updatedOrder;
-      }
+        const simulatedPayment = {
+          id: payment?.id,
+          status: paymentStatus,
+          status_detail: paymentStatusDetail,
+          transaction_amount: Number(payment?.transaction_amount || prepared.totalArs),
+          transaction_details: {
+            total_paid_amount: Number(payment?.transaction_amount || prepared.totalArs),
+          },
+          metadata: {
+            order_id: updatedOrder.id,
+          },
+          external_reference: String(updatedOrder.id),
+        };
 
-      if (isSandbox) {
-        logEvent("WEBHOOK_SIMULATION_DONE", "Sandbox webhook simulation done", {
+        if (isSandbox) {
+          logEvent("WEBHOOK_SIMULATION_START", "Sandbox webhook simulation start", {
+            requestId: req.requestContext?.requestId || null,
+            orderId: updatedOrder.id,
+          });
+        }
+
+        const reconciliationJob = await scheduleMercadoPagoReconciliation(req, {
+          payment: simulatedPayment,
+          paymentIdOverride: String(payment?.id || "").trim() || null,
+          providerRequestId: isSandbox
+            ? `sandbox_${req.requestContext?.requestId || Date.now()}`
+            : req.requestContext?.requestId || null,
+          source: isSandbox ? "payments_create_sandbox" : "payments_create",
+        });
+
+        logger.info("ENQUEUE_PAYMENT_JOB", {
           requestId: req.requestContext?.requestId || null,
           orderId: updatedOrder.id,
-          appliedStatus: reconciliationJob.result?.outcome?.appliedStatus || updatedOrder.status,
+          paymentId: String(payment?.id || "").trim() || null,
           queued: reconciliationJob.queued,
+          jobId: reconciliationJob.jobId || null,
         });
+
+        if (reconciliationJob.queued) {
+          webhookPending = true;
+          logEvent("QUEUE_JOB_ADDED", "Approved payment queued for reconciliation", {
+            requestId: req.requestContext?.requestId || null,
+            orderId: updatedOrder.id,
+            jobId: reconciliationJob.jobId,
+            source: isSandbox ? "payments_create_sandbox" : "payments_create",
+          });
+        } else {
+          webhookPending = false;
+          updatedOrder = reconciliationJob.result?.order || updatedOrder;
+        }
+
+        if (isSandbox) {
+          logEvent("WEBHOOK_SIMULATION_DONE", "Sandbox webhook simulation done", {
+            requestId: req.requestContext?.requestId || null,
+            orderId: updatedOrder.id,
+            appliedStatus: reconciliationJob.result?.outcome?.appliedStatus || updatedOrder.status,
+            queued: reconciliationJob.queued,
+          });
+        }
       }
     }
 
@@ -7168,6 +8122,7 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
       order: toOrderResponse(updatedOrder, cardsById),
       payment: {
         id: payment?.id ? String(payment.id) : null,
+        provider: String(payment?.provider || (isFakePayment ? "fake" : "mercadopago")),
         status: paymentStatus || null,
         status_detail: paymentStatusDetail,
         amount: Number(payment?.transaction_amount || prepared.totalArs),
@@ -7181,6 +8136,7 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
       requestId: req.requestContext?.requestId || null,
       status: payment?.status || null,
       orderId: updatedOrder.id,
+      paymentMode: PAYMENT_MODE,
       webhookPending,
     });
 
@@ -7203,6 +8159,7 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
       requestId: req.requestContext?.requestId || null,
       orderId: updatedOrder.id,
       paymentId: responsePayload.payment.id,
+      provider: responsePayload.payment.provider,
       paymentStatus,
       paymentStatusDetail,
     });
@@ -7367,6 +8324,7 @@ app.post("/api/shipping/rates", requireAuth, async (req, res) => {
   try {
     const userId = Number(req.user.sub);
     const postalCode = String(req.body?.postal_code || req.body?.postalCode || "").trim();
+    const shippingZone = normalizeShippingZone(req.body?.zone || req.body?.shipping_zone || req.body?.shippingZone) || ShippingZone.INTERIOR;
     if (!postalCode) {
       res.status(400).json({ error: "Código postal requerido" });
       return;
@@ -7382,20 +8340,65 @@ app.post("/api/shipping/rates", requireAuth, async (req, res) => {
       postalCode,
       city,
       state,
+      shippingZone,
       itemCount,
       weight,
     });
 
     const cacheKey = `shipping-rates:${postalCode}:${city.toLowerCase()}:${state.toLowerCase()}:${itemCount}:${Math.round(weight * 100)}`;
-    const rates = await cacheGetOrFetch(
-      cacheKey,
-      300,
-      () => getShippingRates({ postalCode, city, state }, { itemCount, weight }),
-    );
+    let rates;
+    let source = "live";
 
-    if (!Array.isArray(rates) || rates.length === 0) {
-      res.status(503).json({ error: "Shipping unavailable" });
-      return;
+    if (shippingMode === "fallback") {
+      source = "fallback";
+      rates = buildFallbackShippingRates(shippingZone, { reason: "shipping_mode_fallback" });
+      logEvent("SHIPPING_FALLBACK", "Shipping fallback mode enabled; returning fallback rates", {
+        requestId: req.requestContext?.requestId || null,
+        postalCode,
+        city,
+        state,
+        shippingZone,
+        itemCount,
+        weight,
+        reason: "shipping_mode_fallback",
+        shippingMode,
+      });
+    } else {
+      try {
+        rates = await cacheGetOrFetch(
+          cacheKey,
+          300,
+          () => getShippingRates({ postalCode, city, state }, { itemCount, weight }),
+        );
+
+        if (!Array.isArray(rates) || rates.length === 0) {
+          source = "fallback";
+          rates = buildFallbackShippingRates(shippingZone, { reason: "rate_unavailable" });
+          logEvent("SHIPPING_FALLBACK", "No live shipping rates available, returning fallback rates", {
+            requestId: req.requestContext?.requestId || null,
+            postalCode,
+            city,
+            state,
+            shippingZone,
+            itemCount,
+            weight,
+            reason: "rate_unavailable",
+          });
+        }
+      } catch (error) {
+        source = "fallback";
+        rates = buildFallbackShippingRates(shippingZone, { reason: error?.code || "provider_unavailable" });
+        logEvent("SHIPPING_FALLBACK", "Shipping provider failed, returning fallback rates", {
+          requestId: req.requestContext?.requestId || null,
+          postalCode,
+          city,
+          state,
+          shippingZone,
+          itemCount,
+          weight,
+          reason: error?.code || error?.message || "provider_unavailable",
+        });
+      }
     }
 
     const shippingSnapshot = buildShippingSnapshot({
@@ -7408,13 +8411,21 @@ app.post("/api/shipping/rates", requireAuth, async (req, res) => {
       rates,
     });
 
-    await cacheSet(
-      getShippingSnapshotCacheKey(shippingSnapshot.snapshotId),
-      shippingSnapshot,
-      SHIPPING_SNAPSHOT_TTL_SECONDS,
-    );
+    try {
+      await cacheSet(
+        getShippingSnapshotCacheKey(shippingSnapshot.snapshotId),
+        shippingSnapshot,
+        SHIPPING_SNAPSHOT_TTL_SECONDS,
+      );
+    } catch (cacheError) {
+      logEvent("SHIPPING_ERROR", "Failed to cache shipping snapshot", {
+        requestId: req.requestContext?.requestId || null,
+        snapshotId: shippingSnapshot.snapshotId,
+        error: cacheError?.message || String(cacheError),
+      });
+    }
 
-    res.json({ rates, snapshotId: shippingSnapshot.snapshotId });
+    res.json({ rates, snapshotId: shippingSnapshot.snapshotId, source });
   } catch (error) {
     logEvent("SHIPPING_ERROR", "Shipping rates failed", {
       requestId: req.requestContext?.requestId || null,
@@ -7499,7 +8510,7 @@ app.get("/api/shipping/label/:orderId", async (req, res) => {
       return;
     }
 
-    const order = await prisma.order.findUnique({
+    let order = await prisma.order.findUnique({
       where: { id: orderId },
       include: { address: true },
     });
@@ -7509,7 +8520,12 @@ app.get("/api/shipping/label/:orderId", async (req, res) => {
       return;
     }
 
-    if (!String(order.shipmentId || "").startsWith("sandbox_")) {
+    order = await ensureLocalhostSimulatedShipping(order, { req });
+
+    if (
+      !String(order.shipmentId || "").startsWith("sandbox_")
+      && !String(order.shipmentId || "").startsWith(LOCALHOST_SIMULATED_SHIPMENT_ID_PREFIX)
+    ) {
       res.status(404).json({ error: "Shipping label not found" });
       return;
     }
@@ -7761,11 +8777,13 @@ app.get("/api/orders", requireAuth, async (req, res) => {
       return;
     }
 
-    const orders = await prisma.order.findMany({
+    let orders = await prisma.order.findMany({
       where: { id: { in: ids }, userId: currentUserId },
       orderBy: { createdAt: "desc" },
       include: { items: true, user: true, address: true },
     });
+
+    orders = await ensureLocalhostSimulatedShippingForOrders(orders, req);
 
     const cardsById = await getOrderCardsMap(orders);
     res.json({ orders: orders.map((order) => toOrderResponse(order, cardsById)) });
@@ -7981,9 +8999,16 @@ app.get("/api/admin/settings/catalog-scope", requireAdminAuth, async (_req, res)
 app.put("/api/admin/settings/catalog-scope", requireAdminAuth, requireAdminRole([UserRole.ADMIN]), async (req, res) => {
   try {
     const parsedPayload = await _parseCatalogScopePayload(req.body || {});
+    const incomingMode = parsedPayload.data.mode;
+
+    if (process.env.NODE_ENV === "production" && incomingMode === CATALOG_SCOPE_MODE.ALL) {
+      throw new Error("🚨 Forbidden: mode=ALL no permitido en producción");
+    }
+
     const scopeSettings = await setCatalogScopeSettings(parsedPayload.data);
     const scopeWhere = await resolveCatalogScopeWhere(scopeSettings);
     const appliedCardCount = await prisma.card.count({ where: scopeWhere });
+    invalidatePublicCatalogCaches();
     res.json({ settings: serializeCatalogScopeSettings(scopeSettings, appliedCardCount) });
   } catch (error) {
     console.error(error);
@@ -8554,6 +9579,13 @@ app.post("/api/admin/inventory", requireAdminAuth, requireAdminRole([UserRole.AD
     });
 
     invalidatePublicCatalogCaches();
+    if (responsePayload.card) {
+      publishEvent("stock-update", {
+        cardId: parsedPayload.data.cardId,
+        reason: "admin_inventory_add",
+        card: responsePayload.card,
+      });
+    }
     try {
       await recordActivity(req.user.id, "ADMIN_INVENTORY_ADDED", req, {
         mutationId: mutationMeta.mutationId,
@@ -8800,6 +9832,13 @@ app.put("/api/admin/cards/bulk", requireAdminAuth, requireAdminRole([UserRole.AD
           cards: bulkCards,
         });
       }
+      if (parsed.data.isVisible !== undefined) {
+        publishEvent("visibility-change", {
+          bulk: true,
+          reason: "admin_bulk_update",
+          cards: bulkCards,
+        });
+      }
     }
     try {
       await recordActivity(req.user.id, "ADMIN_CARDS_BULK_UPDATED", req, {
@@ -8922,6 +9961,13 @@ app.put("/api/admin/cards/:id", requireAdminAuth, requireAdminRole([UserRole.ADM
     }
     if (parsed.data.price !== undefined) {
       publishEvent("price-change", {
+        cardId: id,
+        reason: "admin_update",
+        card: updatedCard,
+      });
+    }
+    if (parsed.data.isVisible !== undefined) {
+      publishEvent("visibility-change", {
         cardId: id,
         reason: "admin_update",
         card: updatedCard,
@@ -9661,6 +10707,17 @@ app.put("/api/admin/users/:id/role", requireAdminAuth, requireAdminRole([UserRol
         });
       }
 
+      if (existingUser.role === role) {
+        return { user: toUserResponse(existingUser), ignored: true };
+      }
+
+      if (existingUser.role === UserRole.ADMIN) {
+        throw createAppError("Admin users cannot be modified", {
+          statusCode: 403,
+          code: "ADMIN_USER_PROTECTED",
+        });
+      }
+
       if (!overrideConflict) {
         assertExpectedUpdatedAt(existingUser, expectedUpdatedAt);
       }
@@ -9691,16 +10748,18 @@ app.put("/api/admin/users/:id/role", requireAdminAuth, requireAdminRole([UserRol
       return { user: toUserResponse(user) };
     });
 
-    try {
-      await recordActivity(req.user.id, "ADMIN_USER_ROLE_UPDATED", req, {
-        mutationId: mutationMeta.mutationId,
-        requestId: mutationMeta.requestId,
-        targetUserId: userId,
-        nextRole: role,
-        overrideConflict,
-      });
-    } catch (activityError) {
-      console.error("Failed to record user role activity", activityError);
+    if (!responsePayload.ignored) {
+      try {
+        await recordActivity(req.user.id, "ADMIN_USER_ROLE_UPDATED", req, {
+          mutationId: mutationMeta.mutationId,
+          requestId: mutationMeta.requestId,
+          targetUserId: userId,
+          nextRole: role,
+          overrideConflict,
+        });
+      } catch (activityError) {
+        console.error("Failed to record user role activity", activityError);
+      }
     }
 
     await finalizeIdempotentMutation(idempotency, 200, responsePayload);
@@ -9760,7 +10819,7 @@ app.get("/api/admin/orders", requireAdminAuth, async (req, res) => {
     const where = buildAdminOrdersWhere({ search, status });
     const skip = (page - 1) * pageSize;
 
-    const [orders, filteredTotal, totalOrders, pendingCount, countedCount] = await withDatabaseConnection(() => Promise.all([
+    const [ordersResult, filteredTotal, totalOrders, pendingCount, countedCount] = await withDatabaseConnection(() => Promise.all([
       prisma.order.findMany({
         where,
         include: { items: true, user: true, address: true },
@@ -9773,6 +10832,8 @@ app.get("/api/admin/orders", requireAdminAuth, async (req, res) => {
       prisma.order.count({ where: { status: OrderStatus.PENDING_PAYMENT } }),
       prisma.order.count({ where: { status: { in: BILLABLE_ORDER_STATUSES } } }),
     ]), { maxWaitMs: 5000 });
+
+    const orders = await ensureLocalhostSimulatedShippingForOrders(ordersResult, req);
 
     const cardsById = await getOrderCardsMap(orders, { adminThumbnail: true });
     assertRequestActive(req);
@@ -9871,6 +10932,14 @@ app.put("/api/admin/orders/:id/status", requireAdminAuth, async (req, res) => {
         });
       }
 
+      if (order.status === nextStatus) {
+        return {
+          order,
+          postCommitEffect: null,
+          ignored: true,
+        };
+      }
+
       assertExpectedUpdatedAt(order, expectedUpdatedAt);
 
       const allowedNextStatuses = getAllowedOrderTransitions(order.status, req.user.role);
@@ -9912,26 +10981,34 @@ app.put("/api/admin/orders/:id/status", requireAdminAuth, async (req, res) => {
       return {
         order: nextOrder,
         postCommitEffect: buildOrderStatusPostCommitEffect(order, nextStatus),
+        ignored: false,
       };
     });
 
     const updatedOrder = orderUpdateResult.order;
 
     const cardsById = await getOrderCardsMap([updatedOrder], { adminThumbnail: true });
-    const responsePayload = { order: toOrderResponse(updatedOrder, cardsById, { includeAdminFields: true }) };
+    const responsePayload = {
+      order: toOrderResponse(updatedOrder, cardsById, { includeAdminFields: true }),
+      ...(orderUpdateResult.ignored ? { ignored: true } : {}),
+    };
 
-    orderUpdateResult.postCommitEffect.orderSnapshot = responsePayload.order;
-    await applyOrderStatusPostCommitEffect(orderUpdateResult.postCommitEffect);
+    if (!orderUpdateResult.ignored && orderUpdateResult.postCommitEffect) {
+      orderUpdateResult.postCommitEffect.orderSnapshot = buildPublicOrderEventData(updatedOrder);
+      await applyOrderStatusPostCommitEffect(orderUpdateResult.postCommitEffect);
+    }
 
-    try {
-      await recordActivity(req.user.id, "ADMIN_ORDER_STATUS_UPDATED", req, {
-        mutationId: mutationMeta.mutationId,
-        requestId: mutationMeta.requestId,
-        orderId,
-        nextStatus,
-      });
-    } catch (activityError) {
-      console.error("Failed to record order status activity", activityError);
+    if (!orderUpdateResult.ignored) {
+      try {
+        await recordActivity(req.user.id, "ADMIN_ORDER_STATUS_UPDATED", req, {
+          mutationId: mutationMeta.mutationId,
+          requestId: mutationMeta.requestId,
+          orderId,
+          nextStatus,
+        });
+      } catch (activityError) {
+        console.error("Failed to record order status activity", activityError);
+      }
     }
     await finalizeIdempotentMutation(idempotency, 200, responsePayload);
     return res.json(responsePayload);
@@ -9979,6 +11056,7 @@ app.put("/api/admin/orders/:id/status", requireAdminAuth, async (req, res) => {
 app.put("/api/admin/orders/:id/shipping", requireAdminAuth, async (req, res) => {
   const requestId = req.requestContext?.requestId || null;
   let idempotency = null;
+  let parsedShippingUpdate = null;
 
   try {
     const mutationMeta = getMutationMetadata(req);
@@ -9999,6 +11077,7 @@ app.put("/api/admin/orders/:id/shipping", requireAdminAuth, async (req, res) => 
       res.status(400).json({ error: parsed.error });
       return;
     }
+    parsedShippingUpdate = parsed;
 
     idempotency = await beginIdempotentMutation(req, {
       payload: {
@@ -10012,7 +11091,7 @@ app.put("/api/admin/orders/:id/shipping", requireAdminAuth, async (req, res) => 
       return;
     }
 
-    const updatedOrder = await prisma.$transaction(async (tx) => {
+    const updatedOrderResult = await prisma.$transaction(async (tx) => {
       assertRequestActive(req);
 
       const order = await tx.order.findUnique({
@@ -10036,11 +11115,32 @@ app.put("/api/admin/orders/:id/shipping", requireAdminAuth, async (req, res) => 
         });
       }
 
-      const nextOrder = await tx.order.update({
+      const shippingUpdateData = { ...parsed.data };
+      if (
+        Object.prototype.hasOwnProperty.call(shippingUpdateData, "carrier")
+        && !Object.prototype.hasOwnProperty.call(shippingUpdateData, "shippingLabel")
+      ) {
+        shippingUpdateData.shippingLabel = order.shippingLabel || getShippingInfo(order.shippingZone).label;
+      }
+
+      let nextOrder = await tx.order.update({
         where: { id: orderId },
-        data: parsed.data,
+        data: shippingUpdateData,
         include: { items: true, user: true, address: true },
       });
+
+      nextOrder = await ensureLocalhostSimulatedShipping(nextOrder, { req, tx });
+
+      const shippingChanged = [
+        "carrier",
+        "trackingCode",
+        "trackingVisibleToUser",
+        "shippingLabel",
+        "shippingLabelUrl",
+        "shipmentId",
+        "shipmentStatus",
+        "estimatedDelivery",
+      ].some((field) => (order[field] ?? null) !== (nextOrder[field] ?? null));
 
       await createAdminAuditLog(tx, {
         actorId: req.user.id,
@@ -10058,11 +11158,28 @@ app.put("/api/admin/orders/:id/shipping", requireAdminAuth, async (req, res) => 
         },
       });
 
-      return nextOrder;
+      return {
+        order: nextOrder,
+        changed: shippingChanged,
+      };
     });
 
+    const updatedOrder = updatedOrderResult.order;
     const cardsById = await getOrderCardsMap([updatedOrder], { adminThumbnail: true });
     const responsePayload = { order: toOrderResponse(updatedOrder, cardsById, { includeAdminFields: true }) };
+    if (updatedOrderResult.changed) {
+      const publicOrderSnapshot = buildPublicOrderEventData(updatedOrder);
+      publishEvent("order-update", {
+        orderId: updatedOrder.id,
+        status: updatedOrder.status,
+        carrier: publicOrderSnapshot?.carrier ?? null,
+        tracking_code: publicOrderSnapshot?.tracking_code ?? null,
+        trackingVisibleToUser: publicOrderSnapshot?.tracking_visible_to_user ?? false,
+        shipmentStatus: publicOrderSnapshot?.shipment_status ?? null,
+        updated_at: publicOrderSnapshot?.updated_at ?? null,
+        order: publicOrderSnapshot,
+      });
+    }
     try {
       await recordActivity(req.user.id, "ADMIN_ORDER_SHIPPING_UPDATED", req, {
         mutationId: mutationMeta.mutationId,
@@ -10080,8 +11197,6 @@ app.put("/api/admin/orders/:id/shipping", requireAdminAuth, async (req, res) => 
     await finalizeIdempotentMutation(idempotency, 200, responsePayload);
     return res.json(responsePayload);
   } catch (error) {
-    await releaseIdempotentMutation(idempotency);
-
     if (res.headersSent) return;
 
     if (error.message === "CONCURRENT_MODIFICATION") {
@@ -10090,9 +11205,31 @@ app.put("/api/admin/orders/:id/shipping", requireAdminAuth, async (req, res) => 
         include: { items: true, user: true, address: true },
       });
       const cardsById = currentOrder ? await getOrderCardsMap([currentOrder], { adminThumbnail: true }) : new Map();
+      const currentResource = currentOrder ? toOrderResponse(currentOrder, cardsById, { includeAdminFields: true }) : null;
+
+      if (currentResource && orderMatchesAdminShippingUpdate(currentResource, parsedShippingUpdate?.data)) {
+        const responsePayload = {
+          order: currentResource,
+          ignored: true,
+          reason: "already_applied",
+        };
+
+        logger.info("ADMIN_ORDER_SHIPPING_CONFLICT_ALREADY_APPLIED", {
+          requestId,
+          orderId: Number(req.params.id),
+        });
+
+        if (idempotency) {
+          await finalizeIdempotentMutation(idempotency, 200, responsePayload);
+        }
+
+        return res.json(responsePayload);
+      }
+
+      await releaseIdempotentMutation(idempotency);
       sendConcurrencyConflict(res, {
         error: "El tracking ya cambió en otra sesión. Refrescá y reintentá.",
-        currentResource: currentOrder ? toOrderResponse(currentOrder, cardsById, { includeAdminFields: true }) : null,
+        currentResource,
         requestId,
         context: {
           entity: "order",
@@ -10101,6 +11238,8 @@ app.put("/api/admin/orders/:id/shipping", requireAdminAuth, async (req, res) => 
       });
       return;
     }
+
+    await releaseIdempotentMutation(idempotency);
 
     if (error?.statusCode) {
       res.status(error.statusCode).json({
@@ -10117,9 +11256,10 @@ app.put("/api/admin/orders/:id/shipping", requireAdminAuth, async (req, res) => 
   }
 });
 
-app.patch("/api/admin/orders/:id/shipment-status", requireAdminAuth, async (req, res) => {
+app.patch(["/api/admin/orders/:id/shipment-status", "/api/admin/orders/:id/shipping-status"], requireAdminAuth, async (req, res) => {
   const requestId = req.requestContext?.requestId || null;
   let idempotency = null;
+  let parsedShipmentStatus = null;
 
   try {
     const mutationMeta = getMutationMetadata(req);
@@ -10135,11 +11275,18 @@ app.patch("/api/admin/orders/:id/shipment-status", requireAdminAuth, async (req,
       return;
     }
 
+    logger.info("ADMIN_SHIPPING_STATUS_REQUEST", {
+      requestId,
+      orderId,
+      body: req.body || null,
+    });
+
     const parsed = parseAdminOrderShipmentStatusPayload(req.body || {});
     if (parsed.error) {
       res.status(400).json({ error: parsed.error });
       return;
     }
+    parsedShipmentStatus = parsed;
 
     idempotency = await beginIdempotentMutation(req, {
       payload: {
@@ -10156,7 +11303,7 @@ app.patch("/api/admin/orders/:id/shipment-status", requireAdminAuth, async (req,
     const result = await prisma.$transaction(async (tx) => {
       assertRequestActive(req);
 
-      const order = await tx.order.findUnique({
+      let order = await tx.order.findUnique({
         where: { id: orderId },
         include: { items: true, user: true, address: true },
       });
@@ -10175,6 +11322,10 @@ app.patch("/api/admin/orders/:id/shipment-status", requireAdminAuth, async (req,
           statusCode: 409,
           code: "ORDER_HAS_NO_SHIPPING",
         });
+      }
+
+      if (!order.shipmentId && !order.trackingCode && isLocalhostShippingSimulationRequest(req)) {
+        order = await ensureLocalhostSimulatedShipping(order, { req, tx });
       }
 
       if (!order.shipmentId && !order.trackingCode) {
@@ -10217,6 +11368,11 @@ app.patch("/api/admin/orders/:id/shipment-status", requireAdminAuth, async (req,
     });
 
     if (result.changed) {
+      logEvent("ADMIN_SHIPPING_STATUS_UPDATED", "Admin shipping status updated", {
+        requestId,
+        orderId,
+        shipmentStatus: result.order?.shipmentStatus || null,
+      });
       publishShipmentOrderUpdate(result.order);
       try {
         await recordActivity(req.user.id, "ADMIN_ORDER_SHIPMENT_STATUS_UPDATED", req, {
@@ -10242,8 +11398,6 @@ app.patch("/api/admin/orders/:id/shipment-status", requireAdminAuth, async (req,
     await finalizeIdempotentMutation(idempotency, 200, responsePayload);
     return res.json(responsePayload);
   } catch (error) {
-    await releaseIdempotentMutation(idempotency);
-
     if (res.headersSent) return;
 
     if (error.message === "CONCURRENT_MODIFICATION") {
@@ -10252,9 +11406,32 @@ app.patch("/api/admin/orders/:id/shipment-status", requireAdminAuth, async (req,
         include: { items: true, user: true, address: true },
       });
       const cardsById = currentOrder ? await getOrderCardsMap([currentOrder], { adminThumbnail: true }) : new Map();
+      const currentResource = currentOrder ? toOrderResponse(currentOrder, cardsById, { includeAdminFields: true }) : null;
+
+      if (currentResource && orderMatchesAdminShipmentStatus(currentResource, parsedShipmentStatus?.status)) {
+        const responsePayload = {
+          order: currentResource,
+          ignored: true,
+          reason: "already_applied",
+        };
+
+        logger.info("ADMIN_ORDER_SHIPMENT_STATUS_CONFLICT_ALREADY_APPLIED", {
+          requestId,
+          orderId: Number(req.params.id),
+          shipmentStatus: parsedShipmentStatus?.status || null,
+        });
+
+        if (idempotency) {
+          await finalizeIdempotentMutation(idempotency, 200, responsePayload);
+        }
+
+        return res.json(responsePayload);
+      }
+
+      await releaseIdempotentMutation(idempotency);
       sendConcurrencyConflict(res, {
         error: "El estado de envío ya cambió en otra sesión. Refrescá y reintentá.",
-        currentResource: currentOrder ? toOrderResponse(currentOrder, cardsById, { includeAdminFields: true }) : null,
+        currentResource,
         requestId,
         context: {
           entity: "order",
@@ -10263,6 +11440,8 @@ app.patch("/api/admin/orders/:id/shipment-status", requireAdminAuth, async (req,
       });
       return;
     }
+
+    await releaseIdempotentMutation(idempotency);
 
     if (error?.statusCode) {
       res.status(error.statusCode).json({
@@ -10613,6 +11792,17 @@ if (isDirectExecution) {
   logEvent("STARTUP", "DuelVault API starting", {
     nodeEnv: process.env.NODE_ENV || "undefined",
     port: PORT,
+    runtimeModes: {
+      cacheMode,
+      workerMode,
+      shippingMode,
+    },
+    envTargets: {
+      databaseUrl: maskConnectionUrl(process.env.DATABASE_URL),
+      directUrl: maskConnectionUrl(process.env.DIRECT_URL),
+      redisUrl: resolveRedisTargetForLogs(),
+      redisRestUrl: maskConnectionUrl(process.env.UPSTASH_REDIS_REST_URL),
+    },
     jwtConfigured: {
       access: !!process.env.ACCESS_TOKEN_SECRET,
       refresh: !!process.env.REFRESH_TOKEN_SECRET,
@@ -10672,9 +11862,20 @@ if (isDirectExecution) {
           if (tcpOk) {
             logEvent("USING_BULLMQ", "Redis TCP configured; BullMQ worker must run in dedicated process", {
               process: "api",
+              workerMode,
+            });
+          } else if (workerMode === "external") {
+            logEvent("INFRA_STATUS", "Redis TCP unavailable; external worker remains separated", {
+              workerMode,
+              redisTarget: resolveRedisTargetForLogs(),
             });
           }
         } catch { /* non-critical */ }
+      } else if (workerMode === "external") {
+        logEvent("INFRA_STATUS", "Redis TCP not configured; external worker required", {
+          workerMode,
+          redisTarget: resolveRedisTargetForLogs(),
+        });
       } else {
         logEvent("INFRA_STATUS", "Redis TCP not configured; jobs will run inline");
       }

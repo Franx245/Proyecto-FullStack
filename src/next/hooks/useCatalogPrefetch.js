@@ -46,7 +46,7 @@ export default function useCatalogPrefetch() {
       queryClient.prefetchQuery({
         queryKey: queryPlan.cardsQueryKey,
         staleTime: CATALOG_QUERY_STALE_TIME,
-        queryFn: () => fetchCatalogCards({
+        queryFn: ({ signal }) => fetchCatalogCards({
           page: catalogUrlState.page,
           pageSize: CATALOG_PAGE_SIZE,
           search: catalogUrlState.search,
@@ -61,6 +61,7 @@ export default function useCatalogPrefetch() {
                 max: queryPlan.serverFilters.priceRange.max ?? undefined,
               }
             : undefined,
+          signal,
         }),
       }),
       queryClient.prefetchQuery({

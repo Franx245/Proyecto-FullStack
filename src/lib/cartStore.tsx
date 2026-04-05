@@ -20,7 +20,7 @@ interface CartContextType {
   addItem: (version: Omit<CartItem, "quantity">, qty: number) => void;
   removeItem: (versionId: string) => void;
   updateQuantity: (versionId: string, quantity: number) => void;
-  patchItemsByCardId: (cardId: number, patch: { stock?: number; price?: number }) => void;
+  patchItemsByCardId: (cardId: number, patch: { stock?: number; price?: number; isVisible?: boolean }) => void;
   clearCart: () => void;
   totalItems: number;
   totalPrice: number;
@@ -133,7 +133,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // 🔄 Patch stock/price de items por cardId (realtime SSE)
-  const patchItemsByCardId = useCallback((cardId: number, patch: { stock?: number; price?: number }) => {
+  const patchItemsByCardId = useCallback((cardId: number, patch: { stock?: number; price?: number; isVisible?: boolean }) => {
     const versionId = String(cardId);
     setItems((prev) => {
       const idx = prev.findIndex((i) => i.version_id === versionId);
@@ -142,9 +142,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       const item = prev[idx];
       const nextStock = typeof patch.stock === "number" ? patch.stock : item.stock;
       const nextPrice = typeof patch.price === "number" ? patch.price : item.price;
+      const isVisible = typeof patch.isVisible === "boolean" ? patch.isVisible : true;
 
-      // Remove item if stock drops to 0
-      if (typeof nextStock === "number" && nextStock <= 0) {
+      // Remove item if stock drops to 0 or the card becomes hidden.
+      if (!isVisible || (typeof nextStock === "number" && nextStock <= 0)) {
         return prev.filter((i) => i.version_id !== versionId);
       }
 

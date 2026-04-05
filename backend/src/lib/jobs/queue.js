@@ -5,6 +5,7 @@
  * inline (synchronous fallback for serverless or dev without Redis TCP).
  */
 import { Queue } from "bullmq";
+import { workerMode } from "../../../config/env.js";
 import { getQueueConnection, isRedisTcpConfigured } from "../redis-tcp.js";
 import { logEvent } from "../logger.js";
 
@@ -47,6 +48,19 @@ export async function enqueueJob(jobName, data, opts = {}) {
   const queue = getQueue();
 
   if (!queue) {
+    if (workerMode === "external") {
+      console.warn("⚠️ Worker externo requerido, jobs no procesados", {
+        jobName,
+        workerMode,
+      });
+      logEvent("WORKER_EXTERNAL_REQUIRED", "Redis unavailable and workerMode=external; job was not processed", {
+        jobName,
+        options: opts,
+        workerMode,
+      });
+      return null;
+    }
+
     logEvent("USING_INLINE_FALLBACK", "Redis TCP unavailable; running job inline", {
       jobName,
       options: opts,

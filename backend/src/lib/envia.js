@@ -141,6 +141,25 @@ export function isEnviaConfigured() {
   return Boolean(ENVIA_API_KEY);
 }
 
+function createEnviaError(message, { code = "ENVIA_REQUEST_FAILED", statusCode = null, enviaBody = null, enviaErrors = null } = {}) {
+  const error = new Error(message);
+  error.code = code;
+
+  if (statusCode != null) {
+    error.statusCode = statusCode;
+  }
+
+  if (enviaBody != null) {
+    error.enviaBody = enviaBody;
+  }
+
+  if (Array.isArray(enviaErrors) && enviaErrors.length) {
+    error.enviaErrors = enviaErrors;
+  }
+
+  return error;
+}
+
 /**
  * @param {string} path
  * @param {object} [options]
@@ -168,24 +187,39 @@ async function enviaFetch(path, options = {}) {
 
       if (!response.ok) {
         const errorMessage = body?.message || body?.error || `Envia API error ${response.status}`;
-        const error = new Error(errorMessage);
-        /** @type {*} */ (error).statusCode = response.status;
-        /** @type {*} */ (error).enviaBody = body;
-        throw error;
+        throw createEnviaError(errorMessage, {
+          code: `ENVIA_HTTP_${response.status}`,
+          statusCode: response.status,
+          enviaBody: body,
+        });
       }
 
       return body;
     } catch (err) {
-      lastError = err;
-      if (attempt < ENVIA_MAX_RETRIES && (err.name === "AbortError" || /** @type {*} */ (err).statusCode >= 500)) {
+      const normalizedError = err?.name === "AbortError"
+        ? createEnviaError("Envia request timed out", {
+            code: "ENVIA_TIMEOUT",
+            statusCode: 504,
+          })
+        : err;
+
+      lastError = normalizedError;
+      if (
+        attempt < ENVIA_MAX_RETRIES
+        && (
+          normalizedError?.code === "ENVIA_TIMEOUT"
+          || Number(normalizedError?.statusCode || 0) >= 500
+        )
+      ) {
         logEvent("ENVIACOM_RETRY", "Retrying Envia request", {
           attempt,
           path,
-          error: err.message,
+          error: normalizedError?.message || String(normalizedError),
+          code: normalizedError?.code || null,
         });
         continue;
       }
-      throw err;
+      throw normalizedError;
     } finally {
       clearTimeout(timeout);
     }
@@ -239,11 +273,15 @@ const DEFAULT_PARCEL = {
  */
 export async function getShippingRates(destination, options = {}) {
   if (!isEnviaConfigured()) {
-    throw new Error("Envia no esta configurado");
+    throw createEnviaError("Envia no esta configurado", {
+      code: "ENVIA_NOT_CONFIGURED",
+    });
   }
 
   if (!destination?.postalCode) {
-    throw new Error("Código postal requerido para cotizar envío");
+    throw createEnviaError("Código postal requerido para cotizar envío", {
+      code: "ENVIA_POSTAL_CODE_REQUIRED",
+    });
   }
 
   const weight = options.weight || Math.max(0.3, (options.itemCount || 1) * 0.6);
@@ -275,6 +313,7 @@ export async function getShippingRates(destination, options = {}) {
   }];
 
   try {
+    const carrierErrors = [];
     const ratePromises = ENVIA_CARRIERS.map(async (carrier) => {
       try {
         const body = await enviaFetch("/ship/rate/", {
@@ -315,11 +354,21 @@ export async function getShippingRates(destination, options = {}) {
           })
           .filter(Boolean);
       } catch (err) {
+        const carrierError = {
+          carrier,
+          code: String(err?.code || "").trim() || null,
+          message: err?.message || "Unknown Envia error",
+          statusCode: Number.isFinite(Number(err?.statusCode)) ? Number(err.statusCode) : null,
+          body: err?.enviaBody || null,
+        };
+
+        carrierErrors.push(carrierError);
         logEvent("ENVIACOM_ERROR", "Envia rate failed for carrier", {
           carrier,
-          error: err.message,
-          status: err?.statusCode || null,
-          body: err?.enviaBody || null,
+          error: carrierError.message,
+          code: carrierError.code,
+          status: carrierError.statusCode,
+          body: carrierError.body,
         });
         return [];
       }
@@ -328,15 +377,26 @@ export async function getShippingRates(destination, options = {}) {
     const allRates = (await Promise.all(ratePromises)).flat();
 
     if (!allRates.length) {
-      throw new Error("No shipping rates available");
+      const primaryError = carrierErrors.find((entry) => Number(entry.statusCode || 0) >= 500)
+        || carrierErrors[0]
+        || null;
+
+      throw createEnviaError("No shipping rates available", {
+        code: primaryError?.code || "ENVIA_NO_RATES_AVAILABLE",
+        statusCode: primaryError?.statusCode || null,
+        enviaBody: primaryError?.body || null,
+        enviaErrors: carrierErrors,
+      });
     }
 
     return allRates.sort((a, b) => a.price - b.price);
   } catch (error) {
     logEvent("ENVIACOM_ERROR", "Envia rate quote failed", {
       error: error.message,
+      code: error?.code || null,
       status: error?.statusCode || null,
       body: error?.enviaBody || null,
+      details: error?.enviaErrors || null,
     });
     throw error;
   }

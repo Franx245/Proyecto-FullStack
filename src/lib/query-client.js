@@ -1,10 +1,12 @@
 import { QueryClient } from "@tanstack/react-query";
 import { createSyncStoragePersister } from "@tanstack/query-sync-storage-persister";
 
-import { CATALOG_QUERY_STALE_TIME } from "@/api/store";
+import { CATALOG_QUERY_GC_TIME, CATALOG_QUERY_STALE_TIME } from "@/api/store";
 
 const CARDS_CACHE_MAX_AGE = 1000 * 60 * 60 * 6;
-const CARDS_QUERY_GC_TIME = 1000 * 60 * 30;
+const DEFAULT_QUERY_STALE_TIME = 1000 * 60 * 5;
+const DEFAULT_QUERY_GC_TIME = 1000 * 60 * 30;
+const CARDS_QUERY_GC_TIME = CATALOG_QUERY_GC_TIME;
 const QUERY_PERSISTENCE_KEY = "duelvault-react-query-cache-v2";
 const VOLATILE_QUERY_KEYS = new Set(["card-detail", "storefront-config"]);
 const noopPersister = {
@@ -120,6 +122,21 @@ function shouldRetryQuery(failureCount, error) {
 	return failureCount < 1;
 }
 
+const sharedQueryDefaults = {
+	refetchOnWindowFocus: false,
+	refetchOnMount: false,
+	placeholderData: retainPreviousData,
+	retry: shouldRetryQuery,
+};
+
+const cardsQueryDefaults = {
+	staleTime: CATALOG_QUERY_STALE_TIME,
+	gcTime: CARDS_QUERY_GC_TIME,
+	refetchOnWindowFocus: false,
+	refetchOnMount: false,
+	retry: shouldRetryQuery,
+};
+
 /**
  * @typedef {{
  * 	page?: number,
@@ -135,15 +152,15 @@ function shouldRetryQuery(failureCount, error) {
 export const queryClientInstance = new QueryClient({
 	defaultOptions: {
 		queries: {
-			staleTime: CATALOG_QUERY_STALE_TIME,
-			gcTime: CARDS_QUERY_GC_TIME,
-			refetchOnWindowFocus: false,
-			refetchOnMount: false,
-			placeholderData: retainPreviousData,
-			retry: shouldRetryQuery,
+			...sharedQueryDefaults,
+			staleTime: DEFAULT_QUERY_STALE_TIME,
+			gcTime: DEFAULT_QUERY_GC_TIME,
 		},
 	},
 });
+
+queryClientInstance.setQueryDefaults(["cards"], cardsQueryDefaults);
+queryClientInstance.setQueryDefaults(["featured-cards"], cardsQueryDefaults);
 
 /** @param {PersistedQueryLike} query */
 function shouldPersistQuery(query) {
@@ -187,10 +204,10 @@ export function buildCardsQueryKey({ page = 1, pageSize, search = "", category, 
 
 /**
  * @param {import("@tanstack/react-query").Query} query
- * @param {number | string | null | undefined} cardId
+ * @param {Array<number | string>} cardIds
  */
-function queryContainsCardId(query, cardId) {
-	if (!cardId) {
+function queryContainsCardIds(query, cardIds) {
+	if (!Array.isArray(cardIds) || !cardIds.length) {
 		return true;
 	}
 
@@ -199,23 +216,39 @@ function queryContainsCardId(query, cardId) {
 		return true;
 	}
 
+	const normalizedCardIds = new Set(
+		cardIds
+			.map((cardId) => Number(cardId))
+			.filter((cardId) => Number.isFinite(cardId))
+	);
+
+	if (!normalizedCardIds.size) {
+		return true;
+	}
+
 	/** @param {{ id?: number | string, version_id?: number | string, card_id?: number | string }} card */
-	const matchesCardId = (card) => Number(card?.id ?? card?.version_id ?? card?.card_id) === Number(cardId);
+	const matchesCardId = (card) => normalizedCardIds.has(Number(card?.id ?? card?.version_id ?? card?.card_id));
 
 	return cards.some(matchesCardId);
 }
 
-	/** @typedef {{ cardId?: number | string | null }} CardsInvalidationOptions */
+	/** @typedef {{ cardId?: number | string | null, cardIds?: Array<number | string | null | undefined> }} CardsInvalidationOptions */
 
 /**
  * @param {CardsInvalidationOptions} [options]
  * @returns {import("@tanstack/react-query").InvalidateQueryFilters}
  */
 export function buildCardsInvalidationFilters(options = {}) {
-	const { cardId } = options;
+	const candidateCardIds = Array.isArray(options.cardIds)
+		? options.cardIds.filter((cardId) => cardId != null)
+		: [];
+
+	if (candidateCardIds.length === 0 && options.cardId != null) {
+		candidateCardIds.push(options.cardId);
+	}
 
 	/** @param {import("@tanstack/react-query").Query} query */
-	const predicate = (query) => queryContainsCardId(query, cardId);
+	const predicate = (query) => queryContainsCardIds(query, candidateCardIds);
 
 	return /** @type {import("@tanstack/react-query").InvalidateQueryFilters} */ ({
 		queryKey: ["cards"],

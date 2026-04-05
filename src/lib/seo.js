@@ -47,10 +47,38 @@ export function buildCardPath(cardOrId, fallbackName = "") {
   return slug ? `/card/${slug}` : `/card/${cardOrId}`;
 }
 
+function normalizeBaseUrl(value) {
+  return String(value || "").trim().replace(/\/$/, "");
+}
+
+function isLocalhostHostname(hostname) {
+  return ["localhost", "127.0.0.1"].includes(String(hostname || "").trim().toLowerCase());
+}
+
+function isStrictProductionRuntime() {
+  const appEnv = String(process.env.NEXT_PUBLIC_APP_ENV || process.env.NODE_ENV || "")
+    .trim()
+    .toLowerCase();
+
+  if (appEnv !== "production") {
+    return false;
+  }
+
+  if (typeof window !== "undefined") {
+    return !isLocalhostHostname(window.location?.hostname);
+  }
+
+  return true;
+}
+
 export function resolveSiteUrl() {
-  const explicitSiteUrl = String(process.env.NEXT_PUBLIC_SITE_URL || "").trim();
+  const explicitSiteUrl = normalizeBaseUrl(process.env.NEXT_PUBLIC_SITE_URL || "");
   if (explicitSiteUrl) {
-    return explicitSiteUrl.replace(/\/$/, "");
+    return explicitSiteUrl;
+  }
+
+  if (isStrictProductionRuntime()) {
+    throw new Error("Missing NEXT_PUBLIC_SITE_URL in production");
   }
 
   const vercelUrl = String(process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL || "").trim();

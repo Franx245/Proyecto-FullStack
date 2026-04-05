@@ -323,11 +323,12 @@ export default function CartPage() {
   const waitingForFreshShippingQuote = !isPickup && visibleShippingQuoteKey !== resolvedShippingQuoteKey;
 
   const shippingRatesQuery = useQuery({
-    queryKey: ["shipping", debouncedPostalCode, normalizedQuotedCity, normalizedQuotedState, items.length, totalWeight],
+    queryKey: ["shipping", effectiveZone, debouncedPostalCode, normalizedQuotedCity, normalizedQuotedState, items.length, totalWeight],
     queryFn: () => fetchShippingRates({
       postalCode: debouncedPostalCode,
       city: quotedAddress?.city,
       state: quotedAddress?.state,
+      zone: effectiveZone,
       itemCount: items.length,
       weight: totalWeight,
     }),

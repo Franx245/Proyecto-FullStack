@@ -13,7 +13,9 @@ import { Package, Truck } from "lucide-react";
 import { fetchMyOrders, fetchOrdersByIds, fetchStorefrontConfig } from "@/api/store";
 import CardImage from "@/components/marketplace/CardImage";
 import { useAuth } from "@/lib/auth";
+import { normalizeShippingCarrier } from "@/lib/shipping";
 import { formatPrice } from "@/utils/currency";
+import { formatArgentinaDateTime } from "@/utils/dateTime";
 import { getTrackedOrderIds } from "@/lib/orderTracking";
 import { getOrderProgress, getShippingCarrierLabel, getShippingOption, orderStatusLabel } from "@/lib/shipping";
 
@@ -61,6 +63,39 @@ function getVisibleShippingLabel(order) {
   }
 
   return order?.shipping_label || getShippingOption(order?.shipping_zone).label;
+}
+
+function isLocalhostRuntime() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return ["localhost", "127.0.0.1"].includes(window.location.hostname);
+}
+
+/** @param {*} order */
+function isShowroomOrder(order) {
+  const carrier = normalizeShippingCarrier(order?.carrier);
+  return !order?.is_shipping_order || carrier === "showroom" || String(order?.shipping_zone || "").toLowerCase() === "pickup";
+}
+
+/** @param {*} order */
+function shouldForceLocalShipmentTimeline(order, localhostRuntime) {
+  if (!localhostRuntime || isShowroomOrder(order)) {
+    return false;
+  }
+
+  const carrier = normalizeShippingCarrier(order?.carrier);
+  return carrier === "andreani" || carrier === "correo-argentino";
+}
+
+/** @param {*} order */
+function shouldRenderShipmentTimeline(order, localhostRuntime) {
+  if (shouldForceLocalShipmentTimeline(order, localhostRuntime)) {
+    return Boolean(order?.shipment_status || order?.status);
+  }
+
+  return Boolean(order?.tracking_code);
 }
 
 /** @param {*} order */
@@ -118,7 +153,11 @@ function buildWhatsAppMessage(order) {
 }
 
 /** @param {*} order */
-function canRetryDirectPayment(order) {
+/**
+ * @param {*} order
+ * @param {number} [referenceNowMs]
+ */
+function canRetryDirectPayment(order, referenceNowMs = 0) {
   if (!order) {
     return false;
   }
@@ -132,11 +171,11 @@ function canRetryDirectPayment(order) {
     return false;
   }
 
-  if (!order.expires_at) {
+  if (!order.expires_at || referenceNowMs <= 0) {
     return true;
   }
 
-  return new Date(order.expires_at).getTime() > Date.now();
+  return new Date(order.expires_at).getTime() > referenceNowMs;
 }
 
 /** @param {string} value */
@@ -173,9 +212,12 @@ export default function OrdersPage() {
   const { isAuthenticated, isBootstrapping } = useAuth();
   const router = useRouter();
   const [payingOrderId, setPayingOrderId] = useState(null);
-  const [pendingPaymentFeedback, setPendingPaymentFeedback] = useState(() => readPendingPaymentFeedback());
+  const [pendingPaymentFeedback, setPendingPaymentFeedback] = useState(null);
   const [page, setPage] = useState(1);
-  const trackedOrderIds = useMemo(() => getTrackedOrderIds(), []);
+  const [localhostRuntime, setLocalhostRuntime] = useState(false);
+  const [trackedOrderIds, setTrackedOrderIds] = useState(/** @type {Array<string|number>} */ ([]));
+  const [referenceNowMs, setReferenceNowMs] = useState(0);
+  const [hasLoadedClientState, setHasLoadedClientState] = useState(false);
   const storefrontConfigQuery = useQuery({
     queryKey: ["storefront-config"],
     queryFn: fetchStorefrontConfig,
@@ -228,7 +270,7 @@ export default function OrdersPage() {
 
     return Array.from(merged.values()).sort(sortOrdersByNewest);
   }, [paginatedOrders, trackedOrders]);
-  const trackedOrdersNeedReauth = trackedOrderIds.length > 0 && !isBootstrapping && !isAuthenticated;
+  const trackedOrdersNeedReauth = hasLoadedClientState && trackedOrderIds.length > 0 && !isBootstrapping && !isAuthenticated;
   const trackedOrdersErrorMessage = trackedOrdersQuery.isError
     ? getQueryErrorMessage(trackedOrdersQuery.error, "No pudimos cargar tus pedidos recientes.")
     : "";
@@ -241,8 +283,20 @@ export default function OrdersPage() {
   const supportWhatsappNumber = normalizeWhatsappNumber(storefrontConfigQuery.data?.storefront?.support_whatsapp_number || "");
 
   useEffect(() => {
+    setPendingPaymentFeedback(readPendingPaymentFeedback());
+    setTrackedOrderIds(getTrackedOrderIds());
+    setLocalhostRuntime(isLocalhostRuntime());
+    setReferenceNowMs(Date.now());
+    setHasLoadedClientState(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedClientState) {
+      return;
+    }
+
     writePendingPaymentFeedback(pendingPaymentFeedback);
-  }, [pendingPaymentFeedback]);
+  }, [hasLoadedClientState, pendingPaymentFeedback]);
 
   useEffect(() => {
     if (!pendingPaymentFeedback?.orderId) {
@@ -305,7 +359,7 @@ export default function OrdersPage() {
 
     const text =
       `Pedido #${order.id}\n` +
-      `Fecha: ${new Date(order.created_at).toLocaleString("es-AR")}\n\n` +
+      `Fecha: ${formatArgentinaDateTime(order.created_at)}\n\n` +
       `${lines.join("\n")}\n\n` +
       `Estado: ${orderStatusLabel(order.status)}\n` +
       `Envío: ${order.shipping_label || getShippingOption(order.shipping_zone).label}\n` +
@@ -341,13 +395,17 @@ export default function OrdersPage() {
 
   const renderOrderCard = (order, idx, sectionKey) => {
     const isPaymentPendingConfirmation = order.processing_payment || isWebhookConfirmationPending(order);
+    const localShowroomOrder = localhostRuntime && isShowroomOrder(order);
+    const visibleShippingLabel = localShowroomOrder ? "Retiro en showroom" : getVisibleShippingLabel(order);
+    const showShipmentTimeline = shouldRenderShipmentTimeline(order, localhostRuntime);
+    const showLocalTimelineWithoutTracking = !order.tracking_code && shouldForceLocalShipmentTimeline(order, localhostRuntime);
 
     return (
       <motion.div key={`${sectionKey}-${order.id}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.05 }} className="rounded-2xl border border-border bg-card p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm font-bold">#{order.id}</p>
-            <p className="text-xs text-muted-foreground">{new Date(order.created_at).toLocaleString("es-AR")}</p>
+            <p className="text-xs text-muted-foreground">{formatArgentinaDateTime(order.created_at)}</p>
           </div>
 
           <div className="flex items-center gap-2">
@@ -362,12 +420,13 @@ export default function OrdersPage() {
         <div className="mb-4 rounded-2xl border border-border bg-background/40 p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Seguimiento</p>
-              <p className="mt-1 text-sm font-semibold">{getVisibleShippingLabel(order)}</p>
-              {order.shipping_label && getVisibleShippingLabel(order) !== order.shipping_label ? <p className="mt-2 text-xs text-muted-foreground">Servicio: {order.shipping_label}</p> : null}
-              {order.tracking_code ? (
+              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">{localShowroomOrder ? "Entrega" : "Seguimiento"}</p>
+              <p className="mt-1 text-sm font-semibold">{visibleShippingLabel}</p>
+              {!localShowroomOrder && order.shipping_label && visibleShippingLabel !== order.shipping_label ? <p className="mt-2 text-xs text-muted-foreground">Servicio: {order.shipping_label}</p> : null}
+              {showShipmentTimeline ? (
                 <div className="mt-2 space-y-2">
-                  <p className="text-sm text-primary">Tracking: {order.tracking_code}</p>
+                  {order.tracking_code ? <p className="text-sm text-primary">Tracking: {order.tracking_code}</p> : null}
+                  {showLocalTimelineWithoutTracking ? <p className="text-xs text-muted-foreground">Seguimiento simulado disponible en localhost.</p> : null}
                   <ShipmentTimeline status={order.shipment_status || order.status} />
                 </div>
               ) : null}
@@ -379,10 +438,10 @@ export default function OrdersPage() {
                 </p>
               ) : null}
               {!isPaymentPendingConfirmation && order.expires_at && ["pending_payment", "failed", "expired"].includes(order.status) ? (
-                <p className="mt-2 text-xs text-muted-foreground">Vence o venció: {new Date(order.expires_at).toLocaleString("es-AR")}</p>
+                <p className="mt-2 text-xs text-muted-foreground">Vence o venció: {formatArgentinaDateTime(order.expires_at)}</p>
               ) : null}
             </div>
-            {order.shipping_address ? (
+            {!localShowroomOrder && order.shipping_address ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <MapPin className="h-4 w-4" />
                 {order.shipping_address}
@@ -456,7 +515,7 @@ export default function OrdersPage() {
         </div>
 
         <div className="flex flex-wrap gap-2 border-t border-border pt-4">
-          {isAuthenticated && canRetryDirectPayment(order) ? (
+          {isAuthenticated && canRetryDirectPayment(order, referenceNowMs) ? (
             <button onClick={() => handlePayOrder(order)} disabled={payingOrderId === String(order.id)} className="flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-2 text-sm font-medium text-primary transition hover:bg-primary/20 disabled:opacity-50">
               {payingOrderId === String(order.id) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wallet className="h-3.5 w-3.5" />}
               {order.status === "pending_payment" ? "Continuar pago" : "Reintentar pago"}

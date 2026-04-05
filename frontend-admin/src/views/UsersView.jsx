@@ -60,7 +60,10 @@ export default function UsersView({ users, summary, pagination, filters, canEdit
         <EmptyState icon={Users} title="Sin coincidencias" description="Ajustá la búsqueda o el filtro de rol para encontrar usuarios." />
       ) : (
         <div className="space-y-4">
-          {users.map((user) => (
+          {users.map((user) => {
+            const isProtectedAdmin = String(user.role || "").toUpperCase() === "ADMIN";
+
+            return (
             <div key={user.id} className="glass admin-list-card admin-content-auto rounded-3xl border border-white/10 p-5">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
@@ -94,7 +97,7 @@ export default function UsersView({ users, summary, pagination, filters, canEdit
                   <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Rol</p>
                   <select
                     value={user.role}
-                    disabled={!canEditRoles || isRoleMutationPending}
+                    disabled={!canEditRoles || isRoleMutationPending || isProtectedAdmin}
                     onChange={(event) => {
                       const nextRole = event.target.value;
                       if (nextRole === user.role) {
@@ -113,6 +116,7 @@ export default function UsersView({ users, summary, pagination, filters, canEdit
                     <option value="STAFF">Equipo</option>
                     <option value="ADMIN">Administrador</option>
                   </select>
+                  {isProtectedAdmin ? <p className="mt-3 text-xs text-slate-500">Los administradores existentes no se modifican desde este panel.</p> : null}
                   <p className="mt-3 text-xs text-slate-500">Último login: {user.last_login_at ? new Date(user.last_login_at).toLocaleString("es-AR") : "sin actividad"}</p>
                 </div>
 
@@ -145,7 +149,8 @@ export default function UsersView({ users, summary, pagination, filters, canEdit
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
 
           <div className="glass overflow-hidden rounded-3xl border border-white/10">
             <PaginationControls page={pagination?.page || 1} totalPages={pagination?.totalPages || 1} onPageChange={onPageChange} />

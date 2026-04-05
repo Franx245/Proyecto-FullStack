@@ -40,6 +40,14 @@ function patchAdminOrdersPage(old, orderId, orderSnapshot) {
   return changed ? { ...old, orders: nextOrders } : old;
 }
 
+const ADMIN_CARD_KEYS = ["cards", "home-cards", "inventory-cards", "admin-card-search"];
+
+function invalidateAdminCardQueries(queryClient) {
+  for (const key of ADMIN_CARD_KEYS) {
+    queryClient.invalidateQueries({ queryKey: [key] });
+  }
+}
+
 /**
  * Admin realtime hook — listens for SSE events and performs
  * surgical React Query cache updates. Falls back to invalidation
@@ -86,7 +94,7 @@ export function useAdminRealtimeEvents(session, onSessionChange) {
         queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       });
 
-      es.addEventListener("order-update", (e) => {
+      const handleOrderUpdate = (e) => {
         try {
           const { data } = JSON.parse(e.data);
           const orderSnapshot = data?.order;
@@ -108,7 +116,10 @@ export function useAdminRealtimeEvents(session, onSessionChange) {
           queryClient.invalidateQueries({ queryKey: ["orders"] });
         }
         queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-      });
+      };
+
+      es.addEventListener("order-update", handleOrderUpdate);
+      es.addEventListener("order-updated", handleOrderUpdate);
 
       es.addEventListener("stock-update", (e) => {
         const { data } = JSON.parse(e.data);
@@ -120,7 +131,6 @@ export function useAdminRealtimeEvents(session, onSessionChange) {
         if (!entries.length) return;
 
         const hasSnapshots = entries.some((en) => en.card);
-        const ADMIN_CARD_KEYS = ["cards", "home-cards", "inventory-cards", "admin-card-search"];
 
         if (hasSnapshots) {
           for (const key of ADMIN_CARD_KEYS) {
@@ -154,7 +164,6 @@ export function useAdminRealtimeEvents(session, onSessionChange) {
         if (!entries.length) return;
 
         const hasSnapshots = entries.some((en) => en.card);
-        const ADMIN_CARD_KEYS = ["cards", "home-cards", "inventory-cards", "admin-card-search"];
 
         if (hasSnapshots) {
           for (const key of ADMIN_CARD_KEYS) {
@@ -173,11 +182,13 @@ export function useAdminRealtimeEvents(session, onSessionChange) {
         }
       });
 
+      es.addEventListener("visibility-change", () => {
+        invalidateAdminCardQueries(queryClient);
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      });
+
       es.addEventListener("catalog-synced", () => {
-        queryClient.invalidateQueries({ queryKey: ["cards"] });
-        queryClient.invalidateQueries({ queryKey: ["home-cards"] });
-        queryClient.invalidateQueries({ queryKey: ["inventory-cards"] });
-        queryClient.invalidateQueries({ queryKey: ["admin-card-search"] });
+        invalidateAdminCardQueries(queryClient);
         queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       });
 

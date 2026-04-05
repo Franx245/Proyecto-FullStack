@@ -58,8 +58,8 @@ function ensureEventListeners() {
   if (listenersInitialized) return;
   listenersInitialized = true;
 
-  // Public: stock, price, and catalog updates
-  addEventBusListener(["stock-update", "price-change", "catalog-synced"], (data) => {
+  // Public storefront also needs order updates for /orders realtime sync.
+  addEventBusListener(["stock-update", "price-change", "visibility-change", "catalog-synced", "new-order", "order-update", "order-updated"], (data) => {
     broadcast(publicClients, data);
   });
 

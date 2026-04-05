@@ -11,27 +11,59 @@ function normalizeBaseUrl(value) {
   return typeof value === "string" ? value.trim().replace(/\/$/, "") : "";
 }
 
-const RAILWAY_BACKEND_URL = "https://proyecto-fullstack-production-8fe1.up.railway.app";
-
 function resolveApiBaseUrl() {
   const configuredBaseUrl = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL || "");
-  if (configuredBaseUrl) {
-    return configuredBaseUrl;
+  if (!configuredBaseUrl) {
+    throw new Error("Missing VITE_API_BASE_URL");
   }
 
-  if (typeof window === "undefined") {
-    return RAILWAY_BACKEND_URL;
+  let parsedUrl = null;
+  if (import.meta.env.DEV || import.meta.env.PROD) {
+    try {
+      parsedUrl = new URL(configuredBaseUrl);
+    } catch {
+      throw new Error(`Invalid VITE_API_BASE_URL: ${configuredBaseUrl}`);
+    }
   }
 
-  const { hostname } = window.location;
-  if (["localhost", "127.0.0.1"].includes(hostname)) {
-    return "";
+  if (import.meta.env.PROD && ["localhost", "127.0.0.1"].includes(parsedUrl.hostname)) {
+    throw new Error("ERROR: produccion apuntando a localhost");
   }
 
-  return RAILWAY_BACKEND_URL;
+  return configuredBaseUrl;
 }
 
-const API_BASE_URL = resolveApiBaseUrl();
+function isLocalhostRuntime() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return ["localhost", "127.0.0.1"].includes(window.location.hostname);
+}
+
+function mapShipmentStatusToLocalShippingStatus(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+
+  if (normalized === "created") {
+    return "preparando";
+  }
+
+  if (normalized === "picked_up") {
+    return "retirado";
+  }
+
+  if (normalized === "in_transit") {
+    return "en_transito";
+  }
+
+  if (normalized === "delivered") {
+    return "entregado";
+  }
+
+  return normalized;
+}
+
+export const API_BASE_URL = resolveApiBaseUrl();
 const DEFAULT_API_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT || 20000);
 const inflightMutationRequests = new Map();
 
@@ -66,7 +98,7 @@ function buildApiUrl(path) {
     return path;
   }
 
-  return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
+  return `${API_BASE_URL}${path}`;
 }
 
 function buildQueryString(params = {}) {
@@ -80,6 +112,69 @@ function buildQueryString(params = {}) {
 
   const query = searchParams.toString();
   return query ? `?${query}` : "";
+}
+
+function normalizeOrderNestedObject(value, fallback = {}) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return fallback;
+  }
+
+  return value;
+}
+
+function normalizeOrderItem(item) {
+  if (!item || typeof item !== "object") {
+    return item;
+  }
+
+  return {
+    ...item,
+    card: item.card && typeof item.card === "object" ? item.card : null,
+  };
+}
+
+export function normalizeOrderRecord(order) {
+  if (!order || typeof order !== "object") {
+    return order;
+  }
+
+  const normalized = {
+    ...order,
+    items: Array.isArray(order.items) ? order.items.map(normalizeOrderItem) : [],
+    shipping: normalizeOrderNestedObject(order.shipping, {}),
+    address: normalizeOrderNestedObject(order.address, {}),
+    user: order.user && typeof order.user === "object" && !Array.isArray(order.user) ? order.user : null,
+  };
+
+  if (import.meta.env.DEV) {
+    Object.freeze(normalized);
+  }
+
+  return normalized;
+}
+
+function normalizeOrdersPayload(payload) {
+  if (!payload || typeof payload !== "object" || !Array.isArray(payload.orders)) {
+    return payload;
+  }
+
+  return {
+    ...payload,
+    orders: payload.orders.map(normalizeOrderRecord),
+  };
+}
+
+function normalizeDashboardPayload(payload) {
+  if (!payload || typeof payload !== "object") {
+    return payload;
+  }
+
+  return {
+    ...payload,
+    recentOrders: Array.isArray(payload.recentOrders)
+      ? payload.recentOrders.map(normalizeOrderRecord)
+      : payload.recentOrders,
+  };
 }
 
 export function getStoredSession() {
@@ -115,16 +210,22 @@ function delay(ms) {
 }
 
 function createApiError(payload, fallbackMessage, options = {}) {
-  const message = payload?.error || fallbackMessage;
+  const normalizedPayload = payload?.context?.entity === "order" && payload?.current_resource
+    ? {
+        ...payload,
+        current_resource: normalizeOrderRecord(payload.current_resource),
+      }
+    : payload;
+  const message = normalizedPayload?.error || fallbackMessage;
   const common = {
     status: options.status,
-    code: payload?.code || options.code,
-    details: payload,
+    code: normalizedPayload?.code || options.code,
+    details: normalizedPayload,
     requestId: options.requestId,
     retryable: Boolean(options.retryable),
   };
 
-  if (options.status === 409 || payload?.code === "CONFLICT") {
+  if (options.status === 409 || normalizedPayload?.code === "CONFLICT") {
     return new ApiConflictError(message, common);
   }
 
@@ -386,7 +487,8 @@ export async function loginAdmin(credentials) {
 }
 
 export async function getDashboard() {
-  return request("/api/admin/dashboard", { requestLabel: "load-dashboard" });
+  const payload = await request("/api/admin/dashboard", { requestLabel: "load-dashboard" });
+  return normalizeDashboardPayload(payload);
 }
 
 export async function getWhatsappSettings() {
@@ -511,7 +613,8 @@ export async function getAdminCardDetail(cardId) {
 }
 
 export async function getOrders(params = {}) {
-  return request(`/api/admin/orders${buildQueryString(params)}`, { requestLabel: "load-orders" });
+  const payload = await request(`/api/admin/orders${buildQueryString(params)}`, { requestLabel: "load-orders" });
+  return normalizeOrdersPayload(payload);
 }
 
 export async function updateOrderShipping(orderId, payload) {
@@ -525,9 +628,17 @@ export async function updateOrderShipping(orderId, payload) {
 }
 
 export async function updateOrderShipmentStatus(orderId, payload) {
-  return request(`/api/admin/orders/${orderId}/shipment-status`, {
+  const useLocalhostShippingStatusRoute = isLocalhostRuntime();
+  const nextPayload = useLocalhostShippingStatusRoute
+    ? {
+        ...payload,
+        shippingStatus: mapShipmentStatusToLocalShippingStatus(payload?.shippingStatus || payload?.status || payload?.shipment_status),
+      }
+    : payload;
+
+  return request(`/api/admin/orders/${orderId}/${useLocalhostShippingStatusRoute ? "shipping-status" : "shipment-status"}`, {
     method: "PATCH",
-    body: payload,
+    body: nextPayload,
     requestLabel: "update-order-shipment-status",
     idempotencyKey: payload?.mutation_id,
     dedupeKey: `${orderId}:${payload?.status || payload?.shipment_status || "shipment-status"}`,

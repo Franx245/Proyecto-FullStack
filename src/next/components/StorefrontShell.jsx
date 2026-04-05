@@ -105,7 +105,7 @@ export default function StorefrontShell({ children }) {
     refetchOnWindowFocus: true,
   });
   const [mobileOpen, setMobileOpen] = useState(false);
-  const fallbackCatalogHref = pathname.startsWith("/singles") ? pathname : readLastCatalogHref("/singles");
+  const fallbackCatalogHref = pathname.startsWith("/singles") ? pathname : "/singles";
   const [catalogLocationState, setCatalogLocationState] = useState({
     currentSearch: "",
     catalogHref: fallbackCatalogHref,

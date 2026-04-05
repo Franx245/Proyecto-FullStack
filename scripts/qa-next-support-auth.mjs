@@ -51,13 +51,20 @@ async function gotoAndWait(page, url, expectedText = null) {
   }
 }
 
+async function waitForInteractiveAuthForm(page, submitButtonName) {
+  const submitButton = page.getByRole("button", { name: submitButtonName }).first();
+  await submitButton.waitFor({ state: "visible", timeout: 15000 });
+  await page.waitForTimeout(1500);
+  return page.locator("form").filter({ has: submitButton }).first();
+}
+
 async function loginFromAuth(page, appUrl, redirectPath) {
   await gotoAndWait(page, `${appUrl}/auth?redirect=${encodeURIComponent(redirectPath)}`, "Entrar a mi cuenta");
   await clearClientStorage(page);
   await page.reload({ waitUntil: "domcontentloaded" });
   await waitForBodyText(page, "Entrar a mi cuenta");
 
-  const loginForm = page.locator("form");
+  const loginForm = await waitForInteractiveAuthForm(page, /Entrar a mi cuenta/i);
   await loginForm.locator("input").nth(0).fill(TEST_USER.identifier);
   await loginForm.locator('input[type="password"]').first().fill(TEST_USER.password);
   await loginForm.getByRole("button", { name: /Entrar a mi cuenta/i }).click();
@@ -152,7 +159,7 @@ async function main() {
     await clearClientStorage(registerPage);
     await registerPage.reload({ waitUntil: "domcontentloaded" });
     await waitForBodyText(registerPage, "Crear cuenta");
-    const registerForm = registerPage.locator("form");
+    const registerForm = await waitForInteractiveAuthForm(registerPage, /^Crear cuenta$/i);
     await registerForm.locator("input").nth(0).fill("Usuario Next QA");
     await registerForm.locator("input").nth(1).fill(username);
     await registerForm.locator("input").nth(2).fill(email);

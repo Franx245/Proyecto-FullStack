@@ -166,35 +166,44 @@ function sanitizeUrl(url) {
   };
 }
 
-function isTraceableRequestUrl(url) {
+function resolveTraceableApiPath(url) {
   if (!url || typeof window === "undefined") {
-    return false;
+    return null;
   }
 
   if (url.origin === window.location.origin && (url.pathname === "/api" || url.pathname.startsWith("/api/"))) {
-    return true;
+    return url.pathname;
   }
 
   if (!ENV.API_BASE_URL) {
-    return false;
+    return null;
   }
 
   const apiBaseUrl = normalizeBrowserUrl(ENV.API_BASE_URL);
   if (!apiBaseUrl || url.origin !== apiBaseUrl.origin) {
-    return false;
+    return null;
   }
 
   const basePath = apiBaseUrl.pathname.replace(/\/$/, "");
   if (!basePath || basePath === "/") {
-    return url.pathname === "/api" || url.pathname.startsWith("/api/");
+    return url.pathname === "/api" || url.pathname.startsWith("/api/") ? url.pathname : null;
   }
 
   if (!url.pathname.startsWith(basePath)) {
-    return false;
+    return null;
   }
 
   const remainingPath = url.pathname.slice(basePath.length) || "/";
-  return remainingPath === "/api" || remainingPath.startsWith("/api/");
+  return remainingPath === "/api" || remainingPath.startsWith("/api/") ? remainingPath : null;
+}
+
+function isTraceableRequestUrl(url) {
+  return Boolean(resolveTraceableApiPath(url));
+}
+
+function shouldAttachTraceHeader(url) {
+  const apiPath = resolveTraceableApiPath(url);
+  return apiPath !== "/api/catalog";
 }
 
 function cloneRequestHeaders(input, initHeaders) {
@@ -327,7 +336,11 @@ function patchFetch() {
     const requestMeta = sanitizeUrl(url);
     const startedAt = nowMs();
 
-    headers.set("x-trace-id", traceId);
+    if (shouldAttachTraceHeader(url)) {
+      headers.set("x-trace-id", traceId);
+    } else {
+      headers.delete("x-trace-id");
+    }
 
     emitPerfEvent("API_CALL_START", {
       traceId,

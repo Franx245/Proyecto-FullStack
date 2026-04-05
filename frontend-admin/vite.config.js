@@ -1,6 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+const LOCAL_API_ORIGIN = "http://127.0.0.1:3311";
+const ADMIN_PORT = 5198;
+
 function createCleanupServiceWorkerSource(cachePrefixes) {
   return `const CACHE_PREFIXES = ${JSON.stringify(cachePrefixes)};
 
@@ -61,25 +64,23 @@ function adminPreloadAndSw() {
   };
 }
 
-const apiPort = Number(process.env.API_PORT || 3001);
-const adminPort = Number(process.env.ADMIN_PORT || 5174);
-
 export default defineConfig({
+  envDir: ".",
   plugins: [react(), adminPreloadAndSw()],
   server: {
     host: "127.0.0.1",
-    port: adminPort,
+    port: ADMIN_PORT,
     strictPort: true,
     proxy: {
       "/api": {
-        target: `http://127.0.0.1:${apiPort}`,
+        target: LOCAL_API_ORIGIN,
         changeOrigin: true,
       },
     },
   },
   preview: {
     host: "127.0.0.1",
-    port: adminPort,
+    port: ADMIN_PORT,
     strictPort: true,
   },
   build: {

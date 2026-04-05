@@ -9,8 +9,15 @@ const EVENT_CHANNELS = Object.freeze({
   "stock-update": "stock:update",
   "new-order": "order:update",
   "order-update": "order:update",
+  "order-updated": "order:update",
   "price-change": "price:update",
+  "visibility-change": "visibility:update",
   "catalog-synced": "catalog:update",
+});
+
+const EVENT_ALIASES = Object.freeze({
+  "order-update": ["order-updated"],
+  "order-updated": ["order-update"],
 });
 
 /** @type {Map<string, Set<(data: unknown) => void>>} */
@@ -52,10 +59,7 @@ function ensureSubscriber() {
  * @param {keyof typeof EVENT_CHANNELS} eventName
  * @param {unknown} data
  */
-export function publishEvent(eventName, data) {
-  const channel = EVENT_CHANNELS[eventName] || eventName;
-  const envelope = { event: eventName, data, ts: Date.now() };
-
+function emitEnvelope(channel, envelope) {
   if (isRedisTcpConfigured()) {
     /* Redis TCP available — publish via pub/sub; the subscriber connection
        will call local listeners when the message comes back. */
@@ -75,6 +79,22 @@ export function publishEvent(eventName, data) {
         }
       }
     }
+  }
+}
+
+export function publishEvent(eventName, data) {
+  const relatedEvents = [eventName, ...(EVENT_ALIASES[eventName] || [])];
+  const publishedEvents = new Set();
+
+  for (const currentEventName of relatedEvents) {
+    if (publishedEvents.has(currentEventName)) {
+      continue;
+    }
+
+    publishedEvents.add(currentEventName);
+    const channel = EVENT_CHANNELS[currentEventName] || currentEventName;
+    const envelope = { event: currentEventName, data, ts: Date.now() };
+    emitEnvelope(channel, envelope);
   }
 }
 

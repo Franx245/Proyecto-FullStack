@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useCallback, useEffect, useMemo, useRef } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
@@ -22,6 +22,7 @@ import {
 } from "@/lib/catalog-url-state";
 import { retainPreviousData } from "@/lib/query-client";
 import {
+  CATALOG_QUERY_GC_TIME,
   CATALOG_PAGE_SIZE,
   CATALOG_QUERY_STALE_TIME,
   fetchCatalogCards,
@@ -31,6 +32,8 @@ import {
 import FiltersSidebar from "@/components/marketplace/FiltersSidebar";
 import MobileFilters from "@/components/marketplace/MobileFilters";
 import NextCardGrid from "@/next/components/NextCardGrid.jsx";
+
+const CATALOG_DEBOUNCE_MS = 200;
 
 /**
  * @param {*[]} cards
@@ -61,6 +64,7 @@ export default function SinglesPage({ category, initialData }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const restoredScrollRef = useRef("");
+  const [hasMounted, setHasMounted] = useState(false);
   const catalogUrlState = useMemo(() => parseCatalogSearchParams(searchParams), [searchParams]);
   const hasUrlState = useMemo(() => hasActiveCatalogState(catalogUrlState), [catalogUrlState]);
   const searchQuery = catalogUrlState.search;
@@ -68,8 +72,8 @@ export default function SinglesPage({ category, initialData }) {
   const page = catalogUrlState.page;
   const currentCatalogHref = useMemo(() => buildCatalogHref(pathname, catalogUrlState), [pathname, catalogUrlState]);
 
-  const debouncedSearch = useDebounce(searchQuery, 300);
-  const debouncedFilters = useDebounce(filters, 150);
+  const debouncedSearch = useDebounce(searchQuery, CATALOG_DEBOUNCE_MS);
+  const debouncedFilters = useDebounce(filters, CATALOG_DEBOUNCE_MS);
   const queryPlan = useMemo(() => buildCatalogQueryPlan({
     page,
     pageSize: CATALOG_PAGE_SIZE,
@@ -90,19 +94,24 @@ export default function SinglesPage({ category, initialData }) {
     priceRange: serverFilters.priceRange ? { min: serverFilters.priceRange.min, max: serverFilters.priceRange.max ?? undefined } : undefined,
   }), [page, debouncedSearch, category, serverFilters]);
   const clientRefinesResults = useMemo(() => hasClientSideRefinements(debouncedFilters, primaryFilter, useServerFallback), [debouncedFilters, primaryFilter, useServerFallback]);
+  const serverInitialCatalogData = useMemo(() => (initialData && typeof initialData === "object" ? initialData : null), [initialData]);
 
   const isInitialView = page === 1 && !debouncedSearch && !serverFiltersKey && primaryFilter.kind === "none";
 
+  useEffect(() => {
+    setHasMounted(true);
+  }, []);
+
   const queryResult = useQuery({
     queryKey: cardsQueryKey,
-    initialData: () => initialCatalogSnapshot ?? (isInitialView ? initialData : undefined) ?? undefined,
-    initialDataUpdatedAt: Date.now(),
+    initialData: () => (isInitialView ? serverInitialCatalogData : undefined) ?? initialCatalogSnapshot ?? undefined,
     placeholderData: retainPreviousData,
     staleTime: CATALOG_QUERY_STALE_TIME,
+    gcTime: CATALOG_QUERY_GC_TIME,
     refetchOnMount: false,
     refetchOnReconnect: false,
     refetchOnWindowFocus: false,
-    queryFn: async () => fetchCatalogCards({
+    queryFn: async ({ signal }) => fetchCatalogCards({
       page,
       pageSize: CATALOG_PAGE_SIZE,
       search: debouncedSearch,
@@ -112,20 +121,24 @@ export default function SinglesPage({ category, initialData }) {
       conditions: serverFilters.conditions,
       sets: serverFilters.sets,
       priceRange: serverFilters.priceRange ? { min: serverFilters.priceRange.min, max: serverFilters.priceRange.max ?? undefined } : undefined,
+      signal,
     }),
   });
 
   const { data: catalogData, isLoading, isFetching } = queryResult;
+  const visibleCatalogData = !hasMounted && isInitialView
+    ? (serverInitialCatalogData ?? catalogData)
+    : (catalogData ?? serverInitialCatalogData);
 
-  const serverCards = useMemo(() => catalogData?.cards ?? [], [catalogData]);
+  const serverCards = useMemo(() => visibleCatalogData?.cards ?? [], [visibleCatalogData]);
   const cards = useMemo(() => applyClientSideFilters(serverCards, debouncedFilters, primaryFilter, useServerFallback), [serverCards, debouncedFilters, primaryFilter, useServerFallback]);
-  const totalPages = catalogData?.totalPages ?? 0;
-  const totalRows = catalogData?.totalRows ?? 0;
+  const totalPages = visibleCatalogData?.totalPages ?? 0;
+  const totalRows = visibleCatalogData?.totalRows ?? 0;
   const resultsLabel = clientRefinesResults ? `${cards.length} resultados refinados en esta página` : `${totalRows} resultados disponibles`;
 
   const setsQuery = useQuery({
     queryKey: ["ygopro-card-sets"],
-    initialData: () => initialCatalogSnapshot?.filters?.sets ?? initialData?.filters?.sets ?? undefined,
+    initialData: () => serverInitialCatalogData?.filters?.sets ?? initialCatalogSnapshot?.filters?.sets ?? undefined,
     placeholderData: retainPreviousData,
     staleTime: 1000 * 60 * 60,
     refetchOnMount: false,
@@ -232,7 +245,8 @@ export default function SinglesPage({ category, initialData }) {
     void queryClient.prefetchQuery({
       queryKey: nextPageQueryPlan.cardsQueryKey,
       staleTime: CATALOG_QUERY_STALE_TIME,
-      queryFn: () => fetchCatalogCards({
+      gcTime: CATALOG_QUERY_GC_TIME,
+      queryFn: ({ signal }) => fetchCatalogCards({
         page: nextPage,
         pageSize: CATALOG_PAGE_SIZE,
         search: debouncedSearch,
@@ -244,6 +258,7 @@ export default function SinglesPage({ category, initialData }) {
         priceRange: nextPageQueryPlan.serverFilters.priceRange
           ? { min: nextPageQueryPlan.serverFilters.priceRange.min, max: nextPageQueryPlan.serverFilters.priceRange.max ?? undefined }
           : undefined,
+        signal,
       }),
     });
   }, [queryClient, catalogData, page, totalPages, debouncedSearch, category, debouncedFilters]);

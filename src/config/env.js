@@ -18,6 +18,7 @@ const runtimeEnv = typeof process !== "undefined" && process?.env
 const nextPublicEnv = {
   NEXT_PUBLIC_APP_NAME: typeof process !== "undefined" ? process.env.NEXT_PUBLIC_APP_NAME : undefined,
   NEXT_PUBLIC_APP_ENV: typeof process !== "undefined" ? process.env.NEXT_PUBLIC_APP_ENV : undefined,
+  NEXT_PUBLIC_SITE_URL: typeof process !== "undefined" ? process.env.NEXT_PUBLIC_SITE_URL : undefined,
   NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME: typeof process !== "undefined" ? process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME : undefined,
   NEXT_PUBLIC_SUPABASE_URL: typeof process !== "undefined" ? process.env.NEXT_PUBLIC_SUPABASE_URL : undefined,
   NEXT_PUBLIC_SUPABASE_ANON_KEY: typeof process !== "undefined" ? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY : undefined,
@@ -28,7 +29,6 @@ const nextPublicEnv = {
   NEXT_PUBLIC_API_TIMEOUT: typeof process !== "undefined" ? process.env.NEXT_PUBLIC_API_TIMEOUT : undefined,
   NEXT_PUBLIC_AUTH_PROVIDER: typeof process !== "undefined" ? process.env.NEXT_PUBLIC_AUTH_PROVIDER : undefined,
   NEXT_PUBLIC_MP_PUBLIC_KEY: typeof process !== "undefined" ? process.env.NEXT_PUBLIC_MP_PUBLIC_KEY : undefined,
-  NEXT_PUBLIC_LEGACY_STOREFRONT_URL: typeof process !== "undefined" ? process.env.NEXT_PUBLIC_LEGACY_STOREFRONT_URL : undefined,
   NEXT_PUBLIC_ENABLE_CART: typeof process !== "undefined" ? process.env.NEXT_PUBLIC_ENABLE_CART : undefined,
   NEXT_PUBLIC_ENABLE_ORDERS: typeof process !== "undefined" ? process.env.NEXT_PUBLIC_ENABLE_ORDERS : undefined,
   NEXT_PUBLIC_ENABLE_ANALYTICS: typeof process !== "undefined" ? process.env.NEXT_PUBLIC_ENABLE_ANALYTICS : undefined,
@@ -41,14 +41,14 @@ const nextPublicEnv = {
  * @param {string} [fallback]
  */
 function readEnv(viteKey, nextKey, fallback = "") {
-  const viteValue = viteEnv?.[viteKey];
-  if (viteValue !== undefined && viteValue !== null && viteValue !== "") {
-    return viteValue;
-  }
-
   const runtimeValue = nextPublicEnv?.[nextKey] ?? runtimeEnv?.[nextKey];
   if (runtimeValue !== undefined && runtimeValue !== null && runtimeValue !== "") {
     return runtimeValue;
+  }
+
+  const viteValue = viteEnv?.[viteKey];
+  if (viteValue !== undefined && viteValue !== null && viteValue !== "") {
+    return viteValue;
   }
 
   return fallback;
@@ -64,15 +64,12 @@ function readFlag(viteKey, nextKey, fallback = false) {
   return value === "true";
 }
 
-const RAILWAY_BACKEND_URL = "https://proyecto-fullstack-production-8fe1.up.railway.app";
+function normalizeBaseUrl(value) {
+  return typeof value === "string" ? value.trim().replace(/\/$/, "") : "";
+}
 
 const resolveApiBaseUrl = () => {
-  const configured = readEnv("VITE_API_BASE_URL", "NEXT_PUBLIC_API_BASE_URL", runtimeEnv?.BACKEND_URL || "");
-  if (configured) {
-    return configured.replace(/\/$/, "");
-  }
-
-  return RAILWAY_BACKEND_URL;
+  return normalizeBaseUrl(readEnv("VITE_API_BASE_URL", "NEXT_PUBLIC_API_BASE_URL", ""));
 };
 
 export const ENV = {
@@ -91,7 +88,6 @@ export const ENV = {
   AUTH_PROVIDER: readEnv("VITE_AUTH_PROVIDER", "NEXT_PUBLIC_AUTH_PROVIDER", "base44"),
 
   MP_PUBLIC_KEY: readEnv("VITE_MP_PUBLIC_KEY", "NEXT_PUBLIC_MP_PUBLIC_KEY", "") || null,
-  LEGACY_STOREFRONT_URL: readEnv("VITE_STOREFRONT_URL", "NEXT_PUBLIC_LEGACY_STOREFRONT_URL", ""),
 
   FEATURES: {
     CART: readFlag("VITE_ENABLE_CART", "NEXT_PUBLIC_ENABLE_CART", true),

@@ -2,7 +2,8 @@ import { spawn } from "node:child_process";
 import net from "node:net";
 
 const host = "127.0.0.1";
-const preferredPort = Number(process.env.NEXT_STORE_PORT || process.env.PORT || 3003);
+const FIXED_API_PORT = 3311;
+const FIXED_NEXT_PORT = 3005;
 const prewarmRoutes = ["/", "/singles", "/orders", "/auth?redirect=/cart"];
 
 function prefixOutput(chunk, label) {
@@ -30,33 +31,50 @@ function canConnect(port, hostname) {
   });
 }
 
-function isPortFree(port) {
-  return new Promise(async (resolve) => {
-    const localhostOccupied = await canConnect(port, host);
-    if (localhostOccupied) {
-      resolve(false);
-      return;
-    }
+async function assertPortAvailable(port) {
+  if (await canConnect(port, host)) {
+    throw new Error(`Port ${port} for Next storefront is already in use. Free it before starting the service.`);
+  }
 
+  await new Promise((resolve, reject) => {
     const server = net.createServer();
-
-    server.once("error", () => resolve(false));
-    server.once("listening", () => {
-      server.close(() => resolve(true));
-    });
-
+    server.once("error", () => reject(new Error(`Port ${port} for Next storefront is already reserved by another process.`)));
+    server.once("listening", () => server.close(resolve));
     server.listen(port, host);
   });
 }
 
-async function findPort(startPort) {
-  for (let port = startPort; port < startPort + 10; port += 1) {
-    if (await isPortFree(port)) {
-      return port;
-    }
+function normalizeValue(value) {
+  return String(value || "").trim().replace(/\/$/, "");
+}
+
+function assertExpectedEnv(envName, expectedValue) {
+  const currentValue = process.env[envName];
+  if (currentValue == null || currentValue === "") {
+    return;
   }
 
-  throw new Error(`No free port found near ${startPort}`);
+  if (normalizeValue(currentValue) !== normalizeValue(expectedValue)) {
+    throw new Error(`Expected ${envName}=${expectedValue}, received ${currentValue}. Fix the environment before starting the storefront.`);
+  }
+}
+
+function assertExpectedPort() {
+  const configuredPort = process.env.NEXT_STORE_PORT;
+  if (configuredPort && Number(configuredPort) !== FIXED_NEXT_PORT) {
+    throw new Error(`Expected NEXT_STORE_PORT=${FIXED_NEXT_PORT}, received ${configuredPort}. Fix the environment before starting the storefront.`);
+  }
+}
+
+function validateDeterministicEnv(apiBaseUrl, storefrontBaseUrl) {
+  assertExpectedEnv("API_PORT", String(FIXED_API_PORT));
+  assertExpectedEnv("NEXT_STORE_PORT", String(FIXED_NEXT_PORT));
+  assertExpectedEnv("BACKEND_URL", apiBaseUrl);
+  assertExpectedEnv("FRONTEND_URL", storefrontBaseUrl);
+  assertExpectedEnv("VITE_API_BASE_URL", apiBaseUrl);
+  assertExpectedEnv("VITE_STOREFRONT_URL", storefrontBaseUrl);
+  assertExpectedEnv("NEXT_PUBLIC_API_BASE_URL", apiBaseUrl);
+  assertExpectedEnv("NEXT_PUBLIC_SITE_URL", storefrontBaseUrl);
 }
 
 async function waitForUrl(url, timeoutMs = 60000) {
@@ -92,7 +110,12 @@ async function prewarmUrl(baseUrl, route) {
 }
 
 async function main() {
-  const port = await findPort(preferredPort);
+  assertExpectedPort();
+  const port = FIXED_NEXT_PORT;
+  const apiBaseUrl = `http://${host}:${FIXED_API_PORT}`;
+  const storefrontBaseUrl = `http://${host}:${port}`;
+  validateDeterministicEnv(apiBaseUrl, storefrontBaseUrl);
+  await assertPortAvailable(port);
   const command = `npx next dev --turbo --port ${port}`;
   const child = spawn(command, {
     cwd: process.cwd(),
@@ -100,6 +123,14 @@ async function main() {
       ...process.env,
       NEXT_DIST_DIR: ".next-dev",
       PORT: String(port),
+      API_PORT: String(FIXED_API_PORT),
+      NEXT_STORE_PORT: String(port),
+      BACKEND_URL: apiBaseUrl,
+      FRONTEND_URL: storefrontBaseUrl,
+      VITE_API_BASE_URL: apiBaseUrl,
+      VITE_STOREFRONT_URL: storefrontBaseUrl,
+      NEXT_PUBLIC_API_BASE_URL: apiBaseUrl,
+      NEXT_PUBLIC_SITE_URL: storefrontBaseUrl,
     },
     shell: true,
     stdio: ["ignore", "pipe", "pipe"],

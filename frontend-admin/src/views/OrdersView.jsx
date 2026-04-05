@@ -7,7 +7,6 @@ import {
   PaginationControls,
   StatCard,
   cn,
-  currency,
   getAdminCardImageProps,
   orderStatusLabel,
 } from "./shared";
@@ -51,7 +50,21 @@ const MANUAL_SHIPMENT_STATUS_OPTIONS = [
   { value: "out_for_delivery", label: "En reparto" },
   { value: "delivered", label: "Entregado" },
 ];
+const LOCALHOST_SHIPMENT_STATUS_OPTIONS = [
+  { value: "created", label: "Preparando" },
+  { value: "picked_up", label: "Retirado" },
+  { value: "in_transit", label: "En tránsito" },
+  { value: "delivered", label: "Entregado" },
+];
 const MANUAL_SHIPMENT_STATUS_VALUES = new Set(MANUAL_SHIPMENT_STATUS_OPTIONS.map((option) => option.value));
+
+function isLocalhostRuntime() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return ["localhost", "127.0.0.1"].includes(window.location.hostname);
+}
 
 function formatStatusText(value) {
   const normalized = String(value || "").trim().toLowerCase();
@@ -136,8 +149,12 @@ function resolveEditableShipmentStatus(order) {
   return "created";
 }
 
+function resolveOrderTrackingCode(order) {
+  return String(order?.tracking_code || order?.trackingCode || order?.shipping?.tracking_code || order?.shipping?.trackingCode || "").trim();
+}
+
 function hasShipmentStatusSource(order) {
-  return Boolean(String(order.shipmentId || order.shipment_id || order.tracking_code || order.trackingNumber || "").trim());
+  return Boolean(String(order?.shipmentId || order?.shipment_id || resolveOrderTrackingCode(order) || order?.trackingNumber || "").trim());
 }
 
 function StatusPill({ type, value }) {
@@ -199,13 +216,32 @@ function getTransitionOptions(status, canCancelOrders) {
     pending_payment: ["pending_payment", "paid", "failed", "expired", ...(canCancelOrders ? ["cancelled"] : [])],
     failed: ["failed", "pending_payment", ...(canCancelOrders ? ["cancelled"] : [])],
     expired: ["expired", "pending_payment", ...(canCancelOrders ? ["cancelled"] : [])],
-    paid: ["paid", "shipped", ...(canCancelOrders ? ["cancelled"] : [])],
-    shipped: ["shipped", "completed", ...(canCancelOrders ? ["cancelled"] : [])],
-    completed: ["completed"],
+    paid: ["paid", "pending_payment", "shipped", ...(canCancelOrders ? ["cancelled"] : [])],
+    shipped: ["shipped", "pending_payment", "paid", "completed", ...(canCancelOrders ? ["cancelled"] : [])],
+    completed: ["completed", "shipped"],
     cancelled: ["cancelled"],
   };
 
   return transitions[status] || [status];
+}
+
+function getOrderQuickActions(order, canCancelOrders) {
+  return getTransitionOptions(order?.status, canCancelOrders)
+    .filter((status) => ["paid", "shipped", "completed"].includes(status) && status !== order?.status)
+    .map((status) => ({
+      status,
+      idleLabel: status === "paid"
+        ? (order?.status === "shipped" ? "Volver a pagado" : "Marcar pagado")
+        : status === "shipped"
+          ? (order?.status === "completed" ? "Volver a enviado" : "Marcar enviado")
+          : "Marcar completado",
+      successLabel: status === "paid" ? "Pago confirmado" : status === "shipped" ? "Envio actualizado" : "Completado",
+      className: status === "paid"
+        ? "bg-sky-500 text-slate-950 hover:bg-sky-400"
+        : status === "shipped"
+          ? "bg-emerald-500 text-slate-950 hover:bg-emerald-400"
+          : "bg-amber-500 text-slate-950 hover:bg-amber-400",
+    }));
 }
 
 function formatOrderMoney(value, currencyCode = "ARS") {
@@ -226,13 +262,28 @@ function formatOrderMoney(value, currencyCode = "ARS") {
   }
 }
 
+function getOrderItems(order) {
+  return Array.isArray(order?.items) ? order.items : [];
+}
+
+function resolveOrderDestination(order) {
+  return order?.shipping_address || order?.shipping?.address?.city || order?.address?.city || "-";
+}
+
 function OrderOverviewSections({ order, copiedTrackingOrderId, onCopyTracking, onOpenLabel }) {
   const paymentBadgeValue = resolvePaymentBadgeValue(order);
   const shipmentBadgeValue = resolveShipmentBadgeValue(order);
   const copied = copiedTrackingOrderId === order.id;
+  const trackingCode = resolveOrderTrackingCode(order);
   const orderCurrency = String(order.currency || "ARS").toUpperCase();
   const orderTotalLabel = formatOrderMoney(order.total, orderCurrency);
   const mercadoPagoTotalLabel = order.total_ars ? formatOrderMoney(order.total_ars, "ARS") : null;
+  const shippingCost = Number(order.shipping_cost);
+  const shippingCostLabel = order.is_shipping_order
+    ? (Number.isFinite(shippingCost)
+        ? (shippingCost === 0 ? "GRATIS" : formatOrderMoney(shippingCost, orderCurrency))
+        : "Pendiente de cotización")
+    : "Retiro en showroom";
 
   return (
     <div className="grid gap-3 xl:grid-cols-3">
@@ -254,8 +305,9 @@ function OrderOverviewSections({ order, copiedTrackingOrderId, onCopyTracking, o
         </div>
         <InfoRow label="Carrier" value={carrierLabel(order.carrier) || "Sin carrier"} />
         <InfoRow label="Servicio" value={order.shipping_label || "Sin servicio"} />
-        <InfoRow label="Tracking" value={order.tracking_code || "Sin tracking"} className="font-mono text-xs text-slate-200" />
-        {order.shipping_address ? <InfoRow label="Destino" value={order.shipping_address} className="text-xs text-slate-300" /> : null}
+        <InfoRow label="Costo" value={shippingCostLabel} className="font-semibold text-white" />
+        <InfoRow label="Tracking" value={trackingCode || "Sin tracking"} className="font-mono text-xs text-slate-200" />
+        <InfoRow label="Destino" value={resolveOrderDestination(order)} className="text-xs text-slate-300" />
       </InfoSection>
 
       <InfoSection icon={Package} title="Acciones">
@@ -263,7 +315,7 @@ function OrderOverviewSections({ order, copiedTrackingOrderId, onCopyTracking, o
           <button
             type="button"
             onClick={() => onCopyTracking(order)}
-            disabled={!order.tracking_code}
+            disabled={!trackingCode}
             className="flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {copied ? <Check className="h-4 w-4 text-emerald-300" /> : <Copy className="h-4 w-4" />}
@@ -290,23 +342,49 @@ function OrderOverviewSections({ order, copiedTrackingOrderId, onCopyTracking, o
   );
 }
 
-function ShipmentStatusOverridePanel({ canOverride, value, onChange, onSave, pending, success, disabled }) {
+function ShipmentStatusOverridePanel({ canOverride, value, onChange, onSave, pending, success, disabled, localSimulation = false }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-slate-950/30 p-4">
-      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-        <label className="space-y-2">
-          <span className="block text-xs uppercase tracking-[0.18em] text-slate-500">Estado manual de envío</span>
-          <select
-            value={value}
-            onChange={(event) => onChange(event.target.value)}
-            disabled={disabled || !canOverride}
-            className="h-11 w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm font-semibold text-white outline-none transition focus:border-amber-400 disabled:opacity-60"
-          >
-            {MANUAL_SHIPMENT_STATUS_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
-        </label>
+      <div className={cn("grid gap-3", !localSimulation && "md:grid-cols-[minmax(0,1fr)_auto] md:items-end")}>
+        <div className="min-w-0 space-y-2">
+          <span className="block text-xs uppercase tracking-[0.18em] text-slate-500">
+            {localSimulation ? "Estado de envío local" : "Estado manual de envío"}
+          </span>
+          {localSimulation ? (
+            <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(8.5rem,1fr))]">
+              {LOCALHOST_SHIPMENT_STATUS_OPTIONS.map((option) => {
+                const selected = option.value === value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => onChange(option.value)}
+                    disabled={disabled || !canOverride}
+                    className={cn(
+                      "min-h-14 min-w-0 rounded-2xl border px-4 py-3 text-center text-sm font-semibold leading-tight break-words transition disabled:opacity-60",
+                      selected
+                        ? "border-amber-400 bg-amber-400/15 text-amber-200"
+                        : "border-white/10 bg-slate-950/70 text-slate-200 hover:bg-white/[0.06]"
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <select
+              value={value}
+              onChange={(event) => onChange(event.target.value)}
+              disabled={disabled || !canOverride}
+              className="h-11 w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm font-semibold text-white outline-none transition focus:border-amber-400 disabled:opacity-60"
+            >
+              {MANUAL_SHIPMENT_STATUS_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          )}
+        </div>
 
         <ActionStatusButton
           onClick={onSave}
@@ -316,25 +394,30 @@ function ShipmentStatusOverridePanel({ canOverride, value, onChange, onSave, pen
           idleLabel="Actualizar envío"
           pendingLabel="Actualizando..."
           successLabel="Envío actualizado"
-          className="border border-white/10 hover:bg-white/[0.06]"
+          className={cn("border border-white/10 hover:bg-white/[0.06]", localSimulation && "w-full")}
         >
         </ActionStatusButton>
       </div>
 
       <p className="mt-2 text-xs text-slate-400">
-        {canOverride
-          ? "Fallback manual. El webhook y el polling de Envia siguen siendo la fuente automática del tracking real."
-          : "Disponible cuando el pedido tenga tracking cargado o un shipment creado."}
+        {localSimulation
+          ? (canOverride
+              ? "Simulación local controlada. Actualiza solo el estado de envío usado en localhost."
+              : "Disponible solo para pedidos con envío en la simulación local.")
+          : (canOverride
+              ? "Fallback manual. El webhook y el polling de Envia siguen siendo la fuente automática del tracking real."
+              : "Disponible cuando el pedido tenga tracking cargado o un shipment creado.")}
       </p>
     </div>
   );
 }
 
-export default memo(function OrdersView({ orders, summary, pagination, filters, onFiltersChange, onPageChange, onStatusChange, onDeleteOrder, onClearOrders, onExportOrders, onShippingSave, onShipmentStatusSave, updatingOrderId, completedOrderActionKey, savingShippingOrderId, savingShipmentStatusOrderId, completedShippingOrderId, completedShipmentStatusOrderId, deletingOrderId, isClearingOrders, isExportingOrders, canCancelOrders, canDeleteOrders }) {
+export default memo(function OrdersView({ orders = [], summary, pagination, filters, onFiltersChange, onPageChange, onStatusChange, onDeleteOrder, onClearOrders, onExportOrders, onShippingSave, onShipmentStatusSave, updatingOrderId, completedOrderActionKey, savingShippingOrderId, savingShipmentStatusOrderId, completedShippingOrderId, completedShipmentStatusOrderId, deletingOrderId, isClearingOrders, isExportingOrders, canCancelOrders, canDeleteOrders }) {
   const [shippingDrafts, setShippingDrafts] = useState({});
   const [shipmentStatusDrafts, setShipmentStatusDrafts] = useState({});
   const [confirmState, setConfirmState] = useState(null);
   const [copiedTrackingOrderId, setCopiedTrackingOrderId] = useState(null);
+  const localhostSimulation = isLocalhostRuntime();
 
   const filterStatuses = canCancelOrders
     ? ["pending_payment", "failed", "expired", "paid", "shipped", "completed", "cancelled"]
@@ -370,7 +453,7 @@ export default memo(function OrdersView({ orders, summary, pagination, filters, 
       for (const order of orders) {
         next[order.id] = {
           carrier: current[order.id]?.carrier ?? (order.carrier || ""),
-          tracking_code: current[order.id]?.tracking_code ?? (order.tracking_code || ""),
+          tracking_code: current[order.id]?.tracking_code ?? resolveOrderTrackingCode(order),
           tracking_visible_to_user: current[order.id]?.tracking_visible_to_user ?? Boolean(order.tracking_visible_to_user),
         };
       }
@@ -390,7 +473,7 @@ export default memo(function OrdersView({ orders, summary, pagination, filters, 
 
   const getShippingDraft = (order) => shippingDrafts[order.id] || {
     carrier: order.carrier || "",
-    tracking_code: order.tracking_code || "",
+    tracking_code: resolveOrderTrackingCode(order),
     tracking_visible_to_user: Boolean(order.tracking_visible_to_user),
   };
 
@@ -429,7 +512,7 @@ export default memo(function OrdersView({ orders, summary, pagination, filters, 
         : false;
 
   const handleCopyTracking = async (order) => {
-    const trackingCode = String(order?.tracking_code || "").trim();
+    const trackingCode = resolveOrderTrackingCode(order);
     if (!trackingCode || !window.navigator?.clipboard?.writeText) {
       return;
     }
@@ -521,8 +604,12 @@ export default memo(function OrdersView({ orders, summary, pagination, filters, 
       ) : (
         <div className="space-y-4">
           <div className="space-y-4 lg:hidden">
-            {orders.map((order) => (
-              <div key={order.id} className="glass admin-list-card admin-content-auto rounded-3xl border border-white/10 p-4 transition duration-200 hover:border-white/20 hover:bg-white/[0.03]">
+            {orders.map((order) => {
+              const orderItems = getOrderItems(order);
+              const quickActions = getOrderQuickActions(order, canCancelOrders);
+
+              return (
+                <div key={order.id} className="glass admin-list-card admin-content-auto rounded-3xl border border-white/10 p-4 transition duration-200 hover:border-white/20 hover:bg-white/[0.03]">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="font-semibold text-white">Pedido #{order.id}</p>
@@ -544,7 +631,7 @@ export default memo(function OrdersView({ orders, summary, pagination, filters, 
                   </span>
                   {order.customer_name ? <span>Cliente: {order.customer_name}</span> : null}
                   {order.customer_email ? <span>{order.customer_email}</span> : null}
-                  <span>{order.items.length} ítems</span>
+                  <span>{orderItems.length} ítems</span>
                 </div>
 
                 <div className="mt-3">
@@ -598,13 +685,14 @@ export default memo(function OrdersView({ orders, summary, pagination, filters, 
                 {order.is_shipping_order ? (
                   <div className="mt-3">
                     <ShipmentStatusOverridePanel
-                      canOverride={hasShipmentStatusSource(order)}
+                      canOverride={localhostSimulation ? true : hasShipmentStatusSource(order)}
                       value={getShipmentStatusDraft(order)}
                       onChange={(value) => updateShipmentStatusDraft(order.id, value)}
                       onSave={() => onShipmentStatusSave(order.id, getShipmentStatusDraft(order))}
                       pending={savingShipmentStatusOrderId === order.id}
                       success={isShipmentStatusSaved(order.id)}
                       disabled={Boolean(savingShipmentStatusOrderId) || isOrderStatusMutating || Boolean(deletingOrderId) || isClearingOrders}
+                      localSimulation={localhostSimulation}
                     />
                   </div>
                 ) : null}
@@ -625,39 +713,20 @@ export default memo(function OrdersView({ orders, summary, pagination, filters, 
                   </label>
 
                   <div className="grid gap-2 sm:grid-cols-2">
-                    <ActionStatusButton
-                      onClick={() => onStatusChange(order.id, "paid")}
-                      disabled={isOrderStatusMutating || Boolean(deletingOrderId) || isClearingOrders || order.status !== "pending_payment"}
-                      pending={updatingOrderId === order.id}
-                      success={isActionCompleted(order.id, "paid")}
-                      idleLabel="Confirmar pago"
-                      pendingLabel="Actualizando..."
-                      successLabel="Pago confirmado"
-                      className="bg-sky-500 text-slate-950 hover:bg-sky-400"
-                    >
-                    </ActionStatusButton>
-                    <ActionStatusButton
-                      onClick={() => onStatusChange(order.id, "shipped")}
-                      disabled={isOrderStatusMutating || Boolean(deletingOrderId) || isClearingOrders || order.status !== "paid"}
-                      pending={updatingOrderId === order.id}
-                      success={isActionCompleted(order.id, "shipped")}
-                      idleLabel="Marcar enviado"
-                      pendingLabel="Actualizando..."
-                      successLabel="Envío actualizado"
-                      className="bg-emerald-500 text-slate-950 hover:bg-emerald-400"
-                    >
-                    </ActionStatusButton>
-                    <ActionStatusButton
-                      onClick={() => onStatusChange(order.id, "completed")}
-                      disabled={isOrderStatusMutating || Boolean(deletingOrderId) || isClearingOrders || order.status !== "shipped"}
-                      pending={updatingOrderId === order.id}
-                      success={isActionCompleted(order.id, "completed")}
-                      idleLabel="Marcar completado"
-                      pendingLabel="Actualizando..."
-                      successLabel="Completado"
-                      className="bg-amber-500 text-slate-950 hover:bg-amber-400"
-                    >
-                    </ActionStatusButton>
+                    {quickActions.map((action) => (
+                      <ActionStatusButton
+                        key={action.status}
+                        onClick={() => onStatusChange(order.id, action.status)}
+                        disabled={isOrderStatusMutating || Boolean(deletingOrderId) || isClearingOrders}
+                        pending={updatingOrderId === order.id}
+                        success={isActionCompleted(order.id, action.status)}
+                        idleLabel={action.idleLabel}
+                        pendingLabel="Actualizando..."
+                        successLabel={action.successLabel}
+                        className={action.className}
+                      >
+                      </ActionStatusButton>
+                    ))}
                     {canCancelOrders ? (
                       <button
                         onClick={() => setConfirmState({ type: "cancel", orderId: order.id })}
@@ -680,24 +749,29 @@ export default memo(function OrdersView({ orders, summary, pagination, filters, 
                 </div>
 
                 <div className="mt-4 space-y-3 border-t border-white/10 pt-4">
-                  {order.items.map((item) => (
+                  {orderItems.map((item) => (
                     <div key={item.id} className="flex items-center gap-3 rounded-2xl bg-slate-950/50 px-3 py-3">
                       <img {...getAdminCardImageProps(item.card?.image)} alt={item.card?.name} className="h-16 w-12 rounded-lg object-cover" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate font-semibold text-white">{item.card?.name || `Card ${item.card_id}`}</p>
-                        <p className="text-sm text-slate-400">{item.quantity} x {currency(item.price)}</p>
+                        <p className="text-sm text-slate-400">{item.quantity} x {formatOrderMoney(item.price, order.currency || "ARS")}</p>
                       </div>
-                      <p className="font-bold text-white">{currency(item.subtotal)}</p>
+                      <p className="font-bold text-white">{formatOrderMoney(item.subtotal, order.currency || "ARS")}</p>
                     </div>
                   ))}
                 </div>
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </div>
 
           <div className="hidden space-y-4 lg:block">
-            {orders.map((order) => (
-              <details key={order.id} className="glass admin-list-card admin-content-auto rounded-3xl border border-white/10 p-5 transition duration-200 hover:border-white/20 hover:bg-white/[0.03]">
+            {orders.map((order) => {
+              const orderItems = getOrderItems(order);
+              const quickActions = getOrderQuickActions(order, canCancelOrders);
+
+              return (
+                <details key={order.id} className="glass admin-list-card admin-content-auto rounded-3xl border border-white/10 p-5 transition duration-200 hover:border-white/20 hover:bg-white/[0.03]">
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-4">
                   <div>
                     <p className="font-semibold text-white">Pedido #{order.id}</p>
@@ -773,13 +847,14 @@ export default memo(function OrdersView({ orders, summary, pagination, filters, 
 
                   {order.is_shipping_order ? (
                     <ShipmentStatusOverridePanel
-                      canOverride={hasShipmentStatusSource(order)}
+                      canOverride={localhostSimulation ? true : hasShipmentStatusSource(order)}
                       value={getShipmentStatusDraft(order)}
                       onChange={(value) => updateShipmentStatusDraft(order.id, value)}
                       onSave={() => onShipmentStatusSave(order.id, getShipmentStatusDraft(order))}
                       pending={savingShipmentStatusOrderId === order.id}
                       success={isShipmentStatusSaved(order.id)}
                       disabled={Boolean(savingShipmentStatusOrderId) || isOrderStatusMutating || Boolean(deletingOrderId) || isClearingOrders}
+                      localSimulation={localhostSimulation}
                     />
                   ) : null}
 
@@ -801,39 +876,20 @@ export default memo(function OrdersView({ orders, summary, pagination, filters, 
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    <ActionStatusButton
-                      onClick={() => onStatusChange(order.id, "paid")}
-                      disabled={isOrderStatusMutating || Boolean(deletingOrderId) || isClearingOrders || order.status !== "pending_payment"}
-                      pending={updatingOrderId === order.id}
-                      success={isActionCompleted(order.id, "paid")}
-                      idleLabel="Confirmar pago"
-                      pendingLabel="Actualizando..."
-                      successLabel="Pago confirmado"
-                      className="bg-sky-500 py-2 text-slate-950 hover:bg-sky-400"
-                    >
-                    </ActionStatusButton>
-                    <ActionStatusButton
-                      onClick={() => onStatusChange(order.id, "shipped")}
-                      disabled={isOrderStatusMutating || Boolean(deletingOrderId) || isClearingOrders || order.status !== "paid"}
-                      pending={updatingOrderId === order.id}
-                      success={isActionCompleted(order.id, "shipped")}
-                      idleLabel="Marcar enviado"
-                      pendingLabel="Actualizando..."
-                      successLabel="Envío actualizado"
-                      className="bg-emerald-500 py-2 text-slate-950 hover:bg-emerald-400"
-                    >
-                    </ActionStatusButton>
-                    <ActionStatusButton
-                      onClick={() => onStatusChange(order.id, "completed")}
-                      disabled={isOrderStatusMutating || Boolean(deletingOrderId) || isClearingOrders || order.status !== "shipped"}
-                      pending={updatingOrderId === order.id}
-                      success={isActionCompleted(order.id, "completed")}
-                      idleLabel="Marcar completado"
-                      pendingLabel="Actualizando..."
-                      successLabel="Completado"
-                      className="bg-amber-500 py-2 text-slate-950 hover:bg-amber-400"
-                    >
-                    </ActionStatusButton>
+                    {quickActions.map((action) => (
+                      <ActionStatusButton
+                        key={action.status}
+                        onClick={() => onStatusChange(order.id, action.status)}
+                        disabled={isOrderStatusMutating || Boolean(deletingOrderId) || isClearingOrders}
+                        pending={updatingOrderId === order.id}
+                        success={isActionCompleted(order.id, action.status)}
+                        idleLabel={action.idleLabel}
+                        pendingLabel="Actualizando..."
+                        successLabel={action.successLabel}
+                        className={`${action.className} py-2`}
+                      >
+                      </ActionStatusButton>
+                    ))}
                     {canCancelOrders ? (
                       <button
                         onClick={() => setConfirmState({ type: "cancel", orderId: order.id })}
@@ -854,19 +910,20 @@ export default memo(function OrdersView({ orders, summary, pagination, filters, 
                     ) : null}
                   </div>
 
-                  {order.items.map((item) => (
+                  {orderItems.map((item) => (
                     <div key={item.id} className="flex items-center gap-4 rounded-2xl bg-slate-950/50 px-4 py-3">
                       <img {...getAdminCardImageProps(item.card?.image)} alt={item.card?.name} className="h-16 w-12 rounded-lg object-cover" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate font-semibold text-white">{item.card?.name || `Card ${item.card_id}`}</p>
-                        <p className="text-sm text-slate-400">{item.quantity} x {currency(item.price)}</p>
+                        <p className="text-sm text-slate-400">{item.quantity} x {formatOrderMoney(item.price, order.currency || "ARS")}</p>
                       </div>
-                      <p className="font-bold text-white">{currency(item.subtotal)}</p>
+                      <p className="font-bold text-white">{formatOrderMoney(item.subtotal, order.currency || "ARS")}</p>
                     </div>
                   ))}
                 </div>
-              </details>
-            ))}
+                </details>
+              );
+            })}
           </div>
 
           <div className="glass overflow-hidden rounded-3xl border border-white/10">

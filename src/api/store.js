@@ -11,11 +11,47 @@
  * @property {string[]} [cardTypes]
  * @property {string[]} [conditions]
  * @property {string[]} [sets]
+ * @property {AbortSignal} [signal]
  */
 
-/** @typedef {import("../legacy-pages/Cart.jsx").CheckoutPayload} CheckoutPayload */
-/** @typedef {import("../legacy-pages/Cart.jsx").CheckoutAddress} CheckoutAddress */
-/** @typedef {import("../legacy-pages/Cart.jsx").CheckoutOrderSummary} CheckoutOrderSummary */
+/**
+ * @typedef {Object} CheckoutAddress
+ * @property {number} [id]
+ * @property {string} label
+ * @property {string} recipient_name
+ * @property {string} phone
+ * @property {string} line1
+ * @property {string} [line2]
+ * @property {string} city
+ * @property {string} state
+ * @property {string} postal_code
+ * @property {string} zone
+ * @property {string} [notes]
+ * @property {boolean} [is_default]
+ */
+
+/**
+ * @typedef {Object} CheckoutPayload
+ * @property {Array<{ cardId: number, quantity: number }>} items
+ * @property {string} customer_name
+ * @property {string} phone
+ * @property {string} shipping_zone
+ * @property {string} [shipping_carrier]
+ * @property {string} [notes]
+ * @property {string} [mutation_id]
+ * @property {boolean} accepted
+ * @property {number} [addressId]
+ * @property {CheckoutAddress} [address]
+ * @property {boolean} [save_address]
+ */
+
+/**
+ * @typedef {Object} CheckoutOrderSummary
+ * @property {number|string} id
+ * @property {string} [status]
+ * @property {number|string} [total]
+ * @property {number|string} [total_ars]
+ */
 
 import {
   clearStoredUserSession,
@@ -29,7 +65,8 @@ import { ENV } from "@/config/env";
 const INITIAL_CATALOG_BOOTSTRAP_KEY = "__DUELVAULT_INITIAL_CATALOG__";
 const PERSISTED_QUERY_CACHE_KEY = "duelvault-react-query-cache-v2";
 export const CATALOG_PAGE_SIZE = 24;
-export const CATALOG_QUERY_STALE_TIME = 1000 * 60 * 5;
+export const CATALOG_QUERY_STALE_TIME = 1000 * 60;
+export const CATALOG_QUERY_GC_TIME = 1000 * 60 * 5;
 /** @type {string | null} */
 let persistedQueryStateCacheRaw = null;
 /** @type {any} */
@@ -244,6 +281,46 @@ const clearScheduledTimeout = typeof globalThis.clearTimeout === "function"
 
 const CHECKOUT_API_TIMEOUT_MS = Math.max(ENV.API_TIMEOUT, 70000);
 
+/**
+ * @param {(AbortSignal | undefined)[]} signals
+ */
+function composeAbortSignal(signals) {
+  const activeSignals = signals.filter(Boolean);
+
+  if (!activeSignals.length) {
+    return undefined;
+  }
+
+  if (activeSignals.length === 1) {
+    return activeSignals[0];
+  }
+
+  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.any === "function") {
+    return AbortSignal.any(activeSignals);
+  }
+
+  const controller = new AbortController();
+
+  const abortFrom = (signal) => {
+    if (controller.signal.aborted) {
+      return;
+    }
+
+    controller.abort(signal.reason);
+  };
+
+  for (const signal of activeSignals) {
+    if (signal.aborted) {
+      abortFrom(signal);
+      break;
+    }
+
+    signal.addEventListener("abort", () => abortFrom(signal), { once: true });
+  }
+
+  return controller.signal;
+}
+
 /** @typedef {RequestInit & { timeoutMs?: number }} StoreRequestOptions */
 /** @typedef {{ method?: string, body?: any, retryOnAuthError?: boolean, idempotencyKey?: string | null, timeoutMs?: number }} AuthRequestOptions */
 
@@ -260,21 +337,24 @@ export function createStoreMutationId(prefix = "store") {
  * @param {StoreRequestOptions} [options]
  */
 async function request(path, options = {}) {
-  const { timeoutMs: timeoutOverride, ...fetchOptions } = options;
+  const { timeoutMs: timeoutOverride, signal: externalSignal, ...fetchOptions } = options;
   const timeoutMs = Number(timeoutOverride || ENV.API_TIMEOUT) || ENV.API_TIMEOUT;
-  const controller = new AbortController();
-  const timeoutId = scheduleTimeout(() => controller.abort("timeout"), timeoutMs);
+  const timeoutController = new AbortController();
+  const timeoutId = scheduleTimeout(() => timeoutController.abort("timeout"), timeoutMs);
   const method = String(fetchOptions.method || "GET").toUpperCase();
   const hasJsonBody = fetchOptions.body != null && method !== "GET" && method !== "HEAD";
   const t0 = performance.now();
+  const requestUrl = buildApiUrl(path);
+  const signal = composeAbortSignal([timeoutController.signal, externalSignal]);
 
   try {
-    const response = await fetch(buildApiUrl(path), {
+    const response = await fetch(requestUrl, {
+      ...(typeof window === "undefined" ? { cache: "no-store" } : {}),
       headers: {
         ...(hasJsonBody ? { "Content-Type": "application/json" } : {}),
         ...(fetchOptions.headers || {}),
       },
-      signal: controller.signal,
+      ...(signal ? { signal } : {}),
       ...fetchOptions,
     });
 
@@ -292,7 +372,11 @@ async function request(path, options = {}) {
     return payload;
   } catch (error) {
     if (isAbortError(error)) {
-      throw createStoreTimeoutError();
+      if (timeoutController.signal.aborted) {
+        throw createStoreTimeoutError();
+      }
+
+      throw error;
     }
 
     if (error instanceof TypeError) {
@@ -448,7 +532,9 @@ export async function fetchCatalogCards(options = {}) {
     sets: options.sets,
   });
 
-  const payload = await request(`/api/catalog?${query}`);
+  const payload = await request(`/api/catalog?${query}`, {
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
 
   return normalizeCatalogPayload(payload);
 }
@@ -654,7 +740,11 @@ export async function requestPasswordReset(email) {
 }
 
 export async function fetchRuntimeConfig() {
-  return request("/api/health");
+  const payload = await fetchStorefrontConfig();
+  return {
+    runtime: payload?.storefront || null,
+    storefront: payload?.storefront || null,
+  };
 }
 
 export async function fetchStorefrontConfig() {
@@ -721,12 +811,12 @@ export async function fetchMyOrders({ page = 1, limit = 10 } = {}) {
 }
 
 /**
- * @param {{ postalCode: string, city?: string, state?: string, itemCount?: number, weight?: number }} params
+ * @param {{ postalCode: string, city?: string, state?: string, zone?: string, itemCount?: number, weight?: number }} params
  */
-export async function fetchShippingRates({ postalCode, city, state, itemCount, weight }) {
+export async function fetchShippingRates({ postalCode, city, state, zone, itemCount, weight }) {
   return authRequest("/api/shipping/rates", {
     method: "POST",
-    body: { postal_code: postalCode, city, state, item_count: itemCount, weight },
+    body: { postal_code: postalCode, city, state, zone, item_count: itemCount, weight },
   });
 }
 

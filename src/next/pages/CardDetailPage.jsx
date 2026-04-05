@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { startTransition, useMemo } from "react";
+import { startTransition, useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 
 import { fetchCardDetail } from "@/api/store";
@@ -47,17 +47,24 @@ function DetailSkeleton() {
 /** @param {{ id: string, initialData: * }} props */
 export default function CardDetailPage({ id, initialData }) {
   const router = useRouter();
-  const backHref = useMemo(() => readLastCatalogHref("/singles"), []);
+  const [backHref, setBackHref] = useState("/singles");
   const hasInitialData = Boolean(initialData?.card);
+  const initialDataUpdatedAt = hasInitialData
+    ? new Date(initialData.card.updated_at || initialData.card.updatedAt || 0).getTime()
+    : undefined;
+
+  useEffect(() => {
+    setBackHref(readLastCatalogHref("/singles"));
+  }, []);
+
   const { data, isLoading } = useQuery({
     queryKey: ["card-detail", id],
     queryFn: () => fetchCardDetail(id || ""),
     enabled: Boolean(id),
     staleTime: CARD_DETAIL_STALE_TIME,
     initialData,
-    initialDataUpdatedAt: hasInitialData ? Date.now() : undefined,
+    initialDataUpdatedAt: Number.isFinite(initialDataUpdatedAt) ? initialDataUpdatedAt : undefined,
     placeholderData: hasInitialData ? undefined : retainPreviousData,
-    refetchOnMount: (query) => Date.now() - Number(query.state.dataUpdatedAt || 0) >= CARD_DETAIL_STALE_TIME,
     refetchOnReconnect: false,
     refetchOnWindowFocus: false,
   });

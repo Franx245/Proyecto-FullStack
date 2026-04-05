@@ -246,22 +246,29 @@
   color: white;
 }
 
-#form-checkout .mp-hosted-field {
+#form-checkout .mp-hosted-field,
+[data-mp-host-field] {
   position: relative;
   display: flex;
   align-items: center;
   width: 100%;
   min-height: 3rem;
+  overflow: hidden;
   isolation: isolate;
   pointer-events: auto;
 }
 
-#form-checkout .mp-hosted-field iframe {
+#form-checkout .mp-hosted-field iframe,
+[data-mp-host-field] iframe {
   display: block;
   width: 100% !important;
-  min-height: 1.5rem !important;
+  height: 1.625rem !important;
+  min-height: 1.625rem !important;
+  max-height: 1.625rem !important;
   border: 0;
   background: transparent;
+  flex: 1 1 auto;
+  filter: invert(1) hue-rotate(180deg) brightness(1.08);
 }
 
 #form-checkout input,

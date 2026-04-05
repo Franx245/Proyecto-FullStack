@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { Sparkles } from "lucide-react";
@@ -17,10 +18,20 @@ export default function NextFeaturedCards({
   showHeader = true,
   initialData = undefined,
 }) {
+  const stableInitialCards = useMemo(
+    () => (Array.isArray(initialData) ? initialData : []),
+    [initialData],
+  );
+  const [hasMounted, setHasMounted] = useState(false);
+
+  useEffect(() => {
+    setHasMounted(true);
+  }, []);
+
   const queryResult = useQuery({
     queryKey,
     staleTime: 1000 * 60 * 2,
-    initialData,
+    ...(stableInitialCards.length > 0 ? { initialData: stableInitialCards } : {}),
     placeholderData: retainPreviousData,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
@@ -28,9 +39,13 @@ export default function NextFeaturedCards({
     queryFn,
   });
 
-  const { data: cards = [], isLoading, isFetching } = queryResult;
-  const shouldShowSkeleton = isLoading && cards.length === 0;
-  const isBackgroundRefresh = isFetching && !isLoading && cards.length > 0;
+  const { data, isLoading, isFetching } = queryResult;
+  const queryCards = Array.isArray(data) ? data : [];
+  const cards = hasMounted
+    ? (queryCards.length > 0 ? queryCards : stableInitialCards)
+    : stableInitialCards;
+  const shouldShowSkeleton = hasMounted && isLoading && cards.length === 0;
+  const isBackgroundRefresh = hasMounted && isFetching && !isLoading && cards.length > 0;
   const hasCards = cards.length > 0;
 
   return (

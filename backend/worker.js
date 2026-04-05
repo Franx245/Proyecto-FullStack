@@ -9,6 +9,7 @@
  * Shares the same job handlers as the API's inline fallback.
  */
 import "./src/lib/load-env.js";
+import { redisConfig } from "./config/env.js";
 import { isRedisTcpConfigured, pingRedisTcp, shutdownRedisTcp } from "./src/lib/redis-tcp.js";
 import { startWorker, shutdownWorker } from "./src/lib/jobs/worker.js";
 import { enqueueJob, shutdownQueue } from "./src/lib/jobs/queue.js";
@@ -17,6 +18,30 @@ import { stopEventBus } from "./src/lib/events.js";
 import { logEvent } from "./src/lib/logger.js";
 
 const EXPIRE_PENDING_ORDERS_INTERVAL_MS = 5 * 60 * 1000;
+
+function maskConnectionUrl(value) {
+  const rawValue = String(value || "").trim();
+  if (!rawValue) {
+    return "";
+  }
+
+  try {
+    const parsed = new URL(rawValue);
+    const auth = parsed.username ? `${parsed.username}:***@` : "";
+    const port = parsed.port ? `:${parsed.port}` : "";
+    return `${parsed.protocol}//${auth}${parsed.hostname}${port}${parsed.pathname}`;
+  } catch {
+    return rawValue;
+  }
+}
+
+function resolveRedisTargetForLogs() {
+  if (!redisConfig.target) {
+    return "";
+  }
+
+  return maskConnectionUrl(redisConfig.target);
+}
 
 /** @type {NodeJS.Timeout | null} */
 let expirePendingOrdersInterval = null;
@@ -76,11 +101,17 @@ function stopExpirePendingOrdersLoop() {
 async function main() {
   logEvent("WORKER_START", "Worker started", {
     entry: "backend/worker.js",
+    envTargets: {
+      databaseUrl: maskConnectionUrl(process.env.DATABASE_URL),
+      directUrl: maskConnectionUrl(process.env.DIRECT_URL),
+      redisUrl: resolveRedisTargetForLogs(),
+      redisRestUrl: maskConnectionUrl(process.env.UPSTASH_REDIS_REST_URL),
+    },
   });
 
   if (!isRedisTcpConfigured()) {
     logEvent("WORKER_FATAL", "Redis TCP URL is not configured", {
-      envKeys: ["REDIS_TCP_URL", "REDIS_URL"],
+      envKeys: ["REDIS_HOST", "REDIS_PORT", "REDIS_TCP_URL", "REDIS_URL"],
     });
     process.exit(1);
   }

@@ -1,6 +1,21 @@
 import "../backend/src/lib/load-env.js";
 
-const BASE_URL = process.env.CHECKOUT_BASE_URL || "https://duelvault-store-api.vercel.app";
+function normalizeBaseUrl(value) {
+  return String(value || "").trim().replace(/\/$/, "");
+}
+
+const API_BASE_URL = normalizeBaseUrl(
+  process.env.CHECKOUT_API_BASE_URL
+  || process.env.BACKEND_URL
+  || process.env.CHECKOUT_BASE_URL
+  || "https://duelvault-store-api.vercel.app"
+);
+const PAGE_BASE_URL = normalizeBaseUrl(
+  process.env.CHECKOUT_PAGE_BASE_URL
+  || process.env.FRONTEND_URL
+  || process.env.CHECKOUT_BASE_URL
+  || API_BASE_URL
+);
 const PUBLIC_KEY = process.env.MP_PUBLIC_KEY || process.env.VITE_MP_PUBLIC_KEY || null;
 const CARDHOLDER_NAME = process.env.MP_CARDHOLDER_NAME || "APRO";
 const CARD_NUMBER = process.env.MP_CARD_NUMBER || "4509953566233704";
@@ -19,7 +34,7 @@ function randomSuffix() {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(`${BASE_URL}${path}`, options);
+  const response = await fetch(`${API_BASE_URL}${path}`, options);
   const text = await response.text();
   let payload = null;
 
@@ -209,7 +224,7 @@ async function main() {
     body: JSON.stringify(checkoutPayload),
   }), "checkout");
 
-  const checkoutPage = await withRetries(() => apiExternal(`${BASE_URL}/checkout/pay/${checkout?.order?.id}`), "checkout page");
+  const checkoutPage = await withRetries(() => apiExternal(`${PAGE_BASE_URL}/checkout/pay/${checkout?.order?.id}`), "checkout page");
 
   const orders = await withRetries(() => api("/api/auth/orders", {
     headers: {
@@ -261,7 +276,8 @@ async function main() {
       email: STORE_IDENTIFIER || email,
       username: STORE_IDENTIFIER || username,
       mode: sessionLabel,
-      baseUrl: BASE_URL,
+      apiBaseUrl: API_BASE_URL,
+      pageBaseUrl: PAGE_BASE_URL,
       accessTokenPresent: Boolean(session.accessToken),
     },
     selectedCard: selectedCard

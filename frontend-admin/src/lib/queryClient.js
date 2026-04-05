@@ -1,5 +1,5 @@
 import { QueryClient, dehydrate, hydrate } from "@tanstack/react-query";
-import { getStoredSession } from "./api";
+import { getStoredSession, normalizeOrderRecord } from "./api";
 
 const QUERY_CACHE_KEY = "duelvault_admin_query_cache_v5";
 const QUERY_CACHE_MAX_AGE = 1000 * 60 * 60 * 12;
@@ -16,6 +16,56 @@ function getStoredAdminId() {
   } catch {
     return null;
   }
+}
+
+function normalizePersistedOrder(order) {
+  return normalizeOrderRecord(order);
+}
+
+function normalizePersistedQueryData(prefix, data) {
+  if (!data || typeof data !== "object") {
+    return data;
+  }
+
+  if (prefix === "orders" && Array.isArray(data.orders)) {
+    return {
+      ...data,
+      orders: data.orders.map(normalizePersistedOrder),
+    };
+  }
+
+  if (prefix === "dashboard" && Array.isArray(data.recentOrders)) {
+    return {
+      ...data,
+      recentOrders: data.recentOrders.map(normalizePersistedOrder),
+    };
+  }
+
+  return data;
+}
+
+function normalizePersistedClientState(clientState) {
+  if (!clientState || !Array.isArray(clientState.queries)) {
+    return clientState;
+  }
+
+  return {
+    ...clientState,
+    queries: clientState.queries.map((query) => {
+      const prefix = query?.queryKey?.[0];
+      if (typeof prefix !== "string") {
+        return query;
+      }
+
+      return {
+        ...query,
+        state: {
+          ...query.state,
+          data: normalizePersistedQueryData(prefix, query.state?.data),
+        },
+      };
+    }),
+  };
 }
 
 function shouldRetryQuery(failureCount, error) {
@@ -66,7 +116,7 @@ function restorePersistedCache(queryClient) {
       return;
     }
 
-    hydrate(queryClient, persisted.clientState);
+    hydrate(queryClient, normalizePersistedClientState(persisted.clientState));
   } catch {
     window.localStorage.removeItem(QUERY_CACHE_KEY);
   }

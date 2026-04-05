@@ -24,6 +24,12 @@ async function fetchJson(url, revalidate) {
   return response.json();
 }
 
+function resolveSitemapApiBase() {
+  return String(process.env.NEXT_PUBLIC_API_BASE_URL || process.env.BACKEND_URL || "")
+    .trim()
+    .replace(/\/$/, "");
+}
+
 export default async function sitemap() {
   const staticPages = [
     { url: `${BASE_URL}/`, changeFrequency: "daily", priority: 1.0 },
@@ -43,7 +49,7 @@ export default async function sitemap() {
   let setPages = [];
 
   try {
-    const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.BACKEND_URL || "https://proyecto-fullstack-production-8fe1.up.railway.app";
+    const apiBase = resolveSitemapApiBase();
     if (apiBase) {
       const firstPage = await fetchJson(`${apiBase}/api/catalog?page=1&pageSize=50`, 3600);
       const totalPages = Math.min(Number(firstPage?.totalPages || 0), MAX_SITEMAP_PAGES);

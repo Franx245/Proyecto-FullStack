@@ -1,12 +1,13 @@
 import "./load-env.js";
 import { Redis } from "@upstash/redis";
+import { cacheMode } from "../../config/env.js";
 
 const redisUrl = String(process.env.UPSTASH_REDIS_REST_URL || "").trim();
 const redisToken = String(process.env.UPSTASH_REDIS_REST_TOKEN || "").trim();
 const globalForRedis = globalThis;
 
 function createUpstashRedisClient() {
-  if (!redisUrl || !redisToken) {
+  if (cacheMode !== "upstash" || !redisUrl || !redisToken) {
     return null;
   }
 
@@ -17,6 +18,10 @@ function createUpstashRedisClient() {
 }
 
 function resolveRedisBackendName() {
+  if (cacheMode === "memory") {
+    return "memory";
+  }
+
   if (redisUrl && redisToken) {
     return "upstash-rest";
   }
@@ -25,6 +30,10 @@ function resolveRedisBackendName() {
 }
 
 function createRedisClient() {
+  if (cacheMode === "memory") {
+    return null;
+  }
+
   if (redisUrl && redisToken) {
     return createUpstashRedisClient();
   }

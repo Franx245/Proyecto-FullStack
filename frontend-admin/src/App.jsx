@@ -1,5 +1,5 @@
 import { Suspense, lazy, memo, startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   BarChart3,
@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  API_BASE_URL,
   addCardToInventory,
   clearStoredSession,
   createCustomCategory,
@@ -52,7 +53,7 @@ import {
 import { clearPersistedAdminQueryCache, persistAdminQueryCacheNow } from "./lib/queryClient";
 import { generateClientMutationId, recordAdminEvent, startAdminFlow } from "./lib/observability";
 import { markDataReady, reportBootMetrics } from "./lib/perf";
-import { userRoleLabel } from "./views/shared";
+import { orderStatusLabel, userRoleLabel } from "./views/shared";
 import { useAdminRealtimeEvents } from "./hooks/useAdminRealtimeEvents";
 
 function lazyWithPreload(factory) {
@@ -151,6 +152,7 @@ const DEFAULT_USERS_FILTERS = {
   role: "all",
 };
 const HOME_PAGE_SIZE = 24;
+const DASHBOARD_RECENT_ORDERS_PAGE_SIZE = 10;
 
 const EMPTY_ARRAY = [];
 const EMPTY_DASHBOARD = {
@@ -515,6 +517,17 @@ function getOrderEntityQueryKey(orderId) {
   return ["order", Number(orderId)];
 }
 
+function findOrderInOrderResponses(orderId, responses = []) {
+  for (const [, response] of responses) {
+    const foundOrder = response?.orders?.find?.((order) => Number(order?.id) === Number(orderId));
+    if (foundOrder) {
+      return foundOrder;
+    }
+  }
+
+  return null;
+}
+
 function getUserEntityQueryKey(userId) {
   return ["user", Number(userId)];
 }
@@ -705,6 +718,70 @@ function applyOrderStatusToResponse(response, queryKey, orderId, nextStatus, pre
   };
 
   return nextResponse;
+}
+
+function normalizeOrderComparableText(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeOrderTrackingCode(value) {
+  return String(value || "").trim();
+}
+
+function orderMatchesShippingMutationPayload(order, payload) {
+  if (!order || !payload || typeof payload !== "object") {
+    return false;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, "carrier")) {
+    if (normalizeOrderComparableText(order.carrier) !== normalizeOrderComparableText(payload.carrier)) {
+      return false;
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, "tracking_code")) {
+    if (normalizeOrderTrackingCode(order.tracking_code ?? order.trackingCode) !== normalizeOrderTrackingCode(payload.tracking_code)) {
+      return false;
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, "tracking_visible_to_user")) {
+    if (Boolean(order.tracking_visible_to_user ?? order.trackingVisibleToUser) !== Boolean(payload.tracking_visible_to_user)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function orderHasSameShippingSnapshot(order, referenceOrder) {
+  if (!order || !referenceOrder) {
+    return false;
+  }
+
+  return normalizeOrderComparableText(order.carrier) === normalizeOrderComparableText(referenceOrder.carrier)
+    && normalizeOrderTrackingCode(order.tracking_code ?? order.trackingCode) === normalizeOrderTrackingCode(referenceOrder.tracking_code ?? referenceOrder.trackingCode)
+    && Boolean(order.tracking_visible_to_user ?? order.trackingVisibleToUser) === Boolean(referenceOrder.tracking_visible_to_user ?? referenceOrder.trackingVisibleToUser);
+}
+
+function orderMatchesShipmentStatusValue(order, status) {
+  if (!order) {
+    return false;
+  }
+
+  return normalizeOrderComparableText(order.shipment_status ?? order.shippingStatus) === normalizeOrderComparableText(status);
+}
+
+function syncOrderConflictResource(queryClient, adminId, orderId, order) {
+  if (!order) {
+    return;
+  }
+
+  for (const [queryKey] of queryClient.getQueriesData({ queryKey: ["orders", adminId] })) {
+    queryClient.setQueryData(queryKey, (current) => mergeOrderIntoResponse(current, queryKey, orderId, order));
+  }
+
+  mergeEntityCache(queryClient, getOrderEntityQueryKey(orderId), "order", order);
 }
 
 function removeContactRequestsFromResponse(response, predicate) {
@@ -1084,14 +1161,20 @@ async function resolveStorefrontLoginUrl() {
     return `${configuredStorefrontUrl}/auth?mode=login`;
   }
 
-  const fallbackNextStorePort = 3000;
+  const fallbackNextStorePort = 3005;
   const fallbackLegacyStorePort = 5173;
 
   try {
-    const apiBase = import.meta.env.VITE_API_BASE_URL || "https://proyecto-fullstack-production-8fe1.up.railway.app";
-    const response = await fetch(`${apiBase}/api/health`);
+    const response = await fetch(`${API_BASE_URL}/api/storefront/config`);
     const payload = await response.json().catch(() => ({}));
-    const storePort = payload?.runtime?.next_store_port || payload?.runtime?.store_port || fallbackNextStorePort;
+    const runtime = payload?.storefront || null;
+    const storefrontUrl = normalizeAbsoluteUrl(runtime?.storefront_url || "");
+
+    if (storefrontUrl) {
+      return `${storefrontUrl}/auth?mode=login`;
+    }
+
+    const storePort = runtime?.storefront_port || fallbackNextStorePort;
     return `${window.location.protocol}//${window.location.hostname}:${storePort}/auth?mode=login`;
   } catch {
     return `${window.location.protocol}//${window.location.hostname}:${fallbackNextStorePort || fallbackLegacyStorePort}/auth?mode=login`;
@@ -1475,6 +1558,7 @@ function AdminShell({ session, onLogout }) {
   const homeCardsQueryPrefix = ["home-cards", session.admin.id];
   const homeCardsQueryKey = ["home-cards", session.admin.id, homePage, HOME_PAGE_SIZE, deferredHomeSearch];
   const ordersQueryKey = ["orders", session.admin.id, ordersPage, deferredOrdersSearch, ordersFilters.status];
+  const dashboardRecentOrdersQueryKey = ["orders", session.admin.id, 1, "", "all", "dashboard-recent", DASHBOARD_RECENT_ORDERS_PAGE_SIZE];
   const usersQueryKey = ["users", session.admin.id, usersPage, deferredUsersSearch, usersFilters.role];
   const whatsappSettingsQueryKey = ["whatsapp-settings", session.admin.id];
   const contactRequestsQueryKey = ["contact-requests", session.admin.id];
@@ -1533,9 +1617,19 @@ function AdminShell({ session, onLogout }) {
       search: deferredOrdersSearch,
       status: ordersFilters.status,
     }),
-    placeholderData: (previousData) => previousData,
+    placeholderData: keepPreviousData,
     staleTime: 1000 * 60 * 3,
     enabled: Boolean(sectionRequirements.orders),
+  });
+  const dashboardRecentOrdersQuery = useQuery({
+    queryKey: dashboardRecentOrdersQueryKey,
+    queryFn: () => getOrders({
+      page: 1,
+      pageSize: DASHBOARD_RECENT_ORDERS_PAGE_SIZE,
+    }),
+    placeholderData: keepPreviousData,
+    staleTime: 1000 * 60 * 3,
+    enabled: Boolean(sectionRequirements.dashboard),
   });
   const usersQuery = useQuery({
     queryKey: usersQueryKey,
@@ -1876,7 +1970,6 @@ function AdminShell({ session, onLogout }) {
     onMutate: async ({ orderId, status }) => {
       setUpdatingOrderId(orderId);
       const orderEntityQueryKey = getOrderEntityQueryKey(orderId);
-      const previousOrder = ordersQuery.data?.orders?.find((order) => order.id === orderId) || null;
       await Promise.all([
         queryClient.cancelQueries({ queryKey: ["orders", session.admin.id] }),
         queryClient.cancelQueries({ queryKey: orderEntityQueryKey, exact: true }),
@@ -1884,16 +1977,42 @@ function AdminShell({ session, onLogout }) {
 
       const previousOrders = queryClient.getQueriesData({ queryKey: ["orders", session.admin.id] });
       const previousOrderDetail = queryClient.getQueryData(orderEntityQueryKey);
+      const previousOrder = findOrderInOrderResponses(orderId, previousOrders) || previousOrderDetail?.order || null;
       for (const [queryKey] of previousOrders) {
         queryClient.setQueryData(queryKey, (current) => applyOrderStatusToResponse(current, queryKey, orderId, status, previousOrder?.status));
       }
       mergeEntityCache(queryClient, orderEntityQueryKey, "order", { status }, { createIfMissing: false });
 
-      return { previousOrders, previousOrderDetail, orderEntityQueryKey };
+      return { previousOrders, previousOrderDetail, orderEntityQueryKey, previousOrder };
     },
     onError: (error, variables, context) => {
       restoreQuerySnapshots(queryClient, context?.previousOrders);
       restoreExactQuerySnapshot(queryClient, context?.orderEntityQueryKey || getOrderEntityQueryKey(variables.orderId), context?.previousOrderDetail);
+
+      const currentOrder = isConflictError(error) ? error?.details?.current_resource : null;
+      if (currentOrder) {
+        syncOrderConflictResource(queryClient, session.admin.id, variables.orderId, currentOrder);
+
+        if (String(currentOrder.status || "").toLowerCase() === String(variables.status || "").toLowerCase()) {
+          pulseSuccess(setCompletedOrderActionKey, `${variables.orderId}:${variables.status}`);
+          publishNotice("info", `Pedido #${variables.orderId}: ya estaba sincronizado en ${orderStatusLabel(currentOrder.status)}.`);
+          return;
+        }
+
+        if (!variables?.conflictRetried && String(currentOrder.status || "").toLowerCase() === String(context?.previousOrder?.status || "").toLowerCase()) {
+          updateOrderMutation.mutate({
+            ...variables,
+            expectedUpdatedAt: error?.details?.current_updated_at || getResourceUpdatedAt(currentOrder),
+            conflictRetried: true,
+          });
+          publishNotice("info", `Pedido #${variables.orderId}: se recargó el estado actual y se reintentó la actualización.`);
+          return;
+        }
+
+        publishNotice("info", `Pedido #${variables.orderId}: estado actual ${orderStatusLabel(currentOrder.status)}.`);
+        return;
+      }
+
       publishNotice("error", `Pedido #${variables.orderId}: ${getReadableMutationError(error)}`);
     },
     onSuccess: (data, variables) => {
@@ -1911,7 +2030,7 @@ function AdminShell({ session, onLogout }) {
     onSettled: (_data, _error, variables) => {
       setUpdatingOrderId(null);
       const tasks = [
-        queryClient.invalidateQueries({ queryKey: ["orders", session.admin.id], refetchType: "none" }),
+        queryClient.invalidateQueries({ queryKey: ["orders"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: cardsQueryKey, refetchType: "none" }),
         queryClient.invalidateQueries({ queryKey: homeCardsQueryPrefix, refetchType: "none" }),
         queryClient.invalidateQueries({ queryKey: ["inventory-cards", session.admin.id], refetchType: "none" }),
@@ -1963,7 +2082,7 @@ function AdminShell({ session, onLogout }) {
     onSettled: (_data, _error, variables) => {
       setDeletingOrderId(null);
       const tasks = [
-        queryClient.invalidateQueries({ queryKey: ["orders", session.admin.id], refetchType: "none" }),
+        queryClient.invalidateQueries({ queryKey: ["orders"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: cardsQueryKey, refetchType: "none" }),
         queryClient.invalidateQueries({ queryKey: homeCardsQueryPrefix, refetchType: "none" }),
         queryClient.invalidateQueries({ queryKey: ["inventory-cards", session.admin.id], refetchType: "none" }),
@@ -2094,7 +2213,7 @@ function AdminShell({ session, onLogout }) {
     onSettled: () => {
       setIsClearingOrders(false);
       void Promise.allSettled([
-        queryClient.invalidateQueries({ queryKey: ["orders", session.admin.id] }),
+        queryClient.invalidateQueries({ queryKey: ["orders"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: dashboardQueryKey }),
         queryClient.invalidateQueries({ queryKey: cardsQueryKey }),
         queryClient.invalidateQueries({ queryKey: homeCardsQueryPrefix }),
@@ -2130,6 +2249,7 @@ function AdminShell({ session, onLogout }) {
 
       const previousOrders = queryClient.getQueriesData({ queryKey: ["orders", session.admin.id] });
       const previousOrderDetail = queryClient.getQueryData(orderEntityQueryKey);
+      const previousOrder = findOrderInOrderResponses(orderId, previousOrders) || previousOrderDetail?.order || null;
       for (const [queryKey] of previousOrders) {
         queryClient.setQueryData(queryKey, (current) => mergeOrderIntoResponse(current, queryKey, orderId, {
           carrier: payload.carrier,
@@ -2143,11 +2263,33 @@ function AdminShell({ session, onLogout }) {
         tracking_visible_to_user: payload.tracking_visible_to_user,
       }, { createIfMissing: false });
 
-      return { previousOrders, previousOrderDetail, orderEntityQueryKey };
+      return { previousOrders, previousOrderDetail, orderEntityQueryKey, previousOrder };
     },
     onError: (error, variables, context) => {
       restoreQuerySnapshots(queryClient, context?.previousOrders);
       restoreExactQuerySnapshot(queryClient, context?.orderEntityQueryKey || getOrderEntityQueryKey(variables.orderId), context?.previousOrderDetail);
+
+      const currentOrder = isConflictError(error) ? error?.details?.current_resource : null;
+      if (currentOrder) {
+        syncOrderConflictResource(queryClient, session.admin.id, variables.orderId, currentOrder);
+
+        if (orderMatchesShippingMutationPayload(currentOrder, variables.payload)) {
+          pulseSuccess(setCompletedShippingOrderId, variables.orderId);
+          publishNotice("info", `Tracking de pedido #${variables.orderId}: ya estaba sincronizado con la última versión.`);
+          return;
+        }
+
+        if (!variables?.conflictRetried && orderHasSameShippingSnapshot(currentOrder, context?.previousOrder)) {
+          updateOrderShippingMutation.mutate({
+            ...variables,
+            expectedUpdatedAt: error?.details?.current_updated_at || getResourceUpdatedAt(currentOrder),
+            conflictRetried: true,
+          });
+          publishNotice("info", `Tracking de pedido #${variables.orderId}: se recargó la versión actual y se reintentó el guardado.`);
+          return;
+        }
+      }
+
       publishNotice("error", `Tracking de pedido #${variables.orderId}: ${getReadableMutationError(error)}`);
     },
     onSuccess: (data, variables) => {
@@ -2164,7 +2306,10 @@ function AdminShell({ session, onLogout }) {
     },
     onSettled: (_data, _error, variables) => {
       setSavingShippingOrderId(null);
-      const tasks = [];
+      const tasks = [
+        queryClient.invalidateQueries({ queryKey: ["orders"], refetchType: "active" }),
+        queryClient.invalidateQueries({ queryKey: dashboardQueryKey, refetchType: "active" }),
+      ];
       if (variables?.orderId) {
         tasks.push(queryClient.invalidateQueries({ queryKey: getOrderEntityQueryKey(variables.orderId), exact: true, refetchType: "active" }));
       }
@@ -2192,6 +2337,7 @@ function AdminShell({ session, onLogout }) {
 
       const previousOrders = queryClient.getQueriesData({ queryKey: ["orders", session.admin.id] });
       const previousOrderDetail = queryClient.getQueryData(orderEntityQueryKey);
+      const previousOrder = findOrderInOrderResponses(orderId, previousOrders) || previousOrderDetail?.order || null;
       for (const [queryKey] of previousOrders) {
         queryClient.setQueryData(queryKey, (current) => mergeOrderIntoResponse(current, queryKey, orderId, {
           shipment_status: payload.status,
@@ -2201,11 +2347,34 @@ function AdminShell({ session, onLogout }) {
         shipment_status: payload.status,
       }, { createIfMissing: false });
 
-      return { previousOrders, previousOrderDetail, orderEntityQueryKey };
+      return { previousOrders, previousOrderDetail, orderEntityQueryKey, previousOrder };
     },
     onError: (error, variables, context) => {
       restoreQuerySnapshots(queryClient, context?.previousOrders);
       restoreExactQuerySnapshot(queryClient, context?.orderEntityQueryKey || getOrderEntityQueryKey(variables.orderId), context?.previousOrderDetail);
+
+      const currentOrder = isConflictError(error) ? error?.details?.current_resource : null;
+      const requestedStatus = variables.payload?.status || variables.payload?.shipment_status || variables.payload?.shippingStatus;
+      if (currentOrder) {
+        syncOrderConflictResource(queryClient, session.admin.id, variables.orderId, currentOrder);
+
+        if (orderMatchesShipmentStatusValue(currentOrder, requestedStatus)) {
+          pulseSuccess(setCompletedShipmentStatusOrderId, variables.orderId);
+          publishNotice("info", `Estado de envío de pedido #${variables.orderId}: ya estaba sincronizado con la última versión.`);
+          return;
+        }
+
+        if (!variables?.conflictRetried && orderMatchesShipmentStatusValue(currentOrder, context?.previousOrder?.shipment_status || context?.previousOrder?.shippingStatus)) {
+          updateOrderShipmentStatusMutation.mutate({
+            ...variables,
+            expectedUpdatedAt: error?.details?.current_updated_at || getResourceUpdatedAt(currentOrder),
+            conflictRetried: true,
+          });
+          publishNotice("info", `Estado de envío de pedido #${variables.orderId}: se recargó la versión actual y se reintentó el guardado.`);
+          return;
+        }
+      }
+
       publishNotice("error", `Estado de envío de pedido #${variables.orderId}: ${getReadableMutationError(error)}`);
     },
     onSuccess: (data, variables) => {
@@ -2222,7 +2391,10 @@ function AdminShell({ session, onLogout }) {
     },
     onSettled: (_data, _error, variables) => {
       setSavingShipmentStatusOrderId(null);
-      const tasks = [];
+      const tasks = [
+        queryClient.invalidateQueries({ queryKey: ["orders"], refetchType: "active" }),
+        queryClient.invalidateQueries({ queryKey: dashboardQueryKey, refetchType: "active" }),
+      ];
       if (variables?.orderId) {
         tasks.push(queryClient.invalidateQueries({ queryKey: getOrderEntityQueryKey(variables.orderId), exact: true, refetchType: "active" }));
       }
@@ -2458,7 +2630,7 @@ function AdminShell({ session, onLogout }) {
   }, [hasDashboardData]);
 
   const dashboard = dashboardQuery.data || EMPTY_DASHBOARD;
-  const dashboardRecentOrders = dashboard.recentOrders || EMPTY_ARRAY;
+  const dashboardRecentOrders = dashboardRecentOrdersQuery.data?.orders || dashboard.recentOrders || EMPTY_ARRAY;
   const cards = cardsQuery.data?.cards || EMPTY_ARRAY;
   const homePageData = homeCardsQuery.data || {
     cards: [],
@@ -2519,6 +2691,7 @@ function AdminShell({ session, onLogout }) {
           <DashboardView
             dashboard={dashboard}
             orders={orders}
+            recentOrdersData={dashboardRecentOrders}
             users={users}
             cards={cards}
             admin={session.admin}
@@ -2532,6 +2705,20 @@ function AdminShell({ session, onLogout }) {
               status,
               expectedUpdatedAt: getResourceUpdatedAt(orders.find((order) => order.id === orderId) || dashboardRecentOrders.find((order) => order.id === orderId)),
             })}
+            onShippingSave={(orderId, payload) => updateOrderShippingMutation.mutate({
+              orderId,
+              payload,
+              expectedUpdatedAt: getResourceUpdatedAt(orders.find((order) => order.id === orderId) || dashboardRecentOrders.find((order) => order.id === orderId)),
+            })}
+            onShipmentStatusSave={(orderId, status) => updateOrderShipmentStatusMutation.mutate({
+              orderId,
+              payload: { status },
+              expectedUpdatedAt: getResourceUpdatedAt(orders.find((order) => order.id === orderId) || dashboardRecentOrders.find((order) => order.id === orderId)),
+            })}
+            savingShippingOrderId={savingShippingOrderId}
+            savingShipmentStatusOrderId={savingShipmentStatusOrderId}
+            completedShippingOrderId={completedShippingOrderId}
+            completedShipmentStatusOrderId={completedShipmentStatusOrderId}
           />
         </Suspense>
       );
@@ -2673,7 +2860,7 @@ function AdminShell({ session, onLogout }) {
         return <SectionLoadingPanel />;
       }
 
-      if (ordersQuery.error) {
+      if (ordersQuery.error && !ordersQuery.data) {
         return <SectionErrorPanel message={ordersQuery.error.message} />;
       }
 

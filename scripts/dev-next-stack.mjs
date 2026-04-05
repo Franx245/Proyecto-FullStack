@@ -3,6 +3,11 @@ import { spawn } from "child_process";
 import net from "net";
 
 const host = "127.0.0.1";
+const FIXED_PORTS = Object.freeze({
+  api: 3311,
+  next: 3005,
+  admin: 5198,
+});
 
 function prefixOutput(chunk, label) {
   const lines = chunk.toString().split(/\r?\n/).filter(Boolean);
@@ -66,37 +71,60 @@ function canConnect(port, hostname) {
   });
 }
 
-function isPortFree(port) {
-  return new Promise(async (resolve) => {
-    const localhostOccupied = await canConnect(port, host);
-    if (localhostOccupied) {
-      resolve(false);
-      return;
-    }
+async function assertPortAvailable(port, label) {
+  if (await canConnect(port, host)) {
+    throw new Error(`Port ${port} for ${label} is already in use. Free it before starting the stack.`);
+  }
 
+  await new Promise((resolve, reject) => {
     const server = net.createServer();
-
-    server.once("error", () => resolve(false));
-    server.once("listening", () => {
-      server.close(() => resolve(true));
-    });
-
+    server.once("error", () => reject(new Error(`Port ${port} for ${label} is already reserved by another process.`)));
+    server.once("listening", () => server.close(resolve));
     server.listen(port);
   });
 }
 
-async function findPort(preferredPort, reservedPorts = new Set()) {
-  for (let port = preferredPort; port < preferredPort + 20; port += 1) {
-    if (reservedPorts.has(port)) {
-      continue;
-    }
-
-    if (await isPortFree(port)) {
-      return port;
-    }
+async function resolveServiceReuse(port, label, url) {
+  const portIsBusy = await canConnect(port, host);
+  if (!portIsBusy) {
+    return false;
   }
 
-  throw new Error(`No free port found near ${preferredPort}`);
+  if (await isUrlReady(url)) {
+    console.log(`[boot] Reusing existing ${label}: ${url}`);
+    return true;
+  }
+
+  throw new Error(`Port ${port} for ${label} is already in use. Free it before starting the stack.`);
+}
+
+function normalizeValue(value) {
+  return String(value || "").trim().replace(/\/$/, "");
+}
+
+function assertExpectedEnv(envName, expectedValue) {
+  const currentValue = process.env[envName];
+  if (currentValue == null || currentValue === "") {
+    return;
+  }
+
+  if (normalizeValue(currentValue) !== normalizeValue(expectedValue)) {
+    throw new Error(`Expected ${envName}=${expectedValue}, received ${currentValue}. Fix the environment before starting the stack.`);
+  }
+}
+
+function validateDeterministicEnv(apiBaseUrl, nextStoreBaseUrl, adminBaseUrl) {
+  assertExpectedEnv("API_PORT", String(FIXED_PORTS.api));
+  assertExpectedEnv("PORT", String(FIXED_PORTS.api));
+  assertExpectedEnv("NEXT_STORE_PORT", String(FIXED_PORTS.next));
+  assertExpectedEnv("ADMIN_PORT", String(FIXED_PORTS.admin));
+  assertExpectedEnv("BACKEND_URL", apiBaseUrl);
+  assertExpectedEnv("FRONTEND_URL", nextStoreBaseUrl);
+  assertExpectedEnv("ADMIN_URL", adminBaseUrl);
+  assertExpectedEnv("VITE_API_BASE_URL", apiBaseUrl);
+  assertExpectedEnv("VITE_STOREFRONT_URL", nextStoreBaseUrl);
+  assertExpectedEnv("NEXT_PUBLIC_API_BASE_URL", apiBaseUrl);
+  assertExpectedEnv("NEXT_PUBLIC_SITE_URL", nextStoreBaseUrl);
 }
 
 async function waitForUrl(url, label, timeoutMs = 60000) {
@@ -151,26 +179,29 @@ process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
 async function main() {
-  const reservedPorts = new Set();
-  const apiPort = await findPort(Number(process.env.API_PORT || 3001), reservedPorts);
-  reservedPorts.add(apiPort);
-  const nextStorePort = await findPort(Number(process.env.NEXT_STORE_PORT || 3003), reservedPorts);
-  reservedPorts.add(nextStorePort);
-  const adminPort = await findPort(Number(process.env.ADMIN_PORT || 5174), reservedPorts);
+  const apiPort = FIXED_PORTS.api;
+  const nextStorePort = FIXED_PORTS.next;
+  const adminPort = FIXED_PORTS.admin;
 
   const apiBaseUrl = `http://${host}:${apiPort}`;
   const nextStoreBaseUrl = `http://${host}:${nextStorePort}`;
   const adminBaseUrl = `http://${host}:${adminPort}`;
+  const apiHealthUrl = `http://${host}:${apiPort}/api/health`;
+
+  validateDeterministicEnv(apiBaseUrl, nextStoreBaseUrl, adminBaseUrl);
+  const [reuseApi, reuseNext, reuseAdmin] = await Promise.all([
+    resolveServiceReuse(apiPort, "api", apiHealthUrl),
+    resolveServiceReuse(nextStorePort, "storefront", nextStoreBaseUrl),
+    resolveServiceReuse(adminPort, "admin", adminBaseUrl),
+  ]);
+
+  await Promise.all([
+    reuseApi ? Promise.resolve() : assertPortAvailable(apiPort, "api"),
+    reuseNext ? Promise.resolve() : assertPortAvailable(nextStorePort, "storefront"),
+    reuseAdmin ? Promise.resolve() : assertPortAvailable(adminPort, "admin"),
+  ]);
 
   console.log(`[boot] Using ports api=${apiPort} next=${nextStorePort} admin=${adminPort}`);
-  console.log("[boot] Syncing schema...");
-
-  await runCommand("prepare:schema", "prisma db push --skip-generate --schema backend/prisma/schema.prisma", {
-    ...process.env,
-    API_PORT: String(apiPort),
-    NEXT_STORE_PORT: String(nextStorePort),
-    ADMIN_PORT: String(adminPort),
-  });
 
   const sharedEnv = {
     ...process.env,
@@ -185,30 +216,46 @@ async function main() {
     VITE_STOREFRONT_URL: nextStoreBaseUrl,
     NEXT_PUBLIC_API_BASE_URL: apiBaseUrl,
     NEXT_PUBLIC_SITE_URL: nextStoreBaseUrl,
-    NEXT_PUBLIC_LEGACY_STOREFRONT_URL: nextStoreBaseUrl,
     SKIP_FULL_SEED_IF_READY: "1",
   };
 
-  console.log("[boot] Starting services while seed finishes...");
+  let seedPromise = Promise.resolve();
+  let api = null;
+  let nextStore = null;
+  let admin = null;
 
-  const api = spawnService("api", "npm run dev:api", sharedEnv);
-  const seedPromise = runCommand("prepare:seed", "prisma db seed", sharedEnv);
-  const apiHealthUrl = `http://${host}:${apiPort}/api/health`;
+  if (!reuseApi) {
+    console.log("[boot] Syncing schema...");
 
-  children.push(api);
+    await runCommand("prepare:schema", "prisma db push --skip-generate --schema backend/prisma/schema.prisma", {
+      ...process.env,
+      API_PORT: String(apiPort),
+      NEXT_STORE_PORT: String(nextStorePort),
+      ADMIN_PORT: String(adminPort),
+    });
 
-  await waitForUrl(apiHealthUrl, "api");
+    console.log("[boot] Starting services while seed finishes...");
+    api = spawnService("api", "npm run dev:api", sharedEnv);
+    seedPromise = runCommand("prepare:seed", "prisma db seed", sharedEnv);
+    children.push(api);
+    await waitForUrl(apiHealthUrl, "api");
+  }
 
-  const nextStore = spawnService("next", "npm run dev:store:next", sharedEnv);
-  const admin = spawnService("admin", "npm run dev:admin", sharedEnv);
+  if (!reuseNext) {
+    nextStore = spawnService("next", "npm run dev:store:next", sharedEnv);
+    children.push(nextStore);
+  }
+
+  if (!reuseAdmin) {
+    admin = spawnService("admin", "npm run dev:admin", sharedEnv);
+    children.push(admin);
+  }
 
   const serviceHealthChecks = new Map([
-    [api, { label: "api", url: apiHealthUrl }],
-    [nextStore, { label: "next", url: nextStoreBaseUrl }],
-    [admin, { label: "admin", url: adminBaseUrl }],
+    ...(api ? [[api, { label: "api", url: apiHealthUrl }]] : []),
+    ...(nextStore ? [[nextStore, { label: "next", url: nextStoreBaseUrl }]] : []),
+    ...(admin ? [[admin, { label: "admin", url: adminBaseUrl }]] : []),
   ]);
-
-  children.push(nextStore, admin);
 
   for (const child of children) {
     child.on("exit", async (code) => {

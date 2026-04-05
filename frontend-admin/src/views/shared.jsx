@@ -68,12 +68,21 @@ export function getAdminCardImageProps(imageUrl, options = {}) {
   };
 }
 
-export function currency(value) {
-  return new Intl.NumberFormat("es-AR", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2,
-  }).format(value || 0);
+export function currency(value, currencyCode = "ARS") {
+  const amount = Number(value ?? 0);
+  if (!Number.isFinite(amount)) {
+    return "-";
+  }
+
+  try {
+    return new Intl.NumberFormat("es-AR", {
+      style: "currency",
+      currency: String(currencyCode || "ARS").toUpperCase(),
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return `${amount.toFixed(2)} ${String(currencyCode || "ARS").toUpperCase()}`;
+  }
 }
 
 export function formatDay(value) {

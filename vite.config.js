@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const apiPort = Number(process.env.API_PORT || 3001);
-const storePort = Number(process.env.STORE_PORT || 5173);
+const apiPort = Number(process.env.API_PORT || 3311);
+const storePort = Number(process.env.STORE_PORT || process.env.NEXT_STORE_PORT || 3005);
 
 function normalizeModuleId(moduleId) {
   return typeof moduleId === "string" ? moduleId.replace(/\\/g, "/") : "";

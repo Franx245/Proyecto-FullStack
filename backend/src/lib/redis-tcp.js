@@ -6,15 +6,35 @@
  */
 import "./load-env.js";
 import IORedis from "ioredis";
+import { redisConfig } from "../../config/env.js";
 import { logEvent } from "./logger.js";
 
-function getRedisUrl() {
-  return String(process.env.REDIS_TCP_URL || process.env.REDIS_URL || "").trim();
+function getRedisConnectionTarget() {
+  if (redisConfig.url) {
+    return redisConfig.url;
+  }
+
+  if (redisConfig.host && redisConfig.port) {
+    return {
+      host: redisConfig.host,
+      port: redisConfig.port,
+    };
+  }
+
+  return null;
 }
 
-function describeRedisUrl(redisUrl) {
+function describeRedisTarget(redisTarget) {
+  if (typeof redisTarget !== "string") {
+    return {
+      protocol: "redis",
+      host: redisTarget?.host || null,
+      port: redisTarget?.port || null,
+    };
+  }
+
   try {
-    const parsed = new URL(redisUrl);
+    const parsed = new URL(redisTarget);
     return {
       protocol: parsed.protocol.replace(/:$/, ""),
       host: parsed.hostname,
@@ -29,16 +49,16 @@ function describeRedisUrl(redisUrl) {
   }
 }
 
-function requireRedisUrl(label = "default") {
-  const redisUrl = getRedisUrl();
-  if (redisUrl) {
-    return redisUrl;
+function requireRedisTarget(label = "default") {
+  const redisTarget = getRedisConnectionTarget();
+  if (redisTarget) {
+    return redisTarget;
   }
 
-  const error = new Error("REDIS_TCP_URL or REDIS_URL is not set");
-  logEvent("REDIS_CONFIG_ERROR", "Redis URL is required", {
+  const error = new Error("Redis TCP connection is not configured");
+  logEvent("REDIS_CONFIG_ERROR", "Redis connection is required", {
     label,
-    envKeys: ["REDIS_TCP_URL", "REDIS_URL"],
+    envKeys: ["REDIS_HOST", "REDIS_PORT", "REDIS_TCP_URL", "REDIS_URL"],
     error,
   });
   throw error;
@@ -54,18 +74,18 @@ let subscriberClient = null;
 let publisherClient = null;
 
 function createIORedisClient(label = "default", { required = false } = {}) {
-  const redisUrl = required ? requireRedisUrl(label) : getRedisUrl();
-  if (!redisUrl) return null;
+  const redisTarget = required ? requireRedisTarget(label) : getRedisConnectionTarget();
+  if (!redisTarget) return null;
 
   logEvent("REDIS_CONNECTING", "Connecting to Redis...", {
     label,
   });
   logEvent("REDIS_URL_DETECTED", "Redis URL detected", {
     label,
-    ...describeRedisUrl(redisUrl),
+    ...describeRedisTarget(redisTarget),
   });
 
-  const client = new IORedis(redisUrl, {
+  const clientOptions = {
     maxRetriesPerRequest: null,
     enableReadyCheck: true,
     retryStrategy(times) {
@@ -76,7 +96,14 @@ function createIORedisClient(label = "default", { required = false } = {}) {
       return targetErrors.some((e) => err.message.includes(e));
     },
     lazyConnect: false,
-  });
+  };
+
+  const client = typeof redisTarget === "string"
+    ? new IORedis(redisTarget, clientOptions)
+    : new IORedis({
+        ...redisTarget,
+        ...clientOptions,
+      });
 
   client.on("error", (err) => {
     logEvent("REDIS_ERROR", "Redis connection error", {
@@ -114,11 +141,11 @@ function createIORedisClient(label = "default", { required = false } = {}) {
 }
 
 export function isRedisTcpConfigured() {
-  return Boolean(getRedisUrl());
+  return Boolean(getRedisConnectionTarget());
 }
 
 export function getSharedRedisClient() {
-  if (!getRedisUrl()) return null;
+  if (!getRedisConnectionTarget()) return null;
   if (!sharedClient) {
     sharedClient = createIORedisClient("shared");
   }
@@ -127,7 +154,7 @@ export function getSharedRedisClient() {
 
 /** Dedicated subscriber connection for pub/sub (cannot share with commands). */
 export function getSubscriberClient() {
-  if (!getRedisUrl()) return null;
+  if (!getRedisConnectionTarget()) return null;
   if (!subscriberClient) {
     subscriberClient = createIORedisClient("subscriber");
   }
@@ -136,7 +163,7 @@ export function getSubscriberClient() {
 
 /** Dedicated publisher connection for pub/sub. */
 export function getPublisherClient() {
-  if (!getRedisUrl()) return null;
+  if (!getRedisConnectionTarget()) return null;
   if (!publisherClient) {
     publisherClient = createIORedisClient("publisher");
   }

@@ -74,6 +74,23 @@ const STATUS_OPTIONS = [
   { value: "cancelled", label: "Cancelado" },
 ];
 
+const MANUAL_SHIPMENT_STATUS_OPTIONS = [
+  { value: "created", label: "Creado" },
+  { value: "picked_up", label: "Retirado" },
+  { value: "in_transit", label: "En tránsito" },
+  { value: "out_for_delivery", label: "En reparto" },
+  { value: "delivered", label: "Entregado" },
+];
+
+const LOCALHOST_SHIPMENT_STATUS_OPTIONS = [
+  { value: "created", label: "Preparando" },
+  { value: "picked_up", label: "Retirado" },
+  { value: "in_transit", label: "En tránsito" },
+  { value: "delivered", label: "Entregado" },
+];
+
+const MANUAL_SHIPMENT_STATUS_VALUES = new Set(MANUAL_SHIPMENT_STATUS_OPTIONS.map((option) => option.value));
+
 const ALERT_COPY = {
   low_stock: {
     eyebrow: "Alertas de inventario",
@@ -93,6 +110,80 @@ const ALERT_COPY = {
 
 function normalizeText(value) {
   return String(value || "").toLowerCase().trim();
+}
+
+function isLocalhostRuntime() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return ["localhost", "127.0.0.1"].includes(window.location.hostname);
+}
+
+function resolveEditableShipmentStatus(order) {
+  const shipmentStatus = String(order?.shipment_status || "").trim().toLowerCase();
+  if (MANUAL_SHIPMENT_STATUS_VALUES.has(shipmentStatus)) {
+    return shipmentStatus;
+  }
+
+  if (order?.status === "completed") {
+    return "delivered";
+  }
+
+  if (order?.status === "shipped") {
+    return "in_transit";
+  }
+
+  return "created";
+}
+
+function resolveOrderTrackingCode(order) {
+  return String(order?.tracking_code || order?.trackingCode || order?.shipping?.tracking_code || order?.shipping?.trackingCode || "").trim();
+}
+
+function hasShipmentStatusSource(order) {
+  return Boolean(String(order?.shipmentId || order?.shipment_id || resolveOrderTrackingCode(order) || order?.trackingNumber || "").trim());
+}
+
+function getTransitionOptions(status, canCancelOrders) {
+  const transitions = {
+    pending_payment: ["pending_payment", "paid", "failed", "expired", ...(canCancelOrders ? ["cancelled"] : [])],
+    failed: ["failed", "pending_payment", ...(canCancelOrders ? ["cancelled"] : [])],
+    expired: ["expired", "pending_payment", ...(canCancelOrders ? ["cancelled"] : [])],
+    paid: ["paid", "pending_payment", "shipped", ...(canCancelOrders ? ["cancelled"] : [])],
+    shipped: ["shipped", "pending_payment", "paid", "completed", ...(canCancelOrders ? ["cancelled"] : [])],
+    completed: ["completed", "shipped"],
+    cancelled: ["cancelled"],
+  };
+
+  return transitions[status] || [status];
+}
+
+function getOrderQuickActions(order, canCancelOrders) {
+  return getTransitionOptions(order?.status, canCancelOrders)
+    .filter((status) => ["paid", "shipped", "completed"].includes(status) && status !== order?.status)
+    .map((status) => ({
+      status,
+      idleLabel: status === "paid"
+        ? (order?.status === "shipped" ? "Volver a pagado" : "Marcar pagado")
+        : status === "shipped"
+          ? (order?.status === "completed" ? "Volver a enviado" : "Marcar enviado")
+          : "Marcar completado",
+      successLabel: status === "paid" ? "Pago confirmado" : status === "shipped" ? "Enviado" : "Completado",
+      className: status === "paid"
+        ? "bg-sky-500 text-slate-950 hover:bg-sky-400"
+        : status === "shipped"
+          ? "bg-emerald-500 text-slate-950 hover:bg-emerald-400"
+          : "bg-amber-500 text-slate-950 hover:bg-amber-400",
+    }));
+}
+
+function getOrderItems(order) {
+  return Array.isArray(order?.items) ? order.items : [];
+}
+
+function resolveOrderDestination(order) {
+  return order?.shipping_address || order?.shipping?.address?.city || order?.address?.city || "-";
 }
 
 function getCutoffDate(range) {
@@ -153,7 +244,7 @@ function matchesGlobalSearch({ needle, order, user, card }) {
       order.shipping_address,
       order.shipping_zone,
       order.status,
-      ...(order.items || []).flatMap((item) => [item.card?.name, item.card?.rarity, String(item.card_id)]),
+      ...getOrderItems(order).flatMap((item) => [item.card?.name, item.card?.rarity, String(item.card_id)]),
     ] : [],
     user ? [user.full_name, user.username, user.email, user.phone] : [],
     card ? [card.name, card.rarity, card.card_type, card.status] : [],
@@ -231,8 +322,7 @@ function OrderListRow({
   completedOrderActionKey,
 }) {
   const isBusy = updatingOrderId === order.id;
-  const canMarkPaid = order.status === "pending_payment";
-  const canMarkShipped = order.status === "paid";
+  const quickActions = getOrderQuickActions(order, canCancelOrders);
 
   return (
     <article className="rounded-2xl border border-white/10 bg-slate-950/25 px-4 py-4">
@@ -246,7 +336,7 @@ function OrderListRow({
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
             <span>{new Date(order.created_at).toLocaleString("es-AR")}</span>
             <span>{order.shipping_label || "Envío"}</span>
-            <span>{currency(order.total)}</span>
+            <span>{currency(order.total, order.currency || "ARS")}</span>
           </div>
         </div>
 
@@ -259,31 +349,19 @@ function OrderListRow({
             Ver detalle
           </button>
 
-          {canMarkPaid ? (
+          {quickActions.map((action) => (
             <ActionStatusButton
-              onClick={() => onStatusChange(order.id, "paid")}
+              key={action.status}
+              onClick={() => onStatusChange(order.id, action.status)}
               disabled={isBusy}
               pending={isBusy}
-              success={completedOrderActionKey === `${order.id}:paid`}
-              idleLabel="Marcar pagado"
+              success={completedOrderActionKey === `${order.id}:${action.status}`}
+              idleLabel={action.idleLabel}
               pendingLabel="Guardando..."
-              successLabel="Pago confirmado"
-              className="w-full bg-sky-500 text-slate-950 hover:bg-sky-400 sm:w-auto"
+              successLabel={action.successLabel}
+              className={`w-full sm:w-auto ${action.className}`}
             />
-          ) : null}
-
-          {canMarkShipped ? (
-            <ActionStatusButton
-              onClick={() => onStatusChange(order.id, "shipped")}
-              disabled={isBusy}
-              pending={isBusy}
-              success={completedOrderActionKey === `${order.id}:shipped`}
-              idleLabel="Marcar enviado"
-              pendingLabel="Guardando..."
-              successLabel="Enviado"
-              className="w-full bg-emerald-500 text-slate-950 hover:bg-emerald-400 sm:w-auto"
-            />
-          ) : null}
+          ))}
 
           {canCancelOrders && order.status !== "cancelled" ? (
             <button
@@ -301,6 +379,76 @@ function OrderListRow({
   );
 }
 
+function ShipmentStatusActionPanel({ canOverride, value, onChange, onSave, pending, success, disabled, localSimulation = false }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-slate-950/30 p-4">
+      <div className={cn("grid gap-3", !localSimulation && "md:grid-cols-[minmax(0,1fr)_auto] md:items-end")}>
+        <div className="min-w-0 space-y-2">
+          <span className="block text-xs uppercase tracking-[0.18em] text-slate-500">
+            {localSimulation ? "Estado de envío local" : "Estado manual de envío"}
+          </span>
+          {localSimulation ? (
+            <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(8.5rem,1fr))]">
+              {LOCALHOST_SHIPMENT_STATUS_OPTIONS.map((option) => {
+                const selected = option.value === value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => onChange(option.value)}
+                    disabled={disabled || !canOverride}
+                    className={cn(
+                      "min-h-14 min-w-0 rounded-2xl border px-4 py-3 text-center text-sm font-semibold leading-tight break-words transition disabled:opacity-60",
+                      selected
+                        ? "border-amber-400 bg-amber-400/15 text-amber-200"
+                        : "border-white/10 bg-slate-950/70 text-slate-200 hover:bg-white/[0.06]"
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <select
+              value={value}
+              onChange={(event) => onChange(event.target.value)}
+              disabled={disabled || !canOverride}
+              className="h-11 w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm font-semibold text-white outline-none transition focus:border-amber-400 disabled:opacity-60"
+            >
+              {MANUAL_SHIPMENT_STATUS_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        <ActionStatusButton
+          onClick={onSave}
+          pending={pending}
+          success={success}
+          disabled={disabled || !canOverride}
+          idleLabel="Actualizar envío"
+          pendingLabel="Actualizando..."
+          successLabel="Envío actualizado"
+          className={cn("border border-white/10 hover:bg-white/[0.06]", localSimulation && "w-full")}
+        >
+        </ActionStatusButton>
+      </div>
+
+      <p className="mt-2 text-xs text-slate-400">
+        {localSimulation
+          ? (canOverride
+              ? "Simulación local controlada. Actualiza solo el estado de envío usado en localhost."
+              : "Disponible solo para pedidos con envío en la simulación local.")
+          : (canOverride
+              ? "Fallback manual. El webhook y el polling de Envia siguen siendo la fuente automática del tracking real."
+              : "Disponible cuando el pedido tenga tracking cargado o un shipment creado.")}
+      </p>
+    </div>
+  );
+}
+
 function OrderDrawer({
   order,
   onClose,
@@ -309,13 +457,28 @@ function OrderDrawer({
   updatingOrderId,
   completedOrderActionKey,
   onStatusChange,
+  shippingDraft,
+  onShippingDraftChange,
+  onShippingSave,
+  savingShipping,
+  shippingSaved,
+  shipmentStatusDraft,
+  onShipmentStatusDraftChange,
+  onShipmentStatusSave,
+  savingShipmentStatus,
+  shipmentStatusSaved,
+  localSimulation,
 }) {
   if (!order) {
     return null;
   }
 
   const isBusy = updatingOrderId === order.id;
+  const trackingCode = resolveOrderTrackingCode(order);
   const isActionCompleted = (status) => completedOrderActionKey === `${order.id}:${status}`;
+  const shippingFormDisabled = isBusy || savingShipping || savingShipmentStatus;
+  const canOverrideShipmentStatus = localSimulation ? true : hasShipmentStatusSource(order);
+  const quickActions = getOrderQuickActions(order, canCancelOrders);
 
   return (
     <>
@@ -354,11 +517,11 @@ function OrderDrawer({
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <StatusBadge status={order.status} />
                 <span className="rounded-full border border-white/10 px-3 py-1 text-xs font-semibold text-slate-300">
-                  {currency(order.total)}
+                  {currency(order.total, order.currency || "ARS")}
                 </span>
               </div>
               <p className="mt-3 text-sm text-slate-400">{order.shipping_label || "Envío"} · {order.shipping_zone || "Zona sin definir"}</p>
-              {order.tracking_code ? <p className="mt-1 text-sm text-slate-500">Tracking: {order.tracking_code}</p> : null}
+              <p className="mt-1 text-sm text-slate-500">Tracking: {trackingCode || "-"}</p>
             </div>
           </div>
 
@@ -376,26 +539,19 @@ function OrderDrawer({
             </div>
 
             <div className="mt-4 grid gap-2 sm:grid-cols-2">
-              <ActionStatusButton
-                onClick={() => onStatusChange(order.id, "paid")}
-                disabled={isBusy || order.status !== "pending_payment"}
-                pending={isBusy}
-                success={isActionCompleted("paid")}
-                idleLabel="Marcar pagado"
-                pendingLabel="Actualizando..."
-                successLabel="Pago confirmado"
-                className="bg-sky-500 text-slate-950 hover:bg-sky-400"
-              />
-              <ActionStatusButton
-                onClick={() => onStatusChange(order.id, "shipped")}
-                disabled={isBusy || order.status !== "paid"}
-                pending={isBusy}
-                success={isActionCompleted("shipped")}
-                idleLabel="Marcar enviado"
-                pendingLabel="Actualizando..."
-                successLabel="Enviado"
-                className="bg-emerald-500 text-slate-950 hover:bg-emerald-400"
-              />
+              {quickActions.map((action) => (
+                <ActionStatusButton
+                  key={action.status}
+                  onClick={() => onStatusChange(order.id, action.status)}
+                  disabled={isBusy}
+                  pending={isBusy}
+                  success={isActionCompleted(action.status)}
+                  idleLabel={action.idleLabel}
+                  pendingLabel="Actualizando..."
+                  successLabel={action.successLabel}
+                  className={action.className}
+                />
+              ))}
               {canCancelOrders ? (
                 <button
                   type="button"
@@ -412,10 +568,65 @@ function OrderDrawer({
             </div>
           </div>
 
+          {order.is_shipping_order ? (
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Tracking y envío</p>
+              <div className="mt-4 space-y-3">
+                <select
+                  value={shippingDraft.carrier}
+                  onChange={(event) => onShippingDraftChange("carrier", event.target.value)}
+                  disabled={shippingFormDisabled}
+                  className="h-11 w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition focus:border-amber-400 disabled:opacity-60"
+                >
+                  <option value="">Carrier sin definir</option>
+                  <option value="correo-argentino">Correo Argentino</option>
+                  <option value="andreani">Andreani</option>
+                </select>
+                <input
+                  value={shippingDraft.tracking_code}
+                  onChange={(event) => onShippingDraftChange("tracking_code", event.target.value)}
+                  disabled={shippingFormDisabled}
+                  placeholder="Código de seguimiento"
+                  className="h-11 w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 text-sm text-white outline-none transition focus:border-amber-400 disabled:opacity-60"
+                />
+                <label className="flex items-center gap-2 text-xs text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={shippingDraft.tracking_visible_to_user}
+                    onChange={(event) => onShippingDraftChange("tracking_visible_to_user", event.target.checked)}
+                    disabled={shippingFormDisabled}
+                  />
+                  Mostrar tracking al usuario
+                </label>
+                <ActionStatusButton
+                  onClick={() => onShippingSave?.(order.id, shippingDraft)}
+                  pending={savingShipping}
+                  success={shippingSaved}
+                  disabled={shippingFormDisabled}
+                  idleLabel="Guardar tracking"
+                  pendingLabel="Guardando tracking..."
+                  successLabel="Tracking guardado"
+                  className="border border-white/10 hover:bg-white/[0.06]"
+                >
+                </ActionStatusButton>
+                <ShipmentStatusActionPanel
+                  canOverride={canOverrideShipmentStatus}
+                  value={shipmentStatusDraft}
+                  onChange={onShipmentStatusDraftChange}
+                  onSave={() => onShipmentStatusSave?.(order.id, shipmentStatusDraft)}
+                  pending={savingShipmentStatus}
+                  success={shipmentStatusSaved}
+                  disabled={shippingFormDisabled}
+                  localSimulation={localSimulation}
+                />
+              </div>
+            </div>
+          ) : null}
+
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
             <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Productos</p>
             <div className="mt-4 space-y-3">
-              {(order.items || []).map((item) => (
+              {getOrderItems(order).map((item) => (
                 <div key={item.id} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/30 px-3 py-3">
                   <img
                     {...getAdminCardImageProps(item.card?.image)}
@@ -424,10 +635,10 @@ function OrderDrawer({
                   />
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-semibold text-white">{item.card?.name || `Card ${item.card_id}`}</p>
-                    <p className="mt-1 text-sm text-slate-400">Cantidad: {item.quantity} · {currency(item.price)} c/u</p>
+                    <p className="mt-1 text-sm text-slate-400">Cantidad: {item.quantity} · {currency(item.price, order.currency || "ARS")} c/u</p>
                   </div>
                   <div className="text-right text-sm">
-                    <p className="font-bold text-white">{currency(item.subtotal)}</p>
+                    <p className="font-bold text-white">{currency(item.subtotal, order.currency || "ARS")}</p>
                   </div>
                 </div>
               ))}
@@ -436,7 +647,7 @@ function OrderDrawer({
 
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
             <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Entrega</p>
-            <p className="mt-3 text-sm text-slate-300">{order.shipping_address || "Sin dirección registrada"}</p>
+            <p className="mt-3 text-sm text-slate-300">{resolveOrderDestination(order)}</p>
           </div>
         </div>
       </aside>
@@ -447,6 +658,7 @@ function OrderDrawer({
 export default memo(function DashboardView({
   dashboard,
   orders = [],
+  recentOrdersData = [],
   users = [],
   cards = [],
   admin,
@@ -456,6 +668,12 @@ export default memo(function DashboardView({
   onNavigateSection,
   onNavigateSectionIntent,
   onStatusChange,
+  onShippingSave,
+  onShipmentStatusSave,
+  savingShippingOrderId,
+  savingShipmentStatusOrderId,
+  completedShippingOrderId,
+  completedShipmentStatusOrderId,
 }) {
   const dashboardRootRef = useRef(null);
   const persistedState = readDashboardViewState(admin?.id);
@@ -468,8 +686,11 @@ export default memo(function DashboardView({
   const [confirmState, setConfirmState] = useState(null);
   const [showActivity, setShowActivity] = useState(() => Boolean(persistedState.showActivity));
   const [insightsReady, setInsightsReady] = useState(false);
+  const [shippingDraft, setShippingDraft] = useState({ carrier: "", tracking_code: "", tracking_visible_to_user: false });
+  const [shipmentStatusDraft, setShipmentStatusDraft] = useState("created");
   const isHeaderCompact = false;
   const deferredSearch = useDeferredValue(globalSearch);
+  const localhostSimulation = isLocalhostRuntime();
 
   useEffect(() => {
     if (!canUseStorage()) {
@@ -495,9 +716,13 @@ export default memo(function DashboardView({
     return cancel;
   }, []);
 
+  const recentOrderSource = useMemo(() => (
+    recentOrdersData.length ? recentOrdersData : (dashboard?.recentOrders || [])
+  ), [dashboard?.recentOrders, recentOrdersData]);
+
   const orderSource = useMemo(() => (
-    orders.length ? orders : (dashboard?.recentOrders || [])
-  ), [dashboard?.recentOrders, orders]);
+    orders.length ? orders : recentOrderSource
+  ), [orders, recentOrderSource]);
 
   const userSource = useMemo(() => (
     users.length ? users : (dashboard?.recentUsers || [])
@@ -619,7 +844,7 @@ export default memo(function DashboardView({
   }, [dashboard?.metrics?.avgOrderValue, dashboard?.metrics?.pendingPaymentCount, dashboard?.metrics?.totalCustomers, dashboard?.metrics?.totalRevenue, filteredCards.length, filteredOrders, filteredUsers.length, hasOperationalDatasets]);
 
   const recentOrders = useMemo(
-    () => [...filteredOrders].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 8),
+    () => [...filteredOrders].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 10),
     [filteredOrders]
   );
 
@@ -654,7 +879,7 @@ export default memo(function DashboardView({
     const aggregate = new Map();
 
     for (const order of filteredOrders) {
-      for (const item of order.items || []) {
+      for (const item of getOrderItems(order)) {
         const sourceCard = item.card || cardsById.get(item.card_id) || {};
         const current = aggregate.get(item.card_id) || {
           id: item.card_id,
@@ -702,18 +927,45 @@ export default memo(function DashboardView({
 
   const selectedOrderRef = useRef(null);
   const selectedOrder = useMemo(() => {
-    const found = orderSource.find((order) => order.id === selectedOrderId) || null;
+    const found = orderSource.find((order) => order.id === selectedOrderId)
+      || recentOrderSource.find((order) => order.id === selectedOrderId)
+      || null;
     if (found) {
       selectedOrderRef.current = found;
     }
     return found || (selectedOrderId ? selectedOrderRef.current : null);
-  }, [orderSource, selectedOrderId]);
+  }, [orderSource, recentOrderSource, selectedOrderId]);
 
   useEffect(() => {
     if (!selectedOrderId) {
       selectedOrderRef.current = null;
     }
   }, [selectedOrderId]);
+
+  useEffect(() => {
+    if (!selectedOrder) {
+      setShippingDraft({ carrier: "", tracking_code: "", tracking_visible_to_user: false });
+      setShipmentStatusDraft("created");
+      return;
+    }
+
+    setShippingDraft({
+      carrier: selectedOrder.carrier || "",
+      tracking_code: resolveOrderTrackingCode(selectedOrder),
+      tracking_visible_to_user: Boolean(selectedOrder.tracking_visible_to_user),
+    });
+    setShipmentStatusDraft(resolveEditableShipmentStatus(selectedOrder));
+  }, [selectedOrder]);
+
+  const updateShippingDraft = (field, value) => {
+    setShippingDraft((current) => ({
+      carrier: current?.carrier ?? "",
+      tracking_code: current?.tracking_code ?? "",
+      tracking_visible_to_user: current?.tracking_visible_to_user ?? false,
+      ...current,
+      [field]: value,
+    }));
+  };
 
   const visibleAlerts = {
     low_stock: lowStockCards,
@@ -1050,6 +1302,17 @@ export default memo(function DashboardView({
         updatingOrderId={updatingOrderId}
         completedOrderActionKey={completedOrderActionKey}
         onStatusChange={onStatusChange}
+        shippingDraft={shippingDraft}
+        onShippingDraftChange={updateShippingDraft}
+        onShippingSave={onShippingSave}
+        savingShipping={savingShippingOrderId === selectedOrder?.id}
+        shippingSaved={completedShippingOrderId === selectedOrder?.id}
+        shipmentStatusDraft={shipmentStatusDraft}
+        onShipmentStatusDraftChange={setShipmentStatusDraft}
+        onShipmentStatusSave={onShipmentStatusSave}
+        savingShipmentStatus={savingShipmentStatusOrderId === selectedOrder?.id}
+        shipmentStatusSaved={completedShipmentStatusOrderId === selectedOrder?.id}
+        localSimulation={localhostSimulation}
       />
 
       <ConfirmActionDialog

@@ -125,7 +125,7 @@ export default function AuthPage() {
     }
 
     if (typeof window !== "undefined" && ["localhost", "127.0.0.1"].includes(window.location.hostname)) {
-      return `${window.location.protocol}//${window.location.hostname}:${runtime?.admin_port || 5174}`;
+      return `${window.location.protocol}//${window.location.hostname}:${runtime?.admin_port || 5198}`;
     }
 
     return "https://duelvault-admin.vercel.app";

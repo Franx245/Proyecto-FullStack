@@ -1,4 +1,5 @@
 import prismaPkg from "@prisma/client";
+import { shippingMode } from "../../../config/env.js";
 
 import { invalidatePublicCatalogCache } from "../cache.js";
 import { invalidateOrderRelatedCache } from "../cache-invalidation.js";
@@ -242,14 +243,7 @@ function publishShipmentOrderUpdate(order) {
     return;
   }
 
-  publishEvent("admin", {
-    type: "order-update",
-    orderId: order.id,
-    status: order.status,
-    shipmentStatus: order.shipmentStatus || null,
-  });
-  publishEvent("public", {
-    type: "order-update",
+  publishEvent("order-update", {
     orderId: order.id,
     status: order.status,
     shipmentStatus: order.shipmentStatus || null,
@@ -282,12 +276,14 @@ function buildEnviaShipmentPayloadLog(order, { carrier, service }) {
 
 async function createShipment({ order, carrier = null, service = null, isSandbox = false }) {
   const resolvedCarrier = normalizeCheckoutCarrier(carrier || order?.carrier) || normalizeEnviaCarrier(carrier || order?.carrier) || "andreani";
+  const useFallbackShipment = isSandbox || shippingMode === "fallback";
 
-  if (isSandbox) {
+  if (useFallbackShipment) {
     logEvent("ENVIACOM_REQUEST", "Creating sandbox shipment", {
       orderId: order?.id || null,
       carrier: resolvedCarrier,
       service: service || null,
+      shippingMode,
     });
 
     const fakeShipment = {

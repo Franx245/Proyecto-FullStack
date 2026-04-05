@@ -145,6 +145,18 @@ export async function createMercadoPagoBrowserClient(publicKey) {
   return new MercadoPago(publicKey, { locale: "es-AR" });
 }
 
+/**
+ * @param {*} mercadoPagoClient
+ * @param {*} settings
+ */
+export function createMercadoPagoCardForm(mercadoPagoClient, settings) {
+  if (!mercadoPagoClient || typeof mercadoPagoClient.cardForm !== "function") {
+    throw new Error("Mercado Pago CardForm no esta disponible en esta sesion.");
+  }
+
+  return mercadoPagoClient.cardForm(settings);
+}
+
 /** @param {*} mercadoPagoClient */
 export function createMercadoPagoBrickBuilder(mercadoPagoClient) {
   return mercadoPagoClient.bricks({ theme: "dark" });

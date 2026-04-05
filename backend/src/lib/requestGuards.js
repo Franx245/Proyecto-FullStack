@@ -106,12 +106,13 @@ export function createRateLimitMiddleware({
   message,
   code = "RATE_LIMIT_EXCEEDED",
   buildKey,
+  useMemoryOnly = false,
 }) {
   return async function rateLimitMiddleware(req, res, next) {
     try {
       const identifier = buildKeyPart(buildKey ? buildKey(req) : `${req.method}:${req.path}:${getRequestIp(req)}`);
       const key = `${buildKeyPart(keyPrefix)}:${identifier}`;
-      const bucket = isRedisEnabled()
+      const bucket = !useMemoryOnly && isRedisEnabled()
         ? await incrementRedisBucket(key, windowMs)
         : incrementFallbackBucket(key, windowMs);
 
