@@ -31,6 +31,7 @@ export default function MobileFilters({
   onFilterChange,
   onClearFilters,
   sets,
+  isPending = false,
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [draftFilters, setDraftFilters] = useState(filters);
@@ -41,6 +42,7 @@ export default function MobileFilters({
     filters.conditions?.length ||
     filters.sets?.length ||
     filters.priceRange;
+  const hasDraftChanges = JSON.stringify(draftFilters) !== JSON.stringify(filters);
 
   const close = useCallback(() => setIsOpen(false), []);
 
@@ -86,10 +88,10 @@ export default function MobileFilters({
       {/* 🔘 BUTTON */}
       <button
         onClick={() => setIsOpen(true)}
-        className="flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-secondary px-3 py-2.5 text-sm transition hover:bg-secondary/80 min-[420px]:w-auto lg:hidden"
+        className={`flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold transition-all duration-200 ease-out active:scale-[0.98] min-[420px]:w-auto lg:hidden ${isPending ? "catalog-feedback-pill border-emerald-300/18 bg-emerald-300/10 text-emerald-100 shadow-[0_14px_28px_rgba(16,185,129,0.08)]" : "border-border bg-secondary hover:-translate-y-0.5 hover:bg-secondary/80"}`}
       >
         <SlidersHorizontal className="w-4 h-4" />
-        Filtros
+        {isPending ? "Filtros activos" : "Filtros"}
         {hasFilters ? (
           <span className="w-2 h-2 rounded-full bg-primary" />
         ) : null}
@@ -134,6 +136,7 @@ export default function MobileFilters({
                   onFilterChange={handleChange}
                   onClearFilters={handleClear}
                   sets={sets}
+                  isPending={isPending}
                 />
               </div>
 
@@ -141,15 +144,15 @@ export default function MobileFilters({
               <div className="flex gap-3 p-4 border-t border-border">
                 <button
                   onClick={handleResetAndApply}
-                  className="h-10 rounded-lg border border-border px-4 text-sm font-semibold"
+                  className="h-10 rounded-lg border border-border px-4 text-sm font-semibold transition-all duration-200 ease-out active:scale-[0.98]"
                 >
                   Limpiar
                 </button>
                 <button
                   onClick={handleApply}
-                  className="w-full h-10 rounded-lg bg-primary text-primary-foreground font-semibold text-sm"
+                  className={`w-full h-10 rounded-lg font-semibold text-sm transition-all duration-200 ease-out active:scale-[0.98] ${isPending ? "catalog-feedback-pill bg-emerald-300 text-slate-950 shadow-[0_14px_30px_rgba(16,185,129,0.22)]" : "bg-primary text-primary-foreground"}`}
                 >
-                  Aplicar filtros
+                  {isPending ? "Actualizar otra vez" : hasDraftChanges ? "Aplicar filtros" : "Listo"}
                 </button>
               </div>
             </motion.div>

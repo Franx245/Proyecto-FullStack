@@ -62,12 +62,12 @@ const Content = /** @type {any} */ (CollapsibleContent);
 function FilterSection({ title, children, defaultOpen = true }) {
   return (
     <Collapsible defaultOpen={defaultOpen}>
-      <Trigger className="flex items-center justify-between w-full py-2 text-sm font-semibold group">
+      <Trigger className="group flex w-full items-center justify-between py-2 text-sm font-semibold text-slate-200 transition hover:text-white">
         {title}
         <ChevronDown className="w-4 h-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
       </Trigger>
 
-      <Content className="space-y-1 pb-3">
+      <Content className="space-y-1.5 pb-3">
         {children}
       </Content>
     </Collapsible>
@@ -78,19 +78,22 @@ function FilterSection({ title, children, defaultOpen = true }) {
  * @param {{
  *  label: string,
  *  checked: boolean,
- *  onChange: () => void
+ *  onChange: () => void,
+ *  disabled?: boolean
  * }} props
  */
-function Checkbox({ label, checked, onChange }) {
+function Checkbox({ label, checked, onChange, disabled = false }) {
   return (
-    <label className="flex items-center gap-2 py-1 px-1 rounded-md hover:bg-secondary/50 cursor-pointer text-sm transition">
+    <label className={`group flex items-center gap-2 rounded-xl border px-2.5 py-2 text-sm transition-all duration-200 ease-out ${checked ? "border-emerald-400/25 bg-emerald-400/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_10px_26px_rgba(16,185,129,0.08)]" : "border-transparent hover:border-white/10 hover:bg-secondary/60"} ${disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer active:scale-[0.99]"}` } data-state={checked ? "checked" : "unchecked"}>
       <input
         type="checkbox"
         checked={checked}
         onChange={onChange}
+        disabled={disabled}
         className="w-3.5 h-3.5 accent-primary"
       />
-      <span className="text-muted-foreground flex-1">{label}</span>
+      <span className={`flex-1 transition-colors ${checked ? "text-emerald-50" : "text-muted-foreground group-hover:text-foreground"}`}>{label}</span>
+      <span className={`h-2 w-2 shrink-0 rounded-full transition-opacity ${checked ? "bg-emerald-300 opacity-100 shadow-[0_0_12px_rgba(110,231,183,0.7)]" : "opacity-0"}`} />
     </label>
   );
 }
@@ -109,6 +112,7 @@ export default function FiltersSidebar({
   onFilterChange,
   onClearFilters,
   sets = [],
+  isPending = false,
 }) {
 
   const hasFilters = useMemo(() => {
@@ -119,6 +123,14 @@ export default function FiltersSidebar({
       filters.sets.length ||
       filters.priceRange
     );
+  }, [filters]);
+
+  const activeFiltersCount = useMemo(() => {
+    return filters.rarities.length
+      + filters.cardTypes.length
+      + filters.conditions.length
+      + filters.sets.length
+      + (filters.priceRange ? 1 : 0);
   }, [filters]);
 
   const toggleArray = useCallback(
@@ -156,23 +168,36 @@ export default function FiltersSidebar({
   );
 
   return (
-    <aside className="sticky top-24 space-y-2 rounded-3xl border border-border bg-card/70 p-4 shadow-[0_20px_45px_rgba(0,0,0,0.18)]">
+    <aside className="sticky top-24 space-y-2 rounded-[1.8rem] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.015))] p-4 shadow-[0_20px_45px_rgba(0,0,0,0.18)] backdrop-blur-xl" aria-busy={isPending} data-nav-pending={isPending ? "true" : "false"}>
 
       {/* HEADER */}
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-muted-foreground">
+      <div className="mb-4 space-y-3">
+        <h2 className="flex shrink-0 items-center gap-2 text-sm font-bold uppercase tracking-wider text-muted-foreground">
           <Filter className="w-4 h-4" />
           Filtros
         </h2>
 
-        {hasFilters && (
-          <button
-            onClick={onClearFilters}
-            className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary transition hover:bg-primary/15"
-          >
-            Limpiar
-          </button>
-        )}
+        <div className="flex min-h-8 items-center gap-2">
+          {isPending ? (
+            <div className="catalog-feedback-pill inline-flex min-w-[7.5rem] shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full border border-emerald-300/18 bg-emerald-300/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-100">
+              <span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_12px_rgba(110,231,183,0.65)]" />
+              Aplicando
+            </div>
+          ) : hasFilters ? (
+            <span className="inline-flex min-w-[7.5rem] shrink-0 items-center justify-center whitespace-nowrap rounded-full border border-white/8 bg-white/[0.04] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-300">
+              {activeFiltersCount} activos
+            </span>
+          ) : null}
+
+          {hasFilters && (
+            <button
+              onClick={onClearFilters}
+              className="shrink-0 whitespace-nowrap rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-primary/15"
+            >
+              Limpiar
+            </button>
+          )}
+        </div>
       </div>
 
       {/* PRECIO */}
