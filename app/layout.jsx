@@ -1,5 +1,6 @@
 import { Rajdhani, Space_Grotesk } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 
 import "../src/index.css";
 import "../src/critical.css";
@@ -52,6 +53,7 @@ export default function RootLayout(/** @type {{ children: import('react').ReactN
           <StorefrontShell>{children}</StorefrontShell>
         </Providers>
         <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );
