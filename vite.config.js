@@ -24,30 +24,6 @@ function createModulePreloadMarkup(bundle, moduleIds) {
     .join("");
 }
 
-function createCleanupServiceWorkerSource(cachePrefixes) {
-  return `const CACHE_PREFIXES = ${JSON.stringify(cachePrefixes)};
-
-self.addEventListener("install", () => {
-  self.skipWaiting();
-});
-
-self.addEventListener("activate", (event) => {
-  event.waitUntil((async () => {
-    const keys = await caches.keys();
-    await Promise.all(
-      keys
-        .filter((key) => CACHE_PREFIXES.some((prefix) => key.startsWith(prefix)))
-        .map((key) => caches.delete(key))
-    );
-
-    const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-    await self.registration.unregister();
-    await Promise.all(clients.map((client) => client.navigate(client.url).catch(() => undefined)));
-  })());
-});
-`;
-}
-
 function inlineMainStylesheet() {
   const criticalCssPath = path.resolve(__dirname, "./src/critical.css");
 
@@ -81,11 +57,6 @@ function inlineMainStylesheet() {
         new RegExp(`<link rel="stylesheet" crossorigin href="${escapedStylesheetHref}">`),
         deferredStylesheet
       );
-      bundle["sw.js"] = {
-        type: "asset",
-        fileName: "sw.js",
-        source: createCleanupServiceWorkerSource(["duelvault-shell"]),
-      };
     },
   };
 }

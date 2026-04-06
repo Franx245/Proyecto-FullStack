@@ -4,33 +4,9 @@ import react from "@vitejs/plugin-react";
 const LOCAL_API_ORIGIN = "http://127.0.0.1:3311";
 const ADMIN_PORT = 5198;
 
-function createCleanupServiceWorkerSource(cachePrefixes) {
-  return `const CACHE_PREFIXES = ${JSON.stringify(cachePrefixes)};
-
-self.addEventListener("install", () => {
-  self.skipWaiting();
-});
-
-self.addEventListener("activate", (event) => {
-  event.waitUntil((async () => {
-    const keys = await caches.keys();
-    await Promise.all(
-      keys
-        .filter((key) => CACHE_PREFIXES.some((prefix) => key.startsWith(prefix)))
-        .map((key) => caches.delete(key))
-    );
-
-    const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-    await self.registration.unregister();
-    await Promise.all(clients.map((client) => client.navigate(client.url).catch(() => undefined)));
-  })());
-});
-`;
-}
-
-function adminPreloadAndSw() {
+function adminPreloadStyles() {
   return {
-    name: "admin-preload-and-sw",
+    name: "admin-preload-styles",
     apply: "build",
     enforce: "post",
     generateBundle(_, bundle) {
@@ -55,18 +31,13 @@ function adminPreloadAndSw() {
         /\s*<link rel="modulepreload" crossorigin href="\/assets\/InventoryView-[^"]+\.js">/g,
         ""
       );
-      bundle["sw.js"] = {
-        type: "asset",
-        fileName: "sw.js",
-        source: createCleanupServiceWorkerSource(["duelvault-admin-shell"]),
-      };
     },
   };
 }
 
 export default defineConfig({
   envDir: ".",
-  plugins: [react(), adminPreloadAndSw()],
+  plugins: [react(), adminPreloadStyles()],
   server: {
     host: "127.0.0.1",
     port: ADMIN_PORT,

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { Suspense, startTransition, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { LogOut, Mail, MapPin, Menu, Phone, Search, ShoppingCart, Sparkles, X } from "lucide-react";
 
@@ -13,7 +13,6 @@ import { readLastCatalogHref } from "@/lib/catalog-url-state";
 import { useCart } from "@/lib/cartStore";
 import { retainPreviousData } from "@/lib/query-client";
 import NextCartDrawer from "@/next/components/NextCartDrawer.jsx";
-import useCatalogPrefetch from "@/next/hooks/useCatalogPrefetch";
 import { isExternalHref } from "@/next/storefront-links";
 
 /**
@@ -47,20 +46,22 @@ function formatPhoneDisplay(value) {
  *   className: string,
  *   onClick?: import("react").MouseEventHandler<HTMLAnchorElement>,
  *   onMouseEnter?: import("react").MouseEventHandler<HTMLAnchorElement>,
- *   onFocus?: import("react").FocusEventHandler<HTMLAnchorElement>
+ *   onMouseLeave?: import("react").MouseEventHandler<HTMLAnchorElement>,
+ *   onFocus?: import("react").FocusEventHandler<HTMLAnchorElement>,
+ *   onBlur?: import("react").FocusEventHandler<HTMLAnchorElement>
  * }} props
  */
-function NavAnchor({ href, children, className, onClick, onMouseEnter, onFocus }) {
+function NavAnchor({ href, children, className, onClick, onMouseEnter, onMouseLeave, onFocus, onBlur }) {
   if (isExternalHref(href)) {
     return (
-      <a href={href} className={className} onClick={onClick} onMouseEnter={onMouseEnter} onFocus={onFocus}>
+      <a href={href} className={className} onClick={onClick} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} onFocus={onFocus} onBlur={onBlur}>
         {children}
       </a>
     );
   }
 
   return (
-    <Link href={href} className={className} onClick={onClick} onMouseEnter={onMouseEnter} onFocus={onFocus}>
+    <Link href={href} className={className} onClick={onClick} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} onFocus={onFocus} onBlur={onBlur}>
       {children}
     </Link>
   );
@@ -92,7 +93,6 @@ function SearchParamsBridge({ pathname, onResolve }) {
  */
 export default function StorefrontShell({ children }) {
   const router = useRouter();
-  const prefetchCatalog = useCatalogPrefetch();
   const pathname = usePathname();
   const { user, isAuthenticated, isBootstrapping, logout } = useAuth();
   const { totalItems } = useCart();
@@ -117,6 +117,7 @@ export default function StorefrontShell({ children }) {
   const cartButtonLabel = totalItems > 0
     ? `Abrir carrito con ${totalItems} producto${totalItems === 1 ? "" : "s"}`
     : "Abrir carrito";
+  const prefetchTimersRef = useRef(new Map());
 
   const handleResolveCatalogLocation = useCallback(
     /** @type {(nextState: { currentSearch: string, catalogHref: string }) => void} */
@@ -152,6 +153,64 @@ export default function StorefrontShell({ children }) {
   useEffect(() => {
     setSearchQuery(currentSearch);
   }, [currentSearch]);
+
+  const clearPrefetch = useCallback((href) => {
+    const timeoutId = prefetchTimersRef.current.get(href);
+    if (!timeoutId || typeof window === "undefined") {
+      return;
+    }
+
+    window.clearTimeout(timeoutId);
+    prefetchTimersRef.current.delete(href);
+  }, []);
+
+  useEffect(() => () => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    for (const timeoutId of prefetchTimersRef.current.values()) {
+      window.clearTimeout(timeoutId);
+    }
+
+    prefetchTimersRef.current.clear();
+  }, []);
+
+  const schedulePrefetch = useCallback((href) => {
+    if (isExternalHref(href)) {
+      return;
+    }
+
+    clearPrefetch(href);
+
+    if (typeof window === "undefined") {
+      router.prefetch(href);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      prefetchTimersRef.current.delete(href);
+      router.prefetch(href);
+    }, 60);
+
+    prefetchTimersRef.current.set(href, timeoutId);
+  }, [clearPrefetch, router]);
+
+  const prefetchNow = useCallback((href) => {
+    if (isExternalHref(href)) {
+      return;
+    }
+
+    clearPrefetch(href);
+    router.prefetch(href);
+  }, [clearPrefetch, router]);
+
+  const getPrefetchHandlers = useCallback((href) => ({
+    onMouseEnter: () => schedulePrefetch(href),
+    onMouseLeave: () => clearPrefetch(href),
+    onFocus: () => prefetchNow(href),
+    onBlur: () => clearPrefetch(href),
+  }), [clearPrefetch, prefetchNow, schedulePrefetch]);
 
   const navLinks = useMemo(() => ([
     { label: "Inicio", href: "/" },
@@ -250,20 +309,6 @@ export default function StorefrontShell({ children }) {
     setMobileOpen(false);
   };
 
-  /**
-   * @param {string} href
-   */
-  const handleCatalogHover = (href) => {
-    if (!href.startsWith("/singles")) {
-      if (!isExternalHref(href)) {
-        router.prefetch(href);
-      }
-      return;
-    }
-
-    void prefetchCatalog(href);
-  };
-
   const accountHref = isAuthenticated ? "/account" : "/auth?redirect=/cart";
 
   return (
@@ -299,8 +344,7 @@ export default function StorefrontShell({ children }) {
                 <NavAnchor
                   key={link.href}
                   href={link.href}
-                  onMouseEnter={() => handleCatalogHover(link.href)}
-                  onFocus={() => handleCatalogHover(link.href)}
+                  {...getPrefetchHandlers(link.href)}
                   className={`rounded-full px-4 py-2 text-sm font-medium transition duration-300 ${
                     isActive(link.href)
                       ? "bg-emerald-400/15 text-emerald-300 shadow-[inset_0_0_0_1px_rgba(74,222,128,0.22)]"
@@ -329,8 +373,7 @@ export default function StorefrontShell({ children }) {
 
             <Link
               href="/cart"
-              onMouseEnter={() => router.prefetch("/cart")}
-              onFocus={() => router.prefetch("/cart")}
+              {...getPrefetchHandlers("/cart")}
               className="relative shrink-0 rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-slate-200 transition duration-300 hover:border-emerald-400/20 hover:bg-white/[0.06] hover:text-white"
               aria-label={cartButtonLabel}
               title={cartButtonLabel}
@@ -346,7 +389,7 @@ export default function StorefrontShell({ children }) {
 
             {isAuthenticated ? (
               <div className="hidden items-center gap-2 md:flex">
-                <Link href="/account" onMouseEnter={() => router.prefetch("/account")} onFocus={() => router.prefetch("/account")} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-slate-200 transition duration-300 hover:border-emerald-400/20 hover:bg-white/[0.06] hover:text-white">
+                <Link href="/account" {...getPrefetchHandlers("/account")} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-slate-200 transition duration-300 hover:border-emerald-400/20 hover:bg-white/[0.06] hover:text-white">
                   <UserAvatar
                     src={user?.avatar_url || undefined}
                     alt={displayName}
@@ -365,7 +408,7 @@ export default function StorefrontShell({ children }) {
                 </button>
               </div>
             ) : !isBootstrapping ? (
-              <Link href="/auth?redirect=/cart" onMouseEnter={() => router.prefetch(accountHref)} onFocus={() => router.prefetch(accountHref)} className="hidden rounded-full border border-emerald-400/20 bg-gradient-to-r from-emerald-400/90 via-lime-400/80 to-emerald-300/90 px-5 py-2.5 text-sm font-semibold text-slate-950 shadow-[0_0_24px_rgba(74,222,128,0.25)] transition duration-300 hover:-translate-y-0.5 hover:shadow-[0_0_34px_rgba(74,222,128,0.35)] md:inline-flex">
+              <Link href="/auth?redirect=/cart" {...getPrefetchHandlers(accountHref)} className="hidden rounded-full border border-emerald-400/20 bg-gradient-to-r from-emerald-400/90 via-lime-400/80 to-emerald-300/90 px-5 py-2.5 text-sm font-semibold text-slate-950 shadow-[0_0_24px_rgba(74,222,128,0.25)] transition duration-300 hover:-translate-y-0.5 hover:shadow-[0_0_34px_rgba(74,222,128,0.35)] md:inline-flex">
                 Ingresar
               </Link>
             ) : null}
@@ -397,8 +440,7 @@ export default function StorefrontShell({ children }) {
                 key={link.href}
                 href={link.href}
                 onClick={() => setMobileOpen(false)}
-                onMouseEnter={() => handleCatalogHover(link.href)}
-                onFocus={() => handleCatalogHover(link.href)}
+                {...getPrefetchHandlers(link.href)}
                 className={`block rounded-2xl px-4 py-3 text-sm transition ${
                   isActive(link.href)
                     ? "bg-emerald-400/15 font-medium text-emerald-300"
@@ -410,7 +452,7 @@ export default function StorefrontShell({ children }) {
             ))}
             {isAuthenticated ? (
               <>
-                <Link href="/account" onMouseEnter={() => router.prefetch("/account")} onFocus={() => router.prefetch("/account")} onClick={() => setMobileOpen(false)} className="block rounded-2xl px-4 py-3 text-sm text-slate-300 transition hover:bg-white/[0.06] hover:text-white">
+                <Link href="/account" {...getPrefetchHandlers("/account")} onClick={() => setMobileOpen(false)} className="block rounded-2xl px-4 py-3 text-sm text-slate-300 transition hover:bg-white/[0.06] hover:text-white">
                   Mi cuenta
                 </Link>
                 <button
@@ -421,7 +463,7 @@ export default function StorefrontShell({ children }) {
                 </button>
               </>
             ) : !isBootstrapping ? (
-              <Link href="/auth?redirect=/cart" onMouseEnter={() => router.prefetch(accountHref)} onFocus={() => router.prefetch(accountHref)} className="block rounded-2xl bg-gradient-to-r from-emerald-400/90 to-lime-400/80 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:opacity-95">
+              <Link href="/auth?redirect=/cart" {...getPrefetchHandlers(accountHref)} className="block rounded-2xl bg-gradient-to-r from-emerald-400/90 to-lime-400/80 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:opacity-95">
                 Ingresar / registrarme
               </Link>
             ) : null}
@@ -461,8 +503,7 @@ export default function StorefrontShell({ children }) {
                     <NavAnchor
                       key={link.href + link.label}
                       href={link.href}
-                      onMouseEnter={() => handleCatalogHover(link.href)}
-                      onFocus={() => handleCatalogHover(link.href)}
+                      {...getPrefetchHandlers(link.href)}
                       className="transition hover:text-emerald-300"
                     >
                       {link.label}

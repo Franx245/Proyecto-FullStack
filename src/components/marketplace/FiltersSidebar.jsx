@@ -100,7 +100,8 @@ function Checkbox({ label, checked, onChange }) {
  *  filters: Filters,
  *  onFilterChange: (f: Filters) => void,
  *  onClearFilters: () => void,
- *  sets?: string[]
+ *  sets?: string[],
+ *  isPending?: boolean
  * }} props
  */
 export default function FiltersSidebar({

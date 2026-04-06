@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { Sparkles } from "lucide-react";
 
 import { fetchFeaturedCards } from "@/api/store";
 import CardSkeleton from "@/components/marketplace/CardSkeleton";
+import { buildCardPath } from "@/lib/seo";
 import { retainPreviousData } from "@/lib/query-client";
 import NextCardItem from "@/next/components/NextCardItem.jsx";
 
@@ -18,6 +20,7 @@ export default function NextFeaturedCards({
   showHeader = true,
   initialData = undefined,
 }) {
+  const router = useRouter();
   const stableInitialCards = useMemo(
     () => (Array.isArray(initialData) ? initialData : []),
     [initialData],
@@ -48,6 +51,24 @@ export default function NextFeaturedCards({
   const isBackgroundRefresh = hasMounted && isFetching && !isLoading && cards.length > 0;
   const hasCards = cards.length > 0;
 
+  const warmDetail = useCallback((card) => {
+    const detailPath = buildCardPath(card, card?.name);
+    if (!detailPath || detailPath === "/singles") {
+      return;
+    }
+
+    void router.prefetch(detailPath);
+  }, [router]);
+
+  const openDetail = useCallback((card) => {
+    const detailPath = buildCardPath(card, card?.name);
+    if (!detailPath || detailPath === "/singles") {
+      return;
+    }
+
+    void router.push(detailPath);
+  }, [router]);
+
   return (
     <section className="max-w-[1400px] mx-auto px-4 py-12">
       {showHeader ? (
@@ -67,7 +88,15 @@ export default function NextFeaturedCards({
           ? Array.from({ length: 5 }).map((_, index) => <CardSkeleton key={index} />)
           : hasCards
             ? cards.map((/** @type {*} */ card, /** @type {number} */ index) => (
-                <NextCardItem key={card.version_id} card={card} priorityImage={index === 0} sizes="(max-width: 639px) calc(50vw - 1.5rem), (max-width: 1023px) calc(33.3vw - 1.5rem), (max-width: 1279px) calc(25vw - 1.5rem), calc(20vw - 1.5rem)" />
+                <NextCardItem
+                  key={card.version_id}
+                  card={card}
+                  priorityImage={index === 0}
+                  sizes="(max-width: 639px) calc(50vw - 1.5rem), (max-width: 1023px) calc(33.3vw - 1.5rem), (max-width: 1279px) calc(25vw - 1.5rem), calc(20vw - 1.5rem)"
+                  showQuickAdd={false}
+                  onWarmDetail={warmDetail}
+                  onOpenDetail={openDetail}
+                />
               ))
             : (
                 <div className="col-span-full rounded-[1.5rem] border border-white/10 bg-white/[0.03] px-6 py-12 text-center backdrop-blur-xl">

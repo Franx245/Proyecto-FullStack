@@ -1,6 +1,7 @@
 "use client";
 
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { flushSync } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
@@ -64,26 +65,37 @@ export default function SinglesPage({ category, initialData }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const restoredScrollRef = useRef("");
+  const skipNextScrollRestoreRef = useRef(false);
+  const paginationPulseTimeoutRef = useRef(0);
   const [hasMounted, setHasMounted] = useState(false);
+  const [pendingCatalogState, setPendingCatalogState] = useState(null);
+  const [pendingIntent, setPendingIntent] = useState(null);
+  const [paginationPulse, setPaginationPulse] = useState(null);
+  const [isCatalogNavigationPending, startCatalogNavigation] = useTransition();
   const catalogUrlState = useMemo(() => parseCatalogSearchParams(searchParams), [searchParams]);
   const hasUrlState = useMemo(() => hasActiveCatalogState(catalogUrlState), [catalogUrlState]);
-  const searchQuery = catalogUrlState.search;
-  const filters = catalogUrlState.filters;
-  const page = catalogUrlState.page;
+  const uiCatalogState = pendingCatalogState ?? catalogUrlState;
+  const routeSearchQuery = catalogUrlState.search;
+  const routeFilters = catalogUrlState.filters;
+  const routePage = catalogUrlState.page;
+  const searchQuery = uiCatalogState.search;
+  const filters = uiCatalogState.filters;
+  const page = uiCatalogState.page;
   const currentCatalogHref = useMemo(() => buildCatalogHref(pathname, catalogUrlState), [pathname, catalogUrlState]);
+  const activeCatalogHref = useMemo(() => buildCatalogHref(pathname, uiCatalogState), [pathname, uiCatalogState]);
 
-  const debouncedSearch = useDebounce(searchQuery, CATALOG_DEBOUNCE_MS);
-  const debouncedFilters = useDebounce(filters, CATALOG_DEBOUNCE_MS);
+  const debouncedSearch = useDebounce(routeSearchQuery, CATALOG_DEBOUNCE_MS);
+  const debouncedFilters = useDebounce(routeFilters, CATALOG_DEBOUNCE_MS);
   const queryPlan = useMemo(() => buildCatalogQueryPlan({
-    page,
+    page: routePage,
     pageSize: CATALOG_PAGE_SIZE,
     search: debouncedSearch,
     category,
     filters: debouncedFilters,
-  }), [page, debouncedSearch, category, debouncedFilters]);
+  }), [routePage, debouncedSearch, category, debouncedFilters]);
   const { primaryFilter, useServerFallback, serverFilters, serverFiltersKey, cardsQueryKey } = queryPlan;
   const initialCatalogSnapshot = useMemo(() => getInitialCatalogSnapshot({
-    page,
+    page: routePage,
     pageSize: CATALOG_PAGE_SIZE,
     search: debouncedSearch,
     category,
@@ -92,15 +104,25 @@ export default function SinglesPage({ category, initialData }) {
     conditions: serverFilters.conditions,
     sets: serverFilters.sets,
     priceRange: serverFilters.priceRange ? { min: serverFilters.priceRange.min, max: serverFilters.priceRange.max ?? undefined } : undefined,
-  }), [page, debouncedSearch, category, serverFilters]);
+  }), [routePage, debouncedSearch, category, serverFilters]);
   const clientRefinesResults = useMemo(() => hasClientSideRefinements(debouncedFilters, primaryFilter, useServerFallback), [debouncedFilters, primaryFilter, useServerFallback]);
   const serverInitialCatalogData = useMemo(() => (initialData && typeof initialData === "object" ? initialData : null), [initialData]);
 
-  const isInitialView = page === 1 && !debouncedSearch && !serverFiltersKey && primaryFilter.kind === "none";
+  const isInitialView = routePage === 1 && !debouncedSearch && !serverFiltersKey && primaryFilter.kind === "none";
 
   useEffect(() => {
     setHasMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (!pendingCatalogState) {
+      return;
+    }
+
+    if (buildCatalogHref(pathname, pendingCatalogState) === currentCatalogHref) {
+      setPendingCatalogState(null);
+    }
+  }, [pendingCatalogState, pathname, currentCatalogHref]);
 
   const queryResult = useQuery({
     queryKey: cardsQueryKey,
@@ -112,7 +134,7 @@ export default function SinglesPage({ category, initialData }) {
     refetchOnReconnect: false,
     refetchOnWindowFocus: false,
     queryFn: async ({ signal }) => fetchCatalogCards({
-      page,
+      page: routePage,
       pageSize: CATALOG_PAGE_SIZE,
       search: debouncedSearch,
       category,
@@ -169,10 +191,11 @@ export default function SinglesPage({ category, initialData }) {
       return;
     }
 
-    startTransition(() => {
+    setPendingCatalogState(storedState);
+    startCatalogNavigation(() => {
       router.replace(storedHref, { scroll: false });
     });
-  }, [hasUrlState, pathname, currentCatalogHref, router]);
+  }, [hasUrlState, pathname, currentCatalogHref, router, startCatalogNavigation]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -217,6 +240,12 @@ export default function SinglesPage({ category, initialData }) {
     }
 
     restoredScrollRef.current = currentCatalogHref;
+
+    if (skipNextScrollRestoreRef.current) {
+      skipNextScrollRestoreRef.current = false;
+      return;
+    }
+
     const storedScroll = readCatalogScroll(currentCatalogHref);
 
     if (storedScroll == null) {
@@ -229,11 +258,11 @@ export default function SinglesPage({ category, initialData }) {
   }, [currentCatalogHref, isLoading, cards.length]);
 
   useEffect(() => {
-    if (!catalogData || page >= totalPages) {
+    if (!catalogData || routePage >= totalPages) {
       return;
     }
 
-    const nextPage = page + 1;
+    const nextPage = routePage + 1;
     const nextPageQueryPlan = buildCatalogQueryPlan({
       page: nextPage,
       pageSize: CATALOG_PAGE_SIZE,
@@ -261,31 +290,61 @@ export default function SinglesPage({ category, initialData }) {
         signal,
       }),
     });
-  }, [queryClient, catalogData, page, totalPages, debouncedSearch, category, debouncedFilters]);
+  }, [queryClient, catalogData, routePage, totalPages, debouncedSearch, category, debouncedFilters]);
 
-  const navigateCatalog = useCallback((/** @type {*} */ nextState, /** @type {{ replace?: boolean }} */ options = {}) => {
+  const navigateCatalog = useCallback((/** @type {*} */ nextState, /** @type {{ replace?: boolean, intent?: "filters" | "pagination" }} */ options = {}) => {
     const nextHref = buildCatalogHref(pathname, nextState);
-    const currentHref = buildCatalogHref(pathname, {
-      search: searchQuery,
-      page,
-      filters,
-    });
 
-    if (nextHref === currentHref) {
+    if (nextHref === activeCatalogHref) {
       return;
     }
 
-    startTransition(() => {
+    skipNextScrollRestoreRef.current = true;
+    setPendingCatalogState(nextState);
+    setPendingIntent(options.intent ? { kind: options.intent } : null);
+    startCatalogNavigation(() => {
       router[options.replace ? "replace" : "push"](nextHref, { scroll: false });
     });
-  }, [router, pathname, searchQuery, page, filters]);
+  }, [activeCatalogHref, pathname, router, startCatalogNavigation]);
+
+  const isResultsPending = isCatalogNavigationPending || (isFetching && !isLoading);
+  const pendingStatusLabel = isResultsPending
+    ? (pendingIntent?.kind === "pagination" ? `Cargando página ${page}...` : pendingIntent?.kind === "filters" ? "Refinando resultados..." : "Actualizando resultados...")
+    : "";
+
+  useEffect(() => {
+    if (!isResultsPending) {
+      setPendingIntent(null);
+    }
+  }, [isResultsPending]);
+
+  useEffect(() => () => {
+    if (paginationPulseTimeoutRef.current && typeof window !== "undefined") {
+      window.clearTimeout(paginationPulseTimeoutRef.current);
+    }
+  }, []);
+
+  const triggerPaginationPulse = useCallback((direction) => {
+    if (paginationPulseTimeoutRef.current && typeof window !== "undefined") {
+      window.clearTimeout(paginationPulseTimeoutRef.current);
+    }
+
+    setPaginationPulse({ direction });
+
+    if (typeof window !== "undefined") {
+      paginationPulseTimeoutRef.current = window.setTimeout(() => {
+        paginationPulseTimeoutRef.current = 0;
+        setPaginationPulse(null);
+      }, 480);
+    }
+  }, []);
 
   const handleFilterChange = useCallback((/** @type {*} */ nextFilters) => {
     navigateCatalog({
       search: searchQuery,
       page: 1,
       filters: nextFilters,
-    }, { replace: true });
+    }, { replace: true, intent: "filters" });
   }, [navigateCatalog, searchQuery]);
 
   const handleClearFilters = useCallback(() => {
@@ -293,55 +352,66 @@ export default function SinglesPage({ category, initialData }) {
       search: searchQuery,
       page: 1,
       filters: DEFAULT_FILTERS,
-    }, { replace: true });
+    }, { replace: true, intent: "filters" });
   }, [navigateCatalog, searchQuery]);
 
   const handlePreviousPage = useCallback(() => {
+    flushSync(() => {
+      triggerPaginationPulse("previous");
+    });
     navigateCatalog({
       search: searchQuery,
       page: Math.max(1, page - 1),
       filters,
-    });
-  }, [navigateCatalog, searchQuery, page, filters]);
+    }, { intent: "pagination" });
+  }, [filters, navigateCatalog, page, searchQuery, triggerPaginationPulse]);
 
   const handleNextPage = useCallback(() => {
+    flushSync(() => {
+      triggerPaginationPulse("next");
+    });
     navigateCatalog({
       search: searchQuery,
       page: Math.min(Math.max(totalPages, 1), page + 1),
       filters,
-    });
-  }, [navigateCatalog, searchQuery, page, filters, totalPages]);
+    }, { intent: "pagination" });
+  }, [filters, navigateCatalog, page, searchQuery, totalPages, triggerPaginationPulse]);
 
   return (
-    <div className="mx-auto max-w-[1400px] px-4 py-5 sm:py-6" data-critical="singles-page">
+    <div className="mx-auto max-w-[1400px] px-4 py-5 sm:py-6" data-critical="singles-page" data-nav-pending={isCatalogNavigationPending ? "true" : "false"}>
         <div className="mb-5 flex flex-col gap-3 min-[420px]:mb-6 min-[420px]:flex-row min-[420px]:items-start min-[420px]:justify-between">
           <div className="min-w-0">
             <h1 className="text-2xl font-black tracking-tight sm:text-3xl">{category || "Cartas"}</h1>
             <p className="mt-1 text-sm leading-6 text-muted-foreground">
               {debouncedSearch ? `Resultados para "${debouncedSearch}" · ${resultsLabel}` : resultsLabel}
             </p>
-            {isFetching && !isLoading ? <p className="mt-1 text-xs font-medium text-emerald-300">Actualizando resultados...</p> : null}
+            <div className="mt-2 h-9">
+              <div className={`catalog-feedback-pill inline-flex h-full w-fit items-center gap-2 rounded-full border border-emerald-300/18 bg-emerald-300/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-100 transition-opacity duration-150 ${isResultsPending ? "opacity-100" : "pointer-events-none opacity-0"}`} aria-hidden={!isResultsPending}>
+                <span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_14px_rgba(110,231,183,0.65)]" />
+                {pendingStatusLabel || "Actualizando resultados..."}
+              </div>
+            </div>
           </div>
 
-          <MobileFilters filters={filters} onFilterChange={handleFilterChange} onClearFilters={handleClearFilters} sets={availableSets} />
+          <MobileFilters filters={filters} onFilterChange={handleFilterChange} onClearFilters={handleClearFilters} sets={availableSets} isPending={isResultsPending} />
         </div>
 
         <div className="flex gap-6">
           <div className="hidden w-64 shrink-0 lg:block">
-            <FiltersSidebar filters={filters} onFilterChange={handleFilterChange} onClearFilters={handleClearFilters} sets={availableSets} />
+            <FiltersSidebar filters={filters} onFilterChange={handleFilterChange} onClearFilters={handleClearFilters} sets={availableSets} isPending={isResultsPending} />
           </div>
 
           <div className="flex-1">
-            <NextCardGrid cards={cards} isLoading={isLoading} isLoadingMore={isFetching && !isLoading} />
+            <NextCardGrid cards={cards} isLoading={isLoading} isLoadingMore={isFetching && !isLoading} isPending={isResultsPending} pendingIntent={pendingIntent?.kind ?? null} pendingLabel={pendingStatusLabel} />
 
             <div className="mt-6 flex items-center justify-center gap-2 sm:mt-8">
-              <button onClick={handlePreviousPage} disabled={page === 1} className="rounded-xl border border-border bg-card px-4 py-2 text-sm text-foreground transition hover:border-primary/35 disabled:opacity-40">
+              <button onClick={handlePreviousPage} disabled={page === 1} className={`rounded-xl border px-4 py-2 text-sm font-semibold transition-all duration-200 ease-out active:scale-[0.98] disabled:opacity-40 ${pendingIntent?.kind === "pagination" || paginationPulse?.direction === "previous" ? "catalog-feedback-pill border-amber-300/20 bg-amber-300/10 text-amber-100 shadow-[0_12px_28px_rgba(251,191,36,0.08)]" : "border-border bg-card text-foreground hover:-translate-y-0.5 hover:border-primary/35 hover:shadow-[0_12px_28px_rgba(16,185,129,0.08)]"}`} data-critical="catalog-previous-page" data-feedback-active={paginationPulse?.direction === "previous" ? "true" : "false"}>
                 Anterior
               </button>
-              <div className="rounded-xl border border-border bg-card px-4 py-2 text-sm text-muted-foreground">
+              <div className={`rounded-xl border px-4 py-2 text-sm transition-all duration-200 ease-out ${pendingIntent?.kind === "pagination" && isResultsPending ? "catalog-feedback-pill border-amber-300/18 bg-amber-300/10 font-semibold text-amber-100" : paginationPulse ? "catalog-feedback-pill border-emerald-300/16 bg-emerald-300/10 font-semibold text-emerald-100" : "border-border bg-card text-muted-foreground"}`} data-critical="catalog-page-label" data-feedback-active={paginationPulse ? "true" : "false"}>
                 Página {page} de {Math.max(totalPages, 1)}
               </div>
-              <button onClick={handleNextPage} disabled={page >= totalPages} className="rounded-xl border border-border bg-card px-4 py-2 text-sm text-foreground transition hover:border-primary/35 disabled:opacity-40">
+              <button onClick={handleNextPage} disabled={page >= totalPages} className={`rounded-xl border px-4 py-2 text-sm font-semibold transition-all duration-200 ease-out active:scale-[0.98] disabled:opacity-40 ${pendingIntent?.kind === "pagination" || paginationPulse?.direction === "next" ? "catalog-feedback-pill border-amber-300/20 bg-amber-300/10 text-amber-100 shadow-[0_12px_28px_rgba(251,191,36,0.08)]" : "border-border bg-card text-foreground hover:-translate-y-0.5 hover:border-primary/35 hover:shadow-[0_12px_28px_rgba(16,185,129,0.08)]"}`} data-critical="catalog-next-page" data-feedback-active={paginationPulse?.direction === "next" ? "true" : "false"}>
                 Siguiente
               </button>
             </div>

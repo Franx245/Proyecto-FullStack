@@ -5,7 +5,7 @@ import { buildCardJsonLd, buildCardPath, extractCardIdFromRouteSegment } from "@
 import CardNotFoundState from "@/next/components/CardNotFoundState.jsx";
 import CardDetailPage from "@/next/pages/CardDetailPage.jsx";
 
-export const revalidate = 600;
+export const revalidate = 60;
 
 const getCardDetail = cache(async (/** @type {string} */ id) => fetchCardDetail(id));
 

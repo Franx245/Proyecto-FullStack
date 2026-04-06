@@ -22,7 +22,8 @@ import FiltersSidebar from "./FiltersSidebar";
  *  filters: Filters,
  *  onFilterChange: (filters: Filters) => void,
  *  onClearFilters: () => void,
- *  sets?: string[]
+ *  sets?: string[],
+ *  isPending?: boolean
  * }} props
  */
 export default function MobileFilters({

@@ -1,10 +1,10 @@
+export const dynamic = "force-dynamic";
+
 import { Suspense } from "react";
 
 import { CATALOG_PAGE_SIZE, fetchCatalogCards } from "@/api/store";
 import { parseCatalogSearchParams } from "@/lib/catalog-url-state";
 import SinglesPage from "@/next/pages/SinglesPage.jsx";
-
-export const dynamic = "force-dynamic";
 
 export const metadata = {
   title: "Catálogo de Singles",

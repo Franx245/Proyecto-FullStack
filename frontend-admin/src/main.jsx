@@ -7,33 +7,7 @@ import "./index.css";
 
 const DYNAMIC_IMPORT_RELOAD_KEY = "duelvault_admin_dynamic_import_reload";
 
-async function cleanupLegacyAdminShell() {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  if ("serviceWorker" in navigator) {
-    try {
-      const registrations = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(registrations.map((registration) => registration.unregister()));
-    } catch {}
-  }
-
-  if ("caches" in window) {
-    try {
-      const cacheKeys = await window.caches.keys();
-      await Promise.all(
-        cacheKeys
-          .filter((key) => key.startsWith("duelvault-admin-shell"))
-          .map((key) => window.caches.delete(key))
-      );
-    } catch {}
-  }
-}
-
 if (typeof window !== "undefined") {
-  void cleanupLegacyAdminShell();
-
   window.addEventListener("error", (event) => {
     recordAdminError(event.error || new Error(event.message || "Unhandled runtime error"), {
       source: "window-error",
@@ -60,9 +34,7 @@ if (typeof window !== "undefined") {
     window.sessionStorage.setItem(DYNAMIC_IMPORT_RELOAD_KEY, "1");
     event.preventDefault();
 
-    void cleanupLegacyAdminShell().finally(() => {
-      window.location.reload();
-    });
+    window.location.reload();
   });
 
   window.addEventListener("online", () => {

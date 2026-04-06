@@ -321,7 +321,8 @@ function composeAbortSignal(signals) {
   return controller.signal;
 }
 
-/** @typedef {RequestInit & { timeoutMs?: number }} StoreRequestOptions */
+/** @typedef {{ revalidate?: number, tags?: string[] }} StoreNextFetchConfig */
+/** @typedef {RequestInit & { timeoutMs?: number, next?: StoreNextFetchConfig }} StoreRequestOptions */
 /** @typedef {{ method?: string, body?: any, retryOnAuthError?: boolean, idempotencyKey?: string | null, timeoutMs?: number }} AuthRequestOptions */
 
 export function createStoreMutationId(prefix = "store") {
@@ -337,7 +338,12 @@ export function createStoreMutationId(prefix = "store") {
  * @param {StoreRequestOptions} [options]
  */
 async function request(path, options = {}) {
-  const { timeoutMs: timeoutOverride, signal: externalSignal, ...fetchOptions } = options;
+  const {
+    timeoutMs: timeoutOverride,
+    signal: externalSignal,
+    headers: requestHeaders,
+    ...fetchOptions
+  } = options;
   const timeoutMs = Number(timeoutOverride || ENV.API_TIMEOUT) || ENV.API_TIMEOUT;
   const timeoutController = new AbortController();
   const timeoutId = scheduleTimeout(() => timeoutController.abort("timeout"), timeoutMs);
@@ -346,13 +352,17 @@ async function request(path, options = {}) {
   const t0 = performance.now();
   const requestUrl = buildApiUrl(path);
   const signal = composeAbortSignal([timeoutController.signal, externalSignal]);
+  /** @type {StoreRequestOptions} */
+  const serverRequestDefaults = typeof window === "undefined" && fetchOptions.cache == null && fetchOptions.next == null
+    ? { cache: "no-store" }
+    : {};
 
   try {
     const response = await fetch(requestUrl, {
-      ...(typeof window === "undefined" ? { cache: "no-store" } : {}),
+      ...serverRequestDefaults,
       headers: {
         ...(hasJsonBody ? { "Content-Type": "application/json" } : {}),
-        ...(fetchOptions.headers || {}),
+        ...(requestHeaders || {}),
       },
       ...(signal ? { signal } : {}),
       ...fetchOptions,
@@ -532,7 +542,16 @@ export async function fetchCatalogCards(options = {}) {
     sets: options.sets,
   });
 
+  /** @type {StoreRequestOptions} */
+  const serverCatalogCacheOptions = typeof window === "undefined" && !options.signal
+    ? {
+        cache: "force-cache",
+        next: { revalidate: 60 },
+      }
+    : {};
+
   const payload = await request(`/api/catalog?${query}`, {
+    ...serverCatalogCacheOptions,
     ...(options.signal ? { signal: options.signal } : {}),
   });
 
@@ -587,7 +606,15 @@ export async function fetchCustomProductDetail(slug) {
  * @param {string|number} id
  */
 export async function fetchCardDetail(id) {
-  return request(`/api/catalog/${id}`);
+  /** @type {StoreRequestOptions} */
+  const serverDetailCacheOptions = typeof window === "undefined"
+    ? {
+        cache: "force-cache",
+        next: { revalidate: 60 },
+      }
+    : {};
+
+  return request(`/api/catalog/${id}`, serverDetailCacheOptions);
 }
 
 /**
