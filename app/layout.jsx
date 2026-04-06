@@ -1,4 +1,5 @@
 import { Rajdhani, Space_Grotesk } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 
 import "../src/index.css";
 import "../src/critical.css";
@@ -50,6 +51,7 @@ export default function RootLayout(/** @type {{ children: import('react').ReactN
         <Providers>
           <StorefrontShell>{children}</StorefrontShell>
         </Providers>
+        <Analytics />
       </body>
     </html>
   );
