@@ -80,17 +80,17 @@ export default function StoreFooter() {
         <div className="grid gap-8 sm:grid-cols-2 xl:grid-cols-[1.15fr_0.7fr_0.7fr_1fr] xl:gap-10">
         <div className="sm:col-span-2 xl:col-span-1">
           <Link to="/" className="group inline-flex items-center gap-3">
-            <div className="relative flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl border border-emerald-400/25 bg-gradient-to-br from-emerald-400/30 via-emerald-300/10 to-transparent shadow-[0_0_28px_rgba(74,222,128,0.22)] transition duration-300 group-hover:scale-105 sm:h-14 sm:w-14">
+            <div className="relative hidden h-12 w-12 items-center justify-center overflow-hidden rounded-2xl border border-emerald-400/25 bg-gradient-to-br from-emerald-400/30 via-emerald-300/10 to-transparent shadow-[0_0_28px_rgba(74,222,128,0.22)] transition duration-300 group-hover:scale-105 sm:flex sm:h-14 sm:w-14">
               <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.18),transparent_38%)]" />
               <span className="relative font-display text-lg font-black tracking-[0.2em] text-emerald-100">YG</span>
             </div>
             <div>
               <p className="font-display text-xl font-bold text-white sm:text-2xl">RareHunter</p>
-              <p className="text-[11px] uppercase tracking-[0.28em] text-emerald-300/75 sm:text-xs sm:tracking-[0.3em]">Marketplace premium</p>
+              <p className="hidden text-[11px] uppercase tracking-[0.28em] text-emerald-300/75 sm:block sm:text-xs sm:tracking-[0.3em]">Marketplace premium</p>
             </div>
           </Link>
 
-          <p className="mt-5 max-w-sm text-sm leading-6 text-slate-400 sm:mt-6 sm:leading-7">
+          <p className="mt-4 max-w-sm text-sm leading-6 text-slate-400 sm:mt-6 sm:leading-7">
             Tu destino para cartas, accesorios y productos sellados. Catálogo curado, stock real y una experiencia pensada para compradores competitivos.
           </p>
         </div>

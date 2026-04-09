@@ -482,12 +482,13 @@ export default function StorefrontShell({ children }) {
             <div className="sm:col-span-2 xl:col-span-1">
               <Link href="/" className="group relative inline-flex items-center">
                 <div className="pointer-events-none absolute inset-x-4 top-1/2 h-8 -translate-y-1/2 rounded-full bg-emerald-400/12 blur-3xl opacity-80" />
-                <div className="relative flex h-[44px] w-[128px] items-center overflow-visible sm:h-[66px] sm:w-[190px]">
+                <div className="relative hidden h-[44px] w-[128px] items-center overflow-visible sm:flex sm:h-[66px] sm:w-[190px]">
                   <img src="/logo.jpg" alt="RareHunter" draggable={false} className="h-full w-full scale-[1.28] object-contain object-center drop-shadow-[0_0_26px_rgba(74,222,128,0.22)] transition duration-300 group-hover:scale-[1.32]" />
                 </div>
+                <span className="relative font-display text-xl font-bold text-white sm:hidden">RareHunter</span>
               </Link>
 
-              <p className="mt-3 text-[10px] uppercase tracking-[0.24em] text-emerald-300/70 sm:mt-4 sm:text-xs">Cartas Yu-Gi-Oh · RareHunter</p>
+              <p className="hidden text-[10px] uppercase tracking-[0.24em] text-emerald-300/70 sm:mt-4 sm:block sm:text-xs">Cartas Yu-Gi-Oh · RareHunter</p>
               <p className="mt-4 max-w-sm text-xs leading-6 text-slate-400 sm:mt-6 sm:text-sm sm:leading-7">
                 Tu destino para cartas, accesorios y productos sellados. Catálogo curado, stock real y una experiencia pensada para compradores competitivos.
               </p>
