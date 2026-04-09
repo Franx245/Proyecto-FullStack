@@ -85,7 +85,7 @@ export default function StoreFooter() {
               <span className="relative font-display text-lg font-black tracking-[0.2em] text-emerald-100">YG</span>
             </div>
             <div>
-              <p className="font-display text-xl font-bold text-white sm:text-2xl">DuelVault</p>
+              <p className="font-display text-xl font-bold text-white sm:text-2xl">RareHunter</p>
               <p className="text-[11px] uppercase tracking-[0.28em] text-emerald-300/75 sm:text-xs sm:tracking-[0.3em]">Marketplace premium</p>
             </div>
           </Link>
@@ -143,7 +143,7 @@ export default function StoreFooter() {
 
       <div className="border-t border-white/5">
         <div className="mx-auto flex max-w-[1400px] flex-col gap-2 px-4 py-4 text-[11px] text-slate-500 sm:gap-3 sm:py-5 sm:text-xs md:flex-row md:items-center md:justify-between md:px-6">
-          <p>© {new Date().getFullYear()} DuelVault. Todos los derechos reservados.</p>
+          <p>© {new Date().getFullYear()} RareHunter. Todos los derechos reservados.</p>
           <p>No afiliado a Konami. Diseño optimizado para la tienda.</p>
         </div>
       </div>

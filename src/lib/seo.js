@@ -97,7 +97,7 @@ export function buildCardJsonLd(card) {
 
   const name = String(card.name || "Carta Yu-Gi-Oh!").trim();
   const image = card.image ? [card.image] : undefined;
-  const description = String(card.description || `${name} disponible en DuelVault.`).trim();
+  const description = String(card.description || `${name} disponible en RareHunter.`).trim();
   const url = `${resolveSiteUrl()}${buildCardPath(card)}`;
 
   return {

@@ -73,7 +73,7 @@ const resolveApiBaseUrl = () => {
 };
 
 export const ENV = {
-  APP_NAME: readEnv("VITE_APP_NAME", "NEXT_PUBLIC_APP_NAME", "DuelVault"),
+  APP_NAME: readEnv("VITE_APP_NAME", "NEXT_PUBLIC_APP_NAME", "RareHunter"),
   ENV: readEnv("VITE_APP_ENV", "NEXT_PUBLIC_APP_ENV", "development"),
   CLOUDINARY_CLOUD_NAME: readEnv("VITE_CLOUDINARY_CLOUD_NAME", "NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME", ""),
   SUPABASE_URL: readEnv("VITE_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL", ""),

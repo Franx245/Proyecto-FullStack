@@ -78,7 +78,7 @@ export function reportBootMetrics() {
 
     const nav = performance.getEntriesByType("navigation")[0];
 
-    console.group("%c[DuelVault Admin] Boot Performance Report", "color:#7c3aed;font-weight:bold");
+    console.group("%c[RareHunter Admin] Boot Performance Report", "color:#7c3aed;font-weight:bold");
 
     console.log(
       "%cTimeline",
@@ -120,6 +120,6 @@ export function reportBootMetrics() {
 
     console.groupEnd();
   } catch (error) {
-    console.warn("[DuelVault Admin] Perf report failed:", error);
+    console.warn("[RareHunter Admin] Perf report failed:", error);
   }
 }

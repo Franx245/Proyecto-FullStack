@@ -83,7 +83,7 @@ async function main() {
   const APP_URL = FORCED_APP_URL || await findHealthyUrl(
     APP_PORT_CANDIDATES,
     "/auth",
-    (body) => body.includes("DuelVault") && body.includes("/_next/static/")
+    (body) => body.includes("RareHunter") && body.includes("/_next/static/")
   );
 
   const browser = await chromium.launch({ headless: true });

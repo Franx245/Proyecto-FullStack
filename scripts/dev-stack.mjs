@@ -1,6 +1,6 @@
 import "./dev-next-stack.mjs";
 
-  console.log("[boot] DuelVault stack ready.");
+  console.log("[boot] RareHunter stack ready.");
   console.log(`[boot] Store: http://${host}:${storePort}`);
   console.log(`[boot] Admin: http://${host}:${adminPort}`);
   console.log(`[boot] API:   http://${host}:${apiPort}`);

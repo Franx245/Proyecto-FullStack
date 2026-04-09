@@ -1581,7 +1581,7 @@ function alignMercadoPagoItemsTotal(items, totalArs) {
     return [
       {
         id: "order-total",
-        title: "DuelVault Order",
+        title: "RareHunter Order",
         description: "Checkout total",
         category_id: "others",
         quantity: 1,
@@ -2687,10 +2687,10 @@ function buildSandboxShippingLabelPdf(order) {
   const destination = buildAddressSummary(order) || "Direccion no disponible";
   const carrier = String(order?.carrier || order?.shippingLabel || "andreani").trim() || "andreani";
   const trackingNumber = String(order?.trackingCode || buildLocalhostSimulatedTrackingCode(order)).trim();
-  const recipient = String(order?.customerName || order?.address?.recipientName || "Cliente DuelVault").trim();
+  const recipient = String(order?.customerName || order?.address?.recipientName || "Cliente RareHunter").trim();
 
   return buildSimplePdfBuffer({
-    title: "DUELVAULT SHIPPING LABEL",
+    title: "RAREHUNTER SHIPPING LABEL",
     body: [
       `Order: ${order?.id || "N/A"}`,
       `Carrier: ${carrier}`,
@@ -7893,7 +7893,7 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
       token,
       payment_method_id: paymentMethodId,
       installments,
-      description: `DuelVault order #${prepared.order.id}`,
+      description: `RareHunter order #${prepared.order.id}`,
       external_reference: String(prepared.order.id),
       ...(notificationUrl ? { notification_url: notificationUrl } : {}),
       payer: isFakePayment
@@ -8532,7 +8532,7 @@ app.get("/api/shipping/label/:orderId", async (req, res) => {
 
     const pdf = buildSandboxShippingLabelPdf(order);
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename="duelvault-shipping-label-${order.id}.pdf"`);
+    res.setHeader("Content-Disposition", `inline; filename="rarehunter-shipping-label-${order.id}.pdf"`);
     res.send(pdf);
   } catch (error) {
     logEvent("ENVIACOM_ERROR", "Sandbox shipping label failed", {
@@ -10866,7 +10866,7 @@ app.get("/api/admin/export/orders", requireAdminAuth, async (_req, res) => {
 
     const buffer = await buildWorkbook(orders);
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", `attachment; filename="duelvault-orders-${Date.now()}.xlsx"`);
+    res.setHeader("Content-Disposition", `attachment; filename="rarehunter-orders-${Date.now()}.xlsx"`);
     return res.send(Buffer.from(buffer));
   } catch (error) {
     if (res.headersSent) return;
@@ -11789,7 +11789,7 @@ app.use((error, req, res, next) => {
 });
 
 if (isDirectExecution) {
-  logEvent("STARTUP", "DuelVault API starting", {
+  logEvent("STARTUP", "RareHunter API starting", {
     nodeEnv: process.env.NODE_ENV || "undefined",
     port: PORT,
     runtimeModes: {

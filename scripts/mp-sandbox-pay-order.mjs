@@ -64,7 +64,7 @@ async function main() {
     body: JSON.stringify({
       transaction_amount: 10060.65,
       token: token.id,
-      description: `DuelVault sandbox order #${ORDER_ID}`,
+      description: `RareHunter sandbox order #${ORDER_ID}`,
       installments: 1,
       payment_method_id: "visa",
       external_reference: String(ORDER_ID),

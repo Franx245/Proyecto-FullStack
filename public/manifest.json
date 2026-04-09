@@ -1,6 +1,6 @@
 {
-  "name": "DuelVault",
-  "short_name": "DuelVault",
+  "name": "RareHunter",
+  "short_name": "RareHunter",
   "description": "Marketplace de Yu-Gi-Oh! en Argentina",
   "start_url": "/",
   "display": "standalone",

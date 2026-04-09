@@ -22,7 +22,7 @@ function buildWhatsAppCartMessage(items, totalPrice) {
 
   const lines = items.map((/** @type {*} */ item) => `• ${item.quantity}x ${item.name} - ${formatPrice(item.price * item.quantity)}`);
   return encodeURIComponent(
-    `DuelVault - Consulta de carrito\n\n${lines.join("\n")}\n\nTotal: ${formatPrice(totalPrice)}\n\n¿Podés confirmar disponibilidad?`
+    `RareHunter - Consulta de carrito\n\n${lines.join("\n")}\n\nTotal: ${formatPrice(totalPrice)}\n\n¿Podés confirmar disponibilidad?`
   );
 }
 
@@ -157,7 +157,7 @@ export default function ContactPage() {
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="mx-auto max-w-[1120px] px-4 py-6 sm:px-5 sm:py-8 lg:px-6 lg:py-9">
         <div className="mb-5 sm:mb-6">
           <span className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-200">
-            Soporte DuelVault
+            Soporte RareHunter
           </span>
           <h1 className="mt-3 text-3xl font-black tracking-tight text-white sm:text-[2.2rem]">Contacto</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400 sm:text-[15px]">Elegí el canal más rápido para cerrar tu compra o enviarnos una consulta.</p>

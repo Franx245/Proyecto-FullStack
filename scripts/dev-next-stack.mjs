@@ -285,7 +285,7 @@ async function main() {
     waitForUrl(adminBaseUrl, "admin"),
   ]);
 
-  console.log("[boot] DuelVault next stack ready.");
+  console.log("[boot] RareHunter next stack ready.");
   console.log(`[boot] Next:  ${nextStoreBaseUrl}`);
   console.log(`[boot] Admin: ${adminBaseUrl}`);
   console.log(`[boot] API:   ${apiBaseUrl}`);

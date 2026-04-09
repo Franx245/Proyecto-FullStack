@@ -1,6 +1,6 @@
 <div align="center">
 
-# ⚔️ DuelVault
+# ⚔️ RareHunter
 
 **Plataforma ecommerce + CRM para la venta de cartas Yu-Gi-Oh!**
 
@@ -36,7 +36,7 @@
 
 ## Descripción
 
-DuelVault resuelve dos necesidades en un monorepo:
+RareHunter resuelve dos necesidades en un monorepo:
 
 | Capa | Propósito |
 |------|-----------|
@@ -116,7 +116,7 @@ La separación frontend/backend garantiza que secretos y lógica de negocio nunc
 ## Estructura del proyecto
 
 ```
-duelvault/
+rarehunter/
 ├── backend/                    # API Express principal
 │   ├── server.js               # Monolith (~7600 LOC) — rutas, middleware, lógica
 │   ├── prisma/                 # Schema, migraciones y seed
@@ -255,7 +255,7 @@ ALLOW_VERCEL_PREVIEWS=true
 ### Storefront (Vercel)
 
 ```env
-VITE_APP_NAME=DuelVault
+VITE_APP_NAME=RareHunter
 VITE_APP_ENV=production
 VITE_API_BASE_URL=https://tu-backend.onrender.com
 VITE_API_TIMEOUT=10000

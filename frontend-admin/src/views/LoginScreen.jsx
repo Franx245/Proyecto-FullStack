@@ -25,7 +25,7 @@ export default function LoginScreen({ onLoggedIn }) {
         <div className="mb-8">
           <p className="inline-flex items-center gap-2 rounded-full border border-ember/30 bg-ember/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-amber-300">
             <ShieldAlert className="h-3.5 w-3.5" />
-            DuelVault Admin 🐉
+            RareHunter Admin 🐉
           </p>
           <h1 className="mt-5 text-3xl font-black text-white">Panel del duelista</h1>
           <p className="mt-2 text-sm text-slate-300">Acceso por roles, sesión persistente y control táctico de la tienda.</p>

@@ -6,7 +6,7 @@ import HomePage from "@/next/pages/HomePage.jsx";
 export const revalidate = 120;
 
 export const metadata = {
-  title: "DuelVault — Marketplace premium de cartas Yu-Gi-Oh!",
+  title: "RareHunter — Marketplace premium de cartas Yu-Gi-Oh!",
   description:
     "Explorá una vitrina curada de cartas Yu-Gi-Oh! con stock real, condición verificada y envío rápido.",
   alternates: { canonical: "/" },

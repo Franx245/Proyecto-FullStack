@@ -8,7 +8,7 @@ const sections = [
   {
     icon: FileText,
     title: "Aceptación del servicio",
-    content: "Al navegar, registrarte o confirmar una compra aceptás estas condiciones y las políticas publicadas en DuelVault. Si no estás de acuerdo, no completes el checkout.",
+    content: "Al navegar, registrarte o confirmar una compra aceptás estas condiciones y las políticas publicadas en RareHunter. Si no estás de acuerdo, no completes el checkout.",
   },
   {
     icon: CreditCard,
@@ -42,7 +42,7 @@ export default function TermsPage() {
           </div>
 
           <h1 className="mt-5 text-3xl font-black">Términos y Condiciones</h1>
-          <p className="mt-3 max-w-2xl text-sm text-muted-foreground">Estas reglas ordenan el uso de la tienda, las reservas de stock y la confirmación de pagos dentro del flujo actual de DuelVault.</p>
+          <p className="mt-3 max-w-2xl text-sm text-muted-foreground">Estas reglas ordenan el uso de la tienda, las reservas de stock y la confirmación de pagos dentro del flujo actual de RareHunter.</p>
 
           <div className="mt-8 space-y-5">
             {sections.map((section) => {

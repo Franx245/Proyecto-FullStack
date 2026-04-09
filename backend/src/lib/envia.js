@@ -245,10 +245,10 @@ async function enviaFetch(path, options = {}) {
  * @property {string} currency
  */
 
-/** Default origin = CABA (DuelVault showroom) */
+/** Default origin = CABA (RareHunter showroom) */
 const DEFAULT_ORIGIN = {
-  name: "DuelVault",
-  company: "DuelVault",
+  name: "RareHunter",
+  company: "RareHunter",
   street: "Av Corrientes",
   number: "1234",
   city: "Buenos Aires",

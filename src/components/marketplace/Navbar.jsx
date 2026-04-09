@@ -61,7 +61,7 @@ export default function Navbar({ searchQuery, onSearchChange }) {
               <span className="relative text-sm font-black tracking-[0.24em] text-emerald-100">YG</span>
             </div>
             <div className="hidden min-w-0 sm:block">
-              <p className="font-display text-xl font-bold leading-none text-white">DuelVault</p>
+              <p className="font-display text-xl font-bold leading-none text-white">RareHunter</p>
               <p className="mt-1 flex items-center gap-1.5 text-[11px] uppercase tracking-[0.28em] text-emerald-300/80">
                 <Sparkles className="h-3 w-3" />
                 Marketplace premium

@@ -2978,7 +2978,7 @@ function AdminShell({ session, onLogout }) {
       <div className="grid w-full gap-4 lg:grid-cols-[248px_minmax(0,1fr)] lg:gap-5 xl:grid-cols-[256px_minmax(0,1fr)]">
         <aside className="hidden glass self-start rounded-[24px] border border-white/10 p-4 lg:sticky lg:top-4 lg:block lg:h-fit">
           <div className="mb-6">
-            <p className="text-xs uppercase tracking-[0.24em] text-amber-300">DuelVault</p>
+            <p className="text-xs uppercase tracking-[0.24em] text-amber-300">RareHunter</p>
                 <h1 className="mt-2 text-xl font-black text-white">Santuario Admin</h1>
                 <p className="mt-2 text-sm text-slate-400">Operación diaria, inventario y control comercial.</p>
           </div>
@@ -3016,7 +3016,7 @@ function AdminShell({ session, onLogout }) {
                 <div className="glass rounded-[22px] border border-white/10 px-4 py-3">
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0 pr-2">
-                      <p className="text-[11px] uppercase tracking-[0.22em] text-amber-300">DuelVault</p>
+                        <p className="text-[11px] uppercase tracking-[0.22em] text-amber-300">RareHunter</p>
                       <div className="mt-1 flex flex-wrap items-center gap-2">
                         <h1 className="truncate text-lg font-black text-white">Santuario Admin</h1>
                         <span className="inline-flex max-w-full truncate rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold text-slate-300">{currentSectionLabel}</span>

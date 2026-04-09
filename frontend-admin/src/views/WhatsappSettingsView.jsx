@@ -162,7 +162,7 @@ export default function WhatsappSettingsView({ settings, contactRequests, contac
                 type="email"
                 value={supportEmail}
                 onChange={(event) => setSupportEmail(event.target.value)}
-                placeholder="soporte@duelvault.com"
+                placeholder="soporte@rarehunter.com"
                 className="h-11 w-full rounded-2xl border border-white/10 bg-slate-950/70 pl-11 pr-4 outline-none transition focus:border-amber-400"
               />
             </div>

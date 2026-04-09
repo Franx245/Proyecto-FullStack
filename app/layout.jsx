@@ -23,19 +23,19 @@ const displayFont = Rajdhani({
 export const metadata = {
   metadataBase: new URL(resolveSiteUrl()),
   title: {
-    default: "DuelVault — Cartas Yu-Gi-Oh! al mejor precio",
-    template: "%s | DuelVault",
+    default: "RareHunter — Cartas Yu-Gi-Oh! al mejor precio",
+    template: "%s | RareHunter",
   },
   description:
     "Marketplace premium de cartas Yu-Gi-Oh! con stock real, condición verificada y envío rápido. Explorá singles, staples y rarezas.",
   openGraph: {
     type: "website",
     locale: "es_AR",
-    siteName: "DuelVault",
+    siteName: "RareHunter",
   },
   twitter: {
     card: "summary_large_image",
-    title: "DuelVault — Cartas Yu-Gi-Oh! al mejor precio",
+    title: "RareHunter — Cartas Yu-Gi-Oh! al mejor precio",
     description:
       "Marketplace premium de cartas Yu-Gi-Oh! con stock real, condición verificada y envío rápido.",
   },

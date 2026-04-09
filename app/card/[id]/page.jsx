@@ -38,17 +38,17 @@ export async function generateMetadata({ params }) {
     const canonicalPath = buildCardPath(card);
     return {
       title: `${card.name}${price}`,
-      description: `Comprar ${card.name} — ${card.rarity ?? "Yu-Gi-Oh!"} · ${card.set_name ?? "Singles"}. Stock real y condición verificada en DuelVault.`,
+      description: `Comprar ${card.name} — ${card.rarity ?? "Yu-Gi-Oh!"} · ${card.set_name ?? "Singles"}. Stock real y condición verificada en RareHunter.`,
       alternates: { canonical: canonicalPath },
       openGraph: {
-        title: `${card.name} — DuelVault`,
+        title: `${card.name} — RareHunter`,
         description: `${card.name} · ${card.rarity ?? "Yu-Gi-Oh!"}${price}`,
         url: canonicalPath,
         images: card.image ? [{ url: card.image, width: 421, height: 614, alt: card.name }] : [],
       },
       twitter: {
         card: "summary_large_image",
-        title: `${card.name} — DuelVault`,
+        title: `${card.name} — RareHunter`,
         description: `${card.name} · ${card.rarity ?? "Yu-Gi-Oh!"}${price}`,
         images: card.image ? [card.image] : [],
       },
