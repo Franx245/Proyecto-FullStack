@@ -24,7 +24,6 @@ export default function Navbar({ searchQuery, onSearchChange }) {
     { label: "Inicio", to: "/" },
     { label: "Cartas", to: "/singles" },
     { label: "Lotes", to: "/lotes" },
-    { label: "Decks", to: "/decks" },
     { label: "Pedidos", to: "/orders" },
   ];
 

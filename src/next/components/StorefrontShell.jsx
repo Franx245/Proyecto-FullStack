@@ -216,7 +216,6 @@ export default function StorefrontShell({ children }) {
     { label: "Inicio", href: "/" },
     { label: "Cartas", href: catalogHref },
     { label: "Lotes", href: "/lotes" },
-    { label: "Decks", href: "/decks" },
     { label: "Pedidos", href: "/orders" },
   ]), [catalogHref]);
 
@@ -227,7 +226,6 @@ export default function StorefrontShell({ children }) {
         { label: "Inicio", href: "/" },
         { label: "Cartas sueltas", href: catalogHref },
         { label: "Lotes", href: "/lotes" },
-        { label: "Decks", href: "/decks" },
         { label: "Pedidos", href: "/orders" },
       ],
     },
