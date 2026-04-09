@@ -101,6 +101,11 @@
     @apply bg-background text-foreground tracking-tight antialiased;
     font-family: var(--font-body);
   }
+
+  img {
+    user-select: none;
+    -webkit-user-drag: none;
+  }
 }
 
 .font-display {
