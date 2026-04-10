@@ -1,5 +1,21 @@
 "use client";
 
+/**
+ * SinglesPage (Catálogo principal)
+ *
+ * Maneja:
+ * - URL ↔ estado
+ * - navegación sin flicker
+ * - React Query (server + client)
+ * - scroll persistence
+ * - prefetch
+ *
+ * ⚠️ Complejidad alta: coordina múltiples sistemas.
+ *
+ * 💡 Decisión:
+ * separar en hooks para reducir acoplamiento sin mover JSX fuera del archivo.
+ */
+
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { flushSync } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -35,6 +51,8 @@ import MobileFilters from "@/components/marketplace/MobileFilters";
 import NextCardGrid from "@/next/components/NextCardGrid.jsx";
 
 const CATALOG_DEBOUNCE_MS = 200;
+const CATALOG_SCROLL_THROTTLE_MS = 100;
+const PAGINATION_PULSE_MS = 480;
 
 /**
  * @param {*[]} cards
@@ -58,34 +76,55 @@ function applyClientSideFilters(cards, filters, primaryFilter, useServerFallback
   });
 }
 
-/** @param {{ category?: string, initialData?: * }} props */
-export default function SinglesPage({ category, initialData }) {
-  const queryClient = useQueryClient();
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const restoredScrollRef = useRef("");
-  const skipNextScrollRestoreRef = useRef(false);
-  const paginationPulseTimeoutRef = useRef(0);
+function buildPendingStatusLabel(isResultsPending, pendingIntent, page) {
+  if (!isResultsPending) {
+    return "";
+  }
+
+  if (pendingIntent?.kind === "pagination") {
+    return `Cargando página ${page}...`;
+  }
+
+  if (pendingIntent?.kind === "filters") {
+    return "Refinando resultados...";
+  }
+
+  return "Actualizando resultados...";
+}
+
+/**
+ * Hook: useCatalogState
+ *
+ * Responsabilidad:
+ * - derivar el estado canónico desde la URL
+ * - resolver estado visual pendiente durante navegación
+ * - construir inputs estables para datos y navegación
+ *
+ * ⚠️ Importante:
+ * - depende de referencias estables
+ * - evitar cambios innecesarios que disparen renders
+ */
+function useCatalogState({ pathname, searchParams, category, initialData }) {
   const [hasMounted, setHasMounted] = useState(false);
   const [pendingCatalogState, setPendingCatalogState] = useState(null);
-  const [pendingIntent, setPendingIntent] = useState(null);
-  const [paginationPulse, setPaginationPulse] = useState(null);
-  const [isCatalogNavigationPending, startCatalogNavigation] = useTransition();
+
   const catalogUrlState = useMemo(() => parseCatalogSearchParams(searchParams), [searchParams]);
   const hasUrlState = useMemo(() => hasActiveCatalogState(catalogUrlState), [catalogUrlState]);
-  const uiCatalogState = pendingCatalogState ?? catalogUrlState;
-  const routeSearchQuery = catalogUrlState.search;
-  const routeFilters = catalogUrlState.filters;
+  const uiCatalogState = useMemo(() => (
+    pendingCatalogState ?? catalogUrlState
+  ), [pendingCatalogState, catalogUrlState]);
   const routePage = catalogUrlState.page;
   const searchQuery = uiCatalogState.search;
   const filters = uiCatalogState.filters;
   const page = uiCatalogState.page;
   const currentCatalogHref = useMemo(() => buildCatalogHref(pathname, catalogUrlState), [pathname, catalogUrlState]);
   const activeCatalogHref = useMemo(() => buildCatalogHref(pathname, uiCatalogState), [pathname, uiCatalogState]);
+  const pendingCatalogHref = useMemo(() => (
+    pendingCatalogState ? buildCatalogHref(pathname, pendingCatalogState) : ""
+  ), [pathname, pendingCatalogState]);
 
-  const debouncedSearch = useDebounce(routeSearchQuery, CATALOG_DEBOUNCE_MS);
-  const debouncedFilters = useDebounce(routeFilters, CATALOG_DEBOUNCE_MS);
+  const debouncedSearch = useDebounce(catalogUrlState.search, CATALOG_DEBOUNCE_MS);
+  const debouncedFilters = useDebounce(catalogUrlState.filters, CATALOG_DEBOUNCE_MS);
   const queryPlan = useMemo(() => buildCatalogQueryPlan({
     page: routePage,
     pageSize: CATALOG_PAGE_SIZE,
@@ -93,7 +132,7 @@ export default function SinglesPage({ category, initialData }) {
     category,
     filters: debouncedFilters,
   }), [routePage, debouncedSearch, category, debouncedFilters]);
-  const { primaryFilter, useServerFallback, serverFilters, serverFiltersKey, cardsQueryKey } = queryPlan;
+  const { primaryFilter, serverFilters, serverFiltersKey } = queryPlan;
   const initialCatalogSnapshot = useMemo(() => getInitialCatalogSnapshot({
     page: routePage,
     pageSize: CATALOG_PAGE_SIZE,
@@ -105,9 +144,7 @@ export default function SinglesPage({ category, initialData }) {
     sets: serverFilters.sets,
     priceRange: serverFilters.priceRange ? { min: serverFilters.priceRange.min, max: serverFilters.priceRange.max ?? undefined } : undefined,
   }), [routePage, debouncedSearch, category, serverFilters]);
-  const clientRefinesResults = useMemo(() => hasClientSideRefinements(debouncedFilters, primaryFilter, useServerFallback), [debouncedFilters, primaryFilter, useServerFallback]);
   const serverInitialCatalogData = useMemo(() => (initialData && typeof initialData === "object" ? initialData : null), [initialData]);
-
   const isInitialView = routePage === 1 && !debouncedSearch && !serverFiltersKey && primaryFilter.kind === "none";
 
   useEffect(() => {
@@ -119,48 +156,151 @@ export default function SinglesPage({ category, initialData }) {
       return;
     }
 
-    if (buildCatalogHref(pathname, pendingCatalogState) === currentCatalogHref) {
+    /**
+     * Sincronización estado ↔ URL
+     *
+     * ⚠️ Edge case crítico:
+     * pendingCatalogState puede quedar desincronizado
+     *
+     * 💡 Solución:
+     * se limpia automáticamente cuando coincide con la URL actual
+     *
+     * Esto evita:
+     * - UI inconsistente
+     * - navegación fantasma
+     */
+    if (pendingCatalogHref === currentCatalogHref) {
       setPendingCatalogState(null);
     }
-  }, [pendingCatalogState, pathname, currentCatalogHref]);
+  }, [pendingCatalogState, pendingCatalogHref, currentCatalogHref]);
+
+  return useMemo(() => ({
+    hasMounted,
+    hasUrlState,
+    setPendingCatalogState,
+    catalogUrlState,
+    routePage,
+    searchQuery,
+    filters,
+    page,
+    currentCatalogHref,
+    activeCatalogHref,
+    debouncedSearch,
+    debouncedFilters,
+    initialCatalogSnapshot,
+    serverInitialCatalogData,
+    isInitialView,
+    ...queryPlan,
+  }), [
+    hasMounted,
+    hasUrlState,
+    setPendingCatalogState,
+    catalogUrlState,
+    routePage,
+    searchQuery,
+    filters,
+    page,
+    currentCatalogHref,
+    activeCatalogHref,
+    debouncedSearch,
+    debouncedFilters,
+    initialCatalogSnapshot,
+    serverInitialCatalogData,
+    isInitialView,
+    queryPlan,
+  ]);
+}
+
+/**
+ * Hook: useCatalogData
+ *
+ * Responsabilidad:
+ * - construir la capa de datos del catálogo
+ * - definir queryKey y queryFn estables
+ * - resolver refinamiento en cliente solo cuando hace falta
+ *
+ * ⚠️ Importante:
+ * - depende de referencias estables
+ * - evitar cambios innecesarios que disparen renders
+ */
+function useCatalogData({
+  category,
+  routePage,
+  hasMounted,
+  isInitialView,
+  debouncedSearch,
+  debouncedFilters,
+  primaryFilter,
+  useServerFallback,
+  serverFilters,
+  cardsQueryKey,
+  initialCatalogSnapshot,
+  serverInitialCatalogData,
+}) {
+  /**
+   * Data layer del catálogo
+   *
+   * - construye queryPlan
+   * - define queryKey (cache)
+   * - controla cuándo React Query refetch
+   *
+   * ⚠️ Crítico:
+   * cualquier cambio de referencia incorrecto dispara refetch innecesario
+   */
+  const catalogQueryParams = useMemo(() => ({
+    page: routePage,
+    pageSize: CATALOG_PAGE_SIZE,
+    search: debouncedSearch,
+    category,
+    rarities: serverFilters.rarities,
+    cardTypes: serverFilters.cardTypes,
+    conditions: serverFilters.conditions,
+    sets: serverFilters.sets,
+    priceRange: serverFilters.priceRange ? { min: serverFilters.priceRange.min, max: serverFilters.priceRange.max ?? undefined } : undefined,
+  }), [routePage, debouncedSearch, category, serverFilters]);
+  const resolveInitialCatalogData = useCallback(() => (
+    (isInitialView ? serverInitialCatalogData : undefined) ?? initialCatalogSnapshot ?? undefined
+  ), [isInitialView, serverInitialCatalogData, initialCatalogSnapshot]);
+  const fetchCatalogQuery = useCallback(async ({ signal }) => fetchCatalogCards({
+    ...catalogQueryParams,
+    signal,
+  }), [catalogQueryParams]);
 
   const queryResult = useQuery({
     queryKey: cardsQueryKey,
-    initialData: () => (isInitialView ? serverInitialCatalogData : undefined) ?? initialCatalogSnapshot ?? undefined,
+    initialData: resolveInitialCatalogData,
     placeholderData: retainPreviousData,
     staleTime: CATALOG_QUERY_STALE_TIME,
     gcTime: CATALOG_QUERY_GC_TIME,
     refetchOnMount: false,
     refetchOnReconnect: false,
     refetchOnWindowFocus: false,
-    queryFn: async ({ signal }) => fetchCatalogCards({
-      page: routePage,
-      pageSize: CATALOG_PAGE_SIZE,
-      search: debouncedSearch,
-      category,
-      rarities: serverFilters.rarities,
-      cardTypes: serverFilters.cardTypes,
-      conditions: serverFilters.conditions,
-      sets: serverFilters.sets,
-      priceRange: serverFilters.priceRange ? { min: serverFilters.priceRange.min, max: serverFilters.priceRange.max ?? undefined } : undefined,
-      signal,
-    }),
+    queryFn: fetchCatalogQuery,
   });
 
   const { data: catalogData, isLoading, isFetching } = queryResult;
-  const visibleCatalogData = !hasMounted && isInitialView
-    ? (serverInitialCatalogData ?? catalogData)
-    : (catalogData ?? serverInitialCatalogData);
-
+  const visibleCatalogData = useMemo(() => (
+    !hasMounted && isInitialView
+      ? (serverInitialCatalogData ?? catalogData)
+      : (catalogData ?? serverInitialCatalogData)
+  ), [hasMounted, isInitialView, serverInitialCatalogData, catalogData]);
   const serverCards = useMemo(() => visibleCatalogData?.cards ?? [], [visibleCatalogData]);
-  const cards = useMemo(() => applyClientSideFilters(serverCards, debouncedFilters, primaryFilter, useServerFallback), [serverCards, debouncedFilters, primaryFilter, useServerFallback]);
+  const clientRefinesResults = useMemo(() => hasClientSideRefinements(debouncedFilters, primaryFilter, useServerFallback), [debouncedFilters, primaryFilter, useServerFallback]);
+  const cards = useMemo(() => {
+    // Evita ejecutar filtros en cliente si la query ya representa el estado final que necesitamos mostrar.
+    if (!clientRefinesResults) {
+      return serverCards;
+    }
+
+    return applyClientSideFilters(serverCards, debouncedFilters, primaryFilter, useServerFallback);
+  }, [clientRefinesResults, serverCards, debouncedFilters, primaryFilter, useServerFallback]);
   const totalPages = visibleCatalogData?.totalPages ?? 0;
   const totalRows = visibleCatalogData?.totalRows ?? 0;
   const resultsLabel = clientRefinesResults ? `${cards.length} resultados refinados en esta página` : `${totalRows} resultados disponibles`;
 
   const setsQuery = useQuery({
     queryKey: ["ygopro-card-sets"],
-    initialData: () => serverInitialCatalogData?.filters?.sets ?? initialCatalogSnapshot?.filters?.sets ?? undefined,
+    initialData: useCallback(() => serverInitialCatalogData?.filters?.sets ?? initialCatalogSnapshot?.filters?.sets ?? undefined, [serverInitialCatalogData, initialCatalogSnapshot]),
     placeholderData: retainPreviousData,
     staleTime: 1000 * 60 * 60,
     refetchOnMount: false,
@@ -170,6 +310,50 @@ export default function SinglesPage({ category, initialData }) {
   });
 
   const availableSets = useMemo(() => setsQuery.data ?? [], [setsQuery.data]);
+
+  return useMemo(() => ({
+    catalogData,
+    cards,
+    isLoading,
+    isFetching,
+    availableSets,
+    totalPages,
+    resultsLabel,
+  }), [catalogData, cards, isLoading, isFetching, availableSets, totalPages, resultsLabel]);
+}
+
+/**
+ * Hook: useCatalogNavigation
+ *
+ * Responsabilidad:
+ * - coordinar navegación del catálogo
+ * - mantener pending state y feedback visual
+ * - evitar redundancias entre estado local y URL
+ *
+ * ⚠️ Importante:
+ * - depende de referencias estables
+ * - evitar cambios innecesarios que disparen renders
+ */
+function useCatalogNavigation({
+  pathname,
+  router,
+  catalogUrlState,
+  hasUrlState,
+  currentCatalogHref,
+  activeCatalogHref,
+  searchQuery,
+  filters,
+  page,
+  totalPages,
+  isLoading,
+  isFetching,
+  setPendingCatalogState,
+}) {
+  const skipNextScrollRestoreRef = useRef(false);
+  const paginationPulseTimeoutRef = useRef(0);
+  const [pendingIntent, setPendingIntent] = useState(null);
+  const [paginationPulse, setPaginationPulse] = useState(null);
+  const [isCatalogNavigationPending, startCatalogNavigation] = useTransition();
 
   useEffect(() => {
     persistCatalogState(pathname, catalogUrlState);
@@ -195,103 +379,17 @@ export default function SinglesPage({ category, initialData }) {
     startCatalogNavigation(() => {
       router.replace(storedHref, { scroll: false });
     });
-  }, [hasUrlState, pathname, currentCatalogHref, router, startCatalogNavigation]);
+  }, [hasUrlState, pathname, currentCatalogHref, router, startCatalogNavigation, setPendingCatalogState]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return undefined;
-    }
-
-    const saveScrollPosition = () => persistCatalogScroll(currentCatalogHref, window.scrollY);
-    let frameId = 0;
-
-    const handleScroll = () => {
-      if (frameId) {
-        return;
-      }
-
-      frameId = window.requestAnimationFrame(() => {
-        frameId = 0;
-        saveScrollPosition();
-      });
-    };
-
-    saveScrollPosition();
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    window.addEventListener("pagehide", saveScrollPosition);
-
-    return () => {
-      if (frameId) {
-        window.cancelAnimationFrame(frameId);
-      }
-      saveScrollPosition();
-      window.removeEventListener("scroll", handleScroll);
-      window.removeEventListener("pagehide", saveScrollPosition);
-    };
-  }, [currentCatalogHref]);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || isLoading) {
-      return;
-    }
-
-    if (restoredScrollRef.current === currentCatalogHref) {
-      return;
-    }
-
-    restoredScrollRef.current = currentCatalogHref;
-
-    if (skipNextScrollRestoreRef.current) {
-      skipNextScrollRestoreRef.current = false;
-      return;
-    }
-
-    const storedScroll = readCatalogScroll(currentCatalogHref);
-
-    if (storedScroll == null) {
-      return;
-    }
-
-    window.requestAnimationFrame(() => {
-      window.scrollTo({ top: storedScroll, behavior: "auto" });
-    });
-  }, [currentCatalogHref, isLoading, cards.length]);
-
-  useEffect(() => {
-    if (!catalogData || routePage >= totalPages) {
-      return;
-    }
-
-    const nextPage = routePage + 1;
-    const nextPageQueryPlan = buildCatalogQueryPlan({
-      page: nextPage,
-      pageSize: CATALOG_PAGE_SIZE,
-      search: debouncedSearch,
-      category,
-      filters: debouncedFilters,
-    });
-
-    void queryClient.prefetchQuery({
-      queryKey: nextPageQueryPlan.cardsQueryKey,
-      staleTime: CATALOG_QUERY_STALE_TIME,
-      gcTime: CATALOG_QUERY_GC_TIME,
-      queryFn: ({ signal }) => fetchCatalogCards({
-        page: nextPage,
-        pageSize: CATALOG_PAGE_SIZE,
-        search: debouncedSearch,
-        category,
-        rarities: nextPageQueryPlan.serverFilters.rarities,
-        cardTypes: nextPageQueryPlan.serverFilters.cardTypes,
-        conditions: nextPageQueryPlan.serverFilters.conditions,
-        sets: nextPageQueryPlan.serverFilters.sets,
-        priceRange: nextPageQueryPlan.serverFilters.priceRange
-          ? { min: nextPageQueryPlan.serverFilters.priceRange.min, max: nextPageQueryPlan.serverFilters.priceRange.max ?? undefined }
-          : undefined,
-        signal,
-      }),
-    });
-  }, [queryClient, catalogData, routePage, totalPages, debouncedSearch, category, debouncedFilters]);
-
+  /**
+   * Navegación controlada
+   *
+   * - evita navegación redundante
+   * - evita loops
+   * - mantiene sincronización estado ↔ URL
+   *
+   * ⚠️ Crítico para UX sin flicker
+   */
   const navigateCatalog = useCallback((/** @type {*} */ nextState, /** @type {{ replace?: boolean, intent?: "filters" | "pagination" }} */ options = {}) => {
     const nextHref = buildCatalogHref(pathname, nextState);
 
@@ -299,18 +397,17 @@ export default function SinglesPage({ category, initialData }) {
       return;
     }
 
+    // Navegación controlada para evitar flicker y mantener el restore de scroll bajo control.
     skipNextScrollRestoreRef.current = true;
     setPendingCatalogState(nextState);
     setPendingIntent(options.intent ? { kind: options.intent } : null);
     startCatalogNavigation(() => {
       router[options.replace ? "replace" : "push"](nextHref, { scroll: false });
     });
-  }, [activeCatalogHref, pathname, router, startCatalogNavigation]);
+  }, [activeCatalogHref, pathname, router, startCatalogNavigation, setPendingCatalogState]);
 
   const isResultsPending = isCatalogNavigationPending || (isFetching && !isLoading);
-  const pendingStatusLabel = isResultsPending
-    ? (pendingIntent?.kind === "pagination" ? `Cargando página ${page}...` : pendingIntent?.kind === "filters" ? "Refinando resultados..." : "Actualizando resultados...")
-    : "";
+  const pendingStatusLabel = useMemo(() => buildPendingStatusLabel(isResultsPending, pendingIntent, page), [isResultsPending, pendingIntent, page]);
 
   useEffect(() => {
     if (!isResultsPending) {
@@ -335,7 +432,7 @@ export default function SinglesPage({ category, initialData }) {
       paginationPulseTimeoutRef.current = window.setTimeout(() => {
         paginationPulseTimeoutRef.current = 0;
         setPaginationPulse(null);
-      }, 480);
+      }, PAGINATION_PULSE_MS);
     }
   }, []);
 
@@ -376,6 +473,319 @@ export default function SinglesPage({ category, initialData }) {
       filters,
     }, { intent: "pagination" });
   }, [filters, navigateCatalog, page, searchQuery, totalPages, triggerPaginationPulse]);
+
+  return useMemo(() => ({
+    skipNextScrollRestoreRef,
+    pendingIntent,
+    paginationPulse,
+    isCatalogNavigationPending,
+    isResultsPending,
+    pendingStatusLabel,
+    handleFilterChange,
+    handleClearFilters,
+    handlePreviousPage,
+    handleNextPage,
+  }), [
+    skipNextScrollRestoreRef,
+    pendingIntent,
+    paginationPulse,
+    isCatalogNavigationPending,
+    isResultsPending,
+    pendingStatusLabel,
+    handleFilterChange,
+    handleClearFilters,
+    handlePreviousPage,
+    handleNextPage,
+  ]);
+}
+
+/**
+ * Hook: useCatalogScroll
+ *
+ * Responsabilidad:
+ * - persistir scroll por estado de catálogo
+ * - restaurar posición al volver
+ * - respetar el flag de navegación interna
+ *
+ * ⚠️ Importante:
+ * - depende de referencias estables
+ * - evitar cambios innecesarios que disparen renders
+ */
+function useCatalogScroll({ currentCatalogHref, isLoading, cardsCount, skipNextScrollRestoreRef }) {
+  const restoredScrollRef = useRef("");
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    const saveScrollPosition = () => persistCatalogScroll(currentCatalogHref, window.scrollY);
+    let frameId = 0;
+    let timeoutId = 0;
+    let lastSavedAt = 0;
+
+    const flushScrollSave = () => {
+      lastSavedAt = Date.now();
+      saveScrollPosition();
+    };
+
+    const scheduleScrollSave = () => {
+      const remainingTime = CATALOG_SCROLL_THROTTLE_MS - (Date.now() - lastSavedAt);
+
+      if (remainingTime <= 0) {
+        flushScrollSave();
+        return;
+      }
+
+      if (timeoutId) {
+        return;
+      }
+
+      timeoutId = window.setTimeout(() => {
+        timeoutId = 0;
+        window.requestAnimationFrame(() => {
+          flushScrollSave();
+        });
+      }, remainingTime);
+    };
+
+    const handleScroll = () => {
+      if (frameId) {
+        return;
+      }
+
+      frameId = window.requestAnimationFrame(() => {
+        frameId = 0;
+        scheduleScrollSave();
+      });
+    };
+
+    const handlePageHide = () => {
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+        frameId = 0;
+      }
+
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+        timeoutId = 0;
+      }
+
+      saveScrollPosition();
+    };
+
+    // Persiste por href completo para distinguir página, búsqueda y filtros sin inventar otra llave derivada.
+    flushScrollSave();
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    window.addEventListener("pagehide", handlePageHide);
+
+    return () => {
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+      }
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+      saveScrollPosition();
+      window.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("pagehide", handlePageHide);
+    };
+  }, [currentCatalogHref]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || isLoading) {
+      return;
+    }
+
+    if (restoredScrollRef.current === currentCatalogHref) {
+      return;
+    }
+
+    restoredScrollRef.current = currentCatalogHref;
+
+    if (skipNextScrollRestoreRef.current) {
+      skipNextScrollRestoreRef.current = false;
+      return;
+    }
+
+    const storedScroll = readCatalogScroll(currentCatalogHref);
+
+    if (storedScroll == null) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      window.scrollTo({ top: storedScroll, behavior: "auto" });
+    });
+  }, [currentCatalogHref, isLoading, cardsCount, skipNextScrollRestoreRef]);
+}
+
+/**
+ * Hook: useCatalogPrefetch
+ *
+ * Responsabilidad:
+ * - precalentar la siguiente página del catálogo
+ * - reutilizar el mismo plan de query que la vista activa
+ * - evitar trabajo especulativo innecesario
+ *
+ * ⚠️ Importante:
+ * - depende de referencias estables
+ * - evitar cambios innecesarios que disparen renders
+ */
+function useCatalogPrefetch({ queryClient, catalogData, isFetching, routePage, totalPages, debouncedSearch, category, debouncedFilters }) {
+  const shouldPrefetchNextPage = useMemo(() => (
+    !isFetching &&
+    Boolean(catalogData) &&
+    Array.isArray(catalogData?.cards) &&
+    catalogData.cards.length > 0 &&
+    routePage < totalPages
+  ), [isFetching, catalogData, routePage, totalPages]);
+  const nextPageQueryPlan = useMemo(() => {
+    if (!shouldPrefetchNextPage) {
+      return null;
+    }
+
+    return buildCatalogQueryPlan({
+      page: routePage + 1,
+      pageSize: CATALOG_PAGE_SIZE,
+      search: debouncedSearch,
+      category,
+      filters: debouncedFilters,
+    });
+  }, [shouldPrefetchNextPage, routePage, debouncedSearch, category, debouncedFilters]);
+  const nextPageQueryParams = useMemo(() => {
+    if (!nextPageQueryPlan) {
+      return null;
+    }
+
+    return {
+      page: routePage + 1,
+      pageSize: CATALOG_PAGE_SIZE,
+      search: debouncedSearch,
+      category,
+      rarities: nextPageQueryPlan.serverFilters.rarities,
+      cardTypes: nextPageQueryPlan.serverFilters.cardTypes,
+      conditions: nextPageQueryPlan.serverFilters.conditions,
+      sets: nextPageQueryPlan.serverFilters.sets,
+      priceRange: nextPageQueryPlan.serverFilters.priceRange
+        ? { min: nextPageQueryPlan.serverFilters.priceRange.min, max: nextPageQueryPlan.serverFilters.priceRange.max ?? undefined }
+        : undefined,
+    };
+  }, [nextPageQueryPlan, routePage, debouncedSearch, category]);
+
+  useEffect(() => {
+    // Evita precalentar mientras la página actual todavía se está resolviendo o cuando ya no existe una página siguiente real.
+    if (!shouldPrefetchNextPage || !nextPageQueryPlan || !nextPageQueryParams) {
+      return;
+    }
+
+    void queryClient.prefetchQuery({
+      queryKey: nextPageQueryPlan.cardsQueryKey,
+      staleTime: CATALOG_QUERY_STALE_TIME,
+      gcTime: CATALOG_QUERY_GC_TIME,
+      queryFn: ({ signal }) => fetchCatalogCards({
+        ...nextPageQueryParams,
+        signal,
+      }),
+    });
+  }, [queryClient, shouldPrefetchNextPage, nextPageQueryPlan, nextPageQueryParams]);
+}
+
+/** @param {{ category?: string, initialData?: * }} props */
+export default function SinglesPage({ category, initialData }) {
+  const queryClient = useQueryClient();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const {
+    hasMounted,
+    hasUrlState,
+    setPendingCatalogState,
+    catalogUrlState,
+    routePage,
+    searchQuery,
+    filters,
+    page,
+    currentCatalogHref,
+    activeCatalogHref,
+    debouncedSearch,
+    debouncedFilters,
+    primaryFilter,
+    useServerFallback,
+    serverFilters,
+    cardsQueryKey,
+    initialCatalogSnapshot,
+    serverInitialCatalogData,
+    isInitialView,
+  } = useCatalogState({ pathname, searchParams, category, initialData });
+
+  const {
+    catalogData,
+    cards,
+    isLoading,
+    isFetching,
+    availableSets,
+    totalPages,
+    resultsLabel,
+  } = useCatalogData({
+    category,
+    routePage,
+    hasMounted,
+    isInitialView,
+    debouncedSearch,
+    debouncedFilters,
+    primaryFilter,
+    useServerFallback,
+    serverFilters,
+    cardsQueryKey,
+    initialCatalogSnapshot,
+    serverInitialCatalogData,
+  });
+
+  const {
+    skipNextScrollRestoreRef,
+    pendingIntent,
+    paginationPulse,
+    isCatalogNavigationPending,
+    isResultsPending,
+    pendingStatusLabel,
+    handleFilterChange,
+    handleClearFilters,
+    handlePreviousPage,
+    handleNextPage,
+  } = useCatalogNavigation({
+    pathname,
+    router,
+    catalogUrlState,
+    hasUrlState,
+    currentCatalogHref,
+    activeCatalogHref,
+    searchQuery,
+    filters,
+    page,
+    totalPages,
+    isLoading,
+    isFetching,
+    setPendingCatalogState,
+  });
+
+  useCatalogScroll({
+    currentCatalogHref,
+    isLoading,
+    cardsCount: cards.length,
+    skipNextScrollRestoreRef,
+  });
+
+  useCatalogPrefetch({
+    queryClient,
+    catalogData,
+    isFetching,
+    routePage,
+    totalPages,
+    debouncedSearch,
+    category,
+    debouncedFilters,
+  });
 
   return (
     <div className="mx-auto max-w-[1400px] px-4 py-5 sm:py-6" data-critical="singles-page" data-nav-pending={isCatalogNavigationPending ? "true" : "false"}>

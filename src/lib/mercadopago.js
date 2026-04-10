@@ -72,6 +72,36 @@ export function resolveMercadoPagoPayerEmail(options = {}) {
   return `checkout@${MERCADOPAGO_TEST_PAYER_EMAIL_DOMAIN}`;
 }
 
+/**
+ * @param {unknown} error
+ * @param {{ publicKey?: string | null, origin?: string | null }} [options]
+ */
+export function formatMercadoPagoTokenizationError(error, options = {}) {
+  const rawMessage = error instanceof Error
+    ? String(error.message || "").trim()
+    : String(error || "").trim();
+  const normalizedMessage = rawMessage.toLowerCase();
+  const normalizedOrigin = String(options.origin || "").trim();
+
+  if (normalizedMessage.includes("failed to fetch") || normalizedMessage.includes("load failed") || normalizedMessage.includes("networkerror")) {
+    if (isMercadoPagoTestPublicKey(options.publicKey)) {
+      return [
+        "Mercado Pago rechazo la tokenizacion de tarjeta desde este dominio.",
+        normalizedOrigin ? `Origen actual: ${normalizedOrigin}.` : null,
+        "Revisa que la public key del storefront pertenezca a la misma cuenta que MP_ACCESS_TOKEN y que este dominio este cargado como URL permitida dentro de la aplicacion de Mercado Pago.",
+      ].filter(Boolean).join(" ");
+    }
+
+    return [
+      "Mercado Pago no permitio crear el token de tarjeta desde este origen.",
+      normalizedOrigin ? `Origen actual: ${normalizedOrigin}.` : null,
+      "Verifica las URLs permitidas de la aplicacion y que la public key del storefront sea la correcta.",
+    ].filter(Boolean).join(" ");
+  }
+
+  return rawMessage || "Mercado Pago no pudo tokenizar la tarjeta.";
+}
+
 /** @param {string} value */
 export function isMercadoPagoSandboxUrl(value) {
   try {

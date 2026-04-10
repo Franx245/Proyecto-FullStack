@@ -5,7 +5,7 @@ import cors from "cors";
 import ExcelJS from "exceljs";
 import express from "express";
 import { MercadoPagoConfig, Payment, Preference } from "mercadopago";
-import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import prismaPkg from "@prisma/client";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -76,6 +76,59 @@ import {
   signRefreshToken,
   verifyRefreshToken,
 } from "./src/lib/auth.js";
+import { createCheckoutOrder } from "./src/modules/orders/services/createCheckoutOrder.js";
+import { buildCheckoutExpirationDate } from "./src/modules/orders/services/checkoutUtils.js";
+import {
+  buildCheckoutShippingLabel as buildCheckoutShippingLabelShared,
+  buildFallbackCheckoutShippingQuote as buildFallbackCheckoutShippingQuoteShared,
+  buildFallbackShippingRate as buildFallbackShippingRateShared,
+  buildFallbackShippingRates as buildFallbackShippingRatesShared,
+  getCheckoutCarrierLabel as getCheckoutCarrierLabelShared,
+  normalizeCheckoutCarrier as normalizeCheckoutCarrierShared,
+} from "./src/modules/orders/services/checkoutShippingUtils.js";
+import { updateAdminOrderStatus } from "./src/modules/orders/services/updateAdminOrderStatus.js";
+import { createCheckoutPreference } from "./src/modules/payments/services/createCheckoutPreference.js";
+import { buildApprovedReconciliationPayment } from "./src/modules/payments/services/buildApprovedReconciliationPayment.js";
+import {
+  buildDirectPaymentDebugPayload,
+  buildPaymentDebugOrder,
+} from "./src/modules/payments/services/buildDirectPaymentDebug.js";
+import {
+  buildFinalizeApprovedFakePaymentInput,
+  buildPersistDirectPaymentAttemptInput,
+  buildPersistDirectPaymentProviderFailureInput,
+} from "./src/modules/payments/services/buildDirectPaymentMutationInputs.js";
+import { buildDirectPaymentResponse } from "./src/modules/payments/services/buildDirectPaymentResponse.js";
+import { buildDirectPaymentPayload } from "./src/modules/payments/services/buildDirectPaymentPayload.js";
+import { executeDirectPayment } from "./src/modules/payments/services/executeDirectPayment.js";
+import { buildFakeDirectPaymentResult } from "./src/modules/payments/services/fakeDirectPaymentUtils.js";
+import {
+  alignMercadoPagoItemsTotal,
+  buildCheckoutBackUrl,
+  buildMercadoPagoNotificationUrl,
+  buildMercadoPagoPreferenceItems,
+  buildSandboxShippingLabelUrl,
+  extractMercadoPagoPaymentId,
+  isMercadoPagoCheckoutAutoReturnAllowed,
+  isMercadoPagoSandboxMode,
+  resolveMercadoPagoCheckoutUrl,
+  resolveMercadoPagoPayerEmail,
+  shouldUseMercadoPagoSandbox,
+  shouldUseMercadoPagoSandboxWebhook,
+  splitMercadoPagoFullName,
+  unwrapMercadoPagoBody,
+  validateMercadoPagoWebhookSignature,
+} from "./src/modules/payments/services/mercadoPagoUtils.js";
+import {
+  hasMercadoPagoPaymentAttempt,
+  hasApprovedMercadoPagoPayment,
+  isMercadoPagoProcessingStatus,
+  normalizeFakePaymentStatus,
+  normalizeMercadoPagoPaymentStatus,
+  normalizeMercadoPagoPaymentStatusDetail,
+} from "./src/modules/payments/services/paymentStatusUtils.js";
+import { prepareDirectPaymentContext } from "./src/modules/payments/services/prepareDirectPaymentContext.js";
+import { processMercadoPagoWebhook } from "./src/modules/payments/services/processMercadoPagoWebhook.js";
 
 const { ContactRequestStatus, OrderStatus, ShippingZone, UserRole } = prismaPkg;
 const __filename = fileURLToPath(import.meta.url);
@@ -159,7 +212,6 @@ const ENVIA_WEBHOOK_PATH = "/api/webhooks/envia";
 const MERCADOPAGO_TEST_ACCESS_TOKEN_PREFIX = "TEST-";
 const MP_TEST_BUYER_EMAIL = "test_user_3309000128@testuser.com";
 const SUPPORTED_PAYMENT_MODES = new Set(["fake", "real"]);
-const SUPPORTED_FAKE_PAYMENT_STATUSES = new Set(["approved", "rejected", "pending"]);
 
 function resolveConfiguredPaymentMode() {
   const configured = String(process.env.PAYMENT_MODE || "")
@@ -923,77 +975,38 @@ function getShippingInfo(zone) {
 }
 
 function normalizeCheckoutCarrier(value) {
-  return normalizeEnviaCarrier(value);
+  return normalizeCheckoutCarrierShared(value, normalizeEnviaCarrier);
 }
 
 function buildCheckoutShippingLabel(rate, zone) {
-  const fallbackLabel = getShippingInfo(zone).label;
-  const carrierLabel = String(rate?.carrierLabel || "").trim();
-  const service = String(rate?.service || "").trim();
-
-  if (carrierLabel && service && carrierLabel.toLowerCase() !== service.toLowerCase()) {
-    return `${carrierLabel} · ${service}`;
-  }
-
-  return carrierLabel || fallbackLabel;
+  return buildCheckoutShippingLabelShared(rate, zone, { getShippingInfo });
 }
 
 function getCheckoutCarrierLabel(carrier) {
-  const normalizedCarrier = normalizeCheckoutCarrier(carrier);
-  if (normalizedCarrier === "correo-argentino") {
-    return "Correo Argentino";
-  }
-
-  if (normalizedCarrier === "andreani") {
-    return "Andreani";
-  }
-
-  if (normalizedCarrier === "showroom") {
-    return "Retiro en showroom";
-  }
-
-  return null;
+  return getCheckoutCarrierLabelShared(carrier, normalizeEnviaCarrier);
 }
 
-const FALLBACK_SHIPPING_CARRIERS = ["correo-argentino", "andreani"];
-
 function buildFallbackShippingRate(carrier, zone, { reason = "provider_unavailable" } = {}) {
-  const normalizedCarrier = normalizeCheckoutCarrier(carrier) || FALLBACK_SHIPPING_CARRIERS[0];
-  const shippingInfo = getShippingInfo(zone);
-
-  return {
-    carrier: normalizedCarrier,
-    carrierLabel: getCheckoutCarrierLabel(normalizedCarrier) || shippingInfo.label,
-    service: "Estimado",
-    price: formatCurrency(Number(shippingInfo.cost || 0)),
-    estimatedDays: shippingInfo.eta,
-    currency: "ARS",
-    fallback: true,
-    fallbackReason: reason,
-  };
+  return buildFallbackShippingRateShared(carrier, zone, { reason }, {
+    formatCurrency,
+    getShippingInfo,
+    normalizeEnviaCarrier,
+  });
 }
 
 function buildFallbackShippingRates(zone, options = {}) {
-  const carriers = Array.isArray(options.carriers) && options.carriers.length
-    ? options.carriers
-    : FALLBACK_SHIPPING_CARRIERS;
-
-  return [...new Set(carriers.map((carrier) => normalizeCheckoutCarrier(carrier)).filter(Boolean))]
-    .filter((carrier) => carrier !== "showroom")
-    .map((carrier) => buildFallbackShippingRate(carrier, zone, options));
+  return buildFallbackShippingRatesShared(zone, options, {
+    buildFallbackShippingRate,
+    normalizeCheckoutCarrier,
+  });
 }
 
 function buildFallbackCheckoutShippingQuote(carrier, zone, snapshotId, options = {}) {
-  const fallbackRate = buildFallbackShippingRate(carrier, zone, options);
-
-  return {
-    carrier: fallbackRate.carrier,
-    cost: formatCurrency(Number(fallbackRate.price || 0)),
-    label: buildCheckoutShippingLabel(fallbackRate, zone),
-    snapshotId: snapshotId || null,
-    snapshotSource: "fallback",
-    fallbackReason: options.reason || null,
-  };
+  return buildFallbackCheckoutShippingQuoteShared(carrier, zone, snapshotId, options, {
+    buildCheckoutShippingLabel,
+    buildFallbackShippingRate,
+    formatCurrency,
+  });
 }
 
 function normalizeShippingSnapshotText(value) {
@@ -1223,19 +1236,6 @@ function isOrderPayableStatus(status) {
   return [OrderStatus.PENDING_PAYMENT, OrderStatus.FAILED].includes(status);
 }
 
-function isMercadoPagoProcessingStatus(status) {
-  return ["pending", "in_process", "authorized", "in_mediation"].includes(String(status || "").trim().toLowerCase());
-}
-
-function hasMercadoPagoPaymentAttempt(order) {
-  return Boolean(String(order?.payment_id || "").trim());
-}
-
-function hasApprovedMercadoPagoPayment(order) {
-  return hasMercadoPagoPaymentAttempt(order)
-    && normalizeMercadoPagoPaymentStatus(order?.payment_status) === "approved";
-}
-
 function canCancelOrder(role) {
   return role === UserRole.ADMIN;
 }
@@ -1260,10 +1260,6 @@ function _canTransitionOrder(currentStatus, nextStatus, role) {
 
 function formatCurrency(value) {
   return Number((value || 0).toFixed(2));
-}
-
-function buildCheckoutExpirationDate(baseTime = Date.now()) {
-  return new Date(baseTime + CHECKOUT_EXPIRATION_MINUTES * 60 * 1000);
 }
 
 async function inspectOrderSchemaCompatibility() {
@@ -1386,29 +1382,6 @@ function assertMercadoPagoDirectPaymentsConfigured() {
   assertMercadoPagoWebhookConfigured();
 }
 
-function buildCheckoutBackUrl(statusPath, orderId) {
-  return `${FRONTEND_PUBLIC_URL}/checkout/${statusPath}?orderId=${encodeURIComponent(String(orderId))}`;
-}
-
-function isMercadoPagoCheckoutAutoReturnAllowed(value) {
-  if (!value) {
-    return false;
-  }
-
-  try {
-    const parsed = new URL(value);
-    const hostname = String(parsed.hostname || "").trim().toLowerCase();
-
-    if (!hostname || localHosts.has(hostname) || hostname === "0.0.0.0") {
-      return false;
-    }
-
-    return parsed.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
 async function inspectMercadoPagoAccount() {
   const response = await fetch("https://api.mercadopago.com/users/me", {
     headers: {
@@ -1453,76 +1426,8 @@ async function getMercadoPagoAccountDetails() {
   return mercadoPagoAccountState.inflight;
 }
 
-function shouldUseMercadoPagoSandbox(accountDetails) {
-  return Boolean(accountDetails?.isTestUser);
-}
-
-function shouldUseMercadoPagoSandboxWebhook(accountDetails) {
-  return shouldUseMercadoPagoSandbox(accountDetails)
-    || MERCADOPAGO_ACCESS_TOKEN.startsWith(MERCADOPAGO_TEST_ACCESS_TOKEN_PREFIX);
-}
-
-function isMercadoPagoWebhookBaseUrlAllowed(value) {
-  if (!value) {
-    return false;
-  }
-
-  try {
-    const parsed = new URL(value);
-    const hostname = String(parsed.hostname || "").trim().toLowerCase();
-
-    if (!hostname || ["localhost", "127.0.0.1", "0.0.0.0"].includes(hostname)) {
-      return false;
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function buildMercadoPagoNotificationUrl({ useSandboxWebhook = false } = {}) {
-  if (!isMercadoPagoWebhookBaseUrlAllowed(BACKEND_PUBLIC_URL)) {
-    return null;
-  }
-
-  const webhookPath = useSandboxWebhook ? MERCADOPAGO_WEBHOOK_PATHS[1] : MERCADOPAGO_WEBHOOK_PATHS[0];
-  return `${BACKEND_PUBLIC_URL}${webhookPath}?source_news=webhooks`;
-}
-
-function splitMercadoPagoFullName(fullName) {
-  const normalized = String(fullName || "")
-    .trim()
-    .replace(/\s+/g, " ");
-
-  if (!normalized) {
-    return { firstName: null, lastName: null };
-  }
-
-  const parts = normalized.split(" ");
-  if (parts.length === 1) {
-    return { firstName: parts[0], lastName: null };
-  }
-
-  return {
-    firstName: parts[0],
-    lastName: parts.slice(1).join(" "),
-  };
-}
-
-async function resolveMercadoPagoPayerEmail(order) {
-  const email = String(order?.customerEmail || order?.user?.email || "").trim().toLowerCase();
-  const isSandbox = process.env.MP_ACCESS_TOKEN?.startsWith("TEST");
-
-  if (!isSandbox) {
-    return email;
-  }
-
-  return MP_TEST_BUYER_EMAIL;
-}
-
 async function resolveMercadoPagoPayer(order, options = {}) {
-  const email = await resolveMercadoPagoPayerEmail(order);
+  const email = await resolveMercadoPagoPayerEmail(order, process.env.MP_ACCESS_TOKEN, MP_TEST_BUYER_EMAIL);
   logEvent("PAYMENT_PAYER", "Final payer email resolved", {
     orderId: order?.id || null,
     payerEmail: email,
@@ -1547,126 +1452,6 @@ async function resolveMercadoPagoPayer(order, options = {}) {
   return Object.keys(payer).length > 0 ? payer : undefined;
 }
 
-function buildMercadoPagoPreferenceItems(order, cardsById, exchangeRate) {
-  const items = order.items.map((item) => {
-    const card = cardsById.get(item.cardId);
-    return {
-      id: String(item.cardId),
-      title: String(card?.name || `Carta #${item.cardId}`).slice(0, 120),
-      description: String(card?.description || card?.setName || card?.cardType || "Carta coleccionable").slice(0, 240),
-      category_id: "others",
-      quantity: item.quantity,
-      currency_id: "ARS",
-      unit_price: formatCurrency(item.price * exchangeRate),
-    };
-  });
-
-  if (order.shippingCost > 0) {
-    items.push({
-      id: `shipping-${order.id}`,
-      title: String(order.shippingLabel || "Envio").slice(0, 120),
-      description: String(order.shippingAddress || order.shippingZone || "Costo de envio").slice(0, 240),
-      category_id: "services",
-      quantity: 1,
-      currency_id: "ARS",
-      unit_price: formatCurrency(order.shippingCost * exchangeRate),
-    });
-  }
-
-  return items;
-}
-
-function alignMercadoPagoItemsTotal(items, totalArs) {
-  if (!Array.isArray(items) || items.length === 0) {
-    return [
-      {
-        id: "order-total",
-        title: "RareHunter Order",
-        description: "Checkout total",
-        category_id: "others",
-        quantity: 1,
-        currency_id: "ARS",
-        unit_price: formatCurrency(totalArs),
-      },
-    ];
-  }
-
-  const currentTotal = formatCurrency(items.reduce((sum, item) => sum + (item.unit_price * item.quantity), 0));
-  const delta = formatCurrency(totalArs - currentTotal);
-
-  if (delta === 0) {
-    return items;
-  }
-
-  const lastItem = items[items.length - 1];
-  const adjustedUnitPrice = formatCurrency(lastItem.unit_price + (delta / Math.max(lastItem.quantity || 1, 1)));
-
-  items[items.length - 1] = {
-    ...lastItem,
-    unit_price: adjustedUnitPrice > 0 ? adjustedUnitPrice : lastItem.unit_price,
-  };
-
-  return items;
-}
-
-function resolveMercadoPagoCheckoutUrl(preference, { useSandbox }) {
-  if (useSandbox) {
-    return preference?.sandbox_init_point || preference?.init_point || null;
-  }
-
-  return preference?.init_point || preference?.sandbox_init_point || null;
-}
-
-function normalizeFakePaymentStatus(value) {
-  const normalized = String(value || "approved")
-    .trim()
-    .toLowerCase();
-
-  return SUPPORTED_FAKE_PAYMENT_STATUSES.has(normalized)
-    ? normalized
-    : "approved";
-}
-
-function buildFakePaymentId({ orderId, idempotencyKey, status }) {
-  const hash = createHash("sha1")
-    .update(JSON.stringify({
-      orderId,
-      idempotencyKey: String(idempotencyKey || "").trim() || "anonymous",
-      status,
-      provider: "fake",
-    }))
-    .digest("hex")
-    .slice(0, 16);
-
-  return `fake_${orderId}_${hash}`;
-}
-
-function buildFakeDirectPaymentResult({ orderId, idempotencyKey, transactionAmount, paymentMethodId, issuerId, installments, requestedStatus }) {
-  const status = normalizeFakePaymentStatus(requestedStatus);
-
-  return {
-    id: buildFakePaymentId({ orderId, idempotencyKey, status }),
-    provider: "fake",
-    status,
-    status_detail: status === "approved"
-      ? "accredited"
-      : status === "rejected"
-        ? "insufficient_funds"
-        : null,
-    transaction_amount: formatCurrency(Number(transactionAmount || 0)),
-    installments: Number.isInteger(Number(installments)) && Number(installments) > 0
-      ? Number(installments)
-      : 1,
-    payment_method_id: paymentMethodId || null,
-    issuer_id: issuerId || null,
-    external_reference: String(orderId),
-    metadata: {
-      order_id: orderId,
-      provider: "fake",
-    },
-  };
-}
-
 async function createFakeDirectPayment({ prepared, idempotencyKey, paymentMethodId, issuerId, installments, requestedStatus }) {
   const payment = buildFakeDirectPaymentResult({
     orderId: prepared.order.id,
@@ -1676,6 +1461,9 @@ async function createFakeDirectPayment({ prepared, idempotencyKey, paymentMethod
     issuerId,
     installments,
     requestedStatus,
+    dependencies: {
+      formatCurrency,
+    },
   });
 
   logEvent("PAYMENT_FLOW", "Fake payment resolved", {
@@ -1847,107 +1635,6 @@ function safeJsonParse(value) {
   }
 }
 
-function unwrapMercadoPagoBody(payload) {
-  return payload?.body || payload?.response || payload || null;
-}
-
-function normalizeMercadoPagoPaymentStatus(value) {
-  return String(value || "").trim().toLowerCase();
-}
-
-function normalizeMercadoPagoPaymentStatusDetail(value) {
-  const normalized = String(value || "").trim().toLowerCase();
-  return normalized || null;
-}
-
-function parseMercadoPagoSignature(headerValue) {
-  const parts = String(headerValue || "")
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
-
-  return parts.reduce((result, part) => {
-    const [key, value] = part.split("=", 2);
-    if (key === "ts") {
-      result.ts = String(value || "").trim();
-    }
-    if (key === "v1") {
-      result.v1 = String(value || "").trim();
-    }
-    return result;
-  }, { ts: "", v1: "" });
-}
-
-function buildMercadoPagoWebhookManifest(paymentId, requestId, ts) {
-  const normalizedPaymentId = String(paymentId || "").trim().toLowerCase();
-  const normalizedRequestId = String(requestId || "").trim();
-  const normalizedTs = String(ts || "").trim();
-  const parts = [];
-
-  if (normalizedPaymentId) {
-    parts.push(`id:${normalizedPaymentId}`);
-  }
-  if (normalizedRequestId) {
-    parts.push(`request-id:${normalizedRequestId}`);
-  }
-  if (normalizedTs) {
-    parts.push(`ts:${normalizedTs}`);
-  }
-
-  return `${parts.join(";")};`;
-}
-
-function validateMercadoPagoWebhookSignature(req, paymentId) {
-  const signature = parseMercadoPagoSignature(req.headers["x-signature"]);
-  const requestId = String(req.headers["x-request-id"] || "").trim();
-
-  if (!signature.ts || !signature.v1 || !requestId || !paymentId) {
-    throw createAppError("Mercado Pago webhook signature headers are incomplete", {
-      statusCode: 401,
-      code: "INVALID_WEBHOOK_SIGNATURE",
-    });
-  }
-
-  const manifest = buildMercadoPagoWebhookManifest(paymentId, requestId, signature.ts);
-  const expectedSignature = createHmac("sha256", MERCADOPAGO_WEBHOOK_SECRET)
-    .update(manifest)
-    .digest("hex");
-  const receivedSignature = signature.v1.toLowerCase();
-  const isValid = expectedSignature.length === receivedSignature.length
-    && timingSafeEqual(Buffer.from(expectedSignature), Buffer.from(receivedSignature));
-
-  if (!isValid) {
-    throw createAppError("Mercado Pago webhook signature mismatch", {
-      statusCode: 401,
-      code: "INVALID_WEBHOOK_SIGNATURE",
-    });
-  }
-
-  return {
-    providerRequestId: requestId,
-    manifest,
-    ts: signature.ts,
-  };
-}
-
-function extractMercadoPagoPaymentId(payload, query) {
-  const candidates = [
-    payload?.data?.id,
-    payload?.id,
-    query?.id,
-    query?.["data.id"],
-  ];
-
-  for (const candidate of candidates) {
-    const normalized = String(candidate || "").trim();
-    if (normalized) {
-      return normalized;
-    }
-  }
-
-  return "";
-}
-
 function resolveOrderShipmentService(order, explicitService = null) {
   const requestedService = String(explicitService || "").trim();
   if (requestedService) {
@@ -1963,15 +1650,6 @@ function resolveOrderShipmentService(order, explicitService = null) {
   }
 
   return "Estándar";
-}
-
-function isMercadoPagoSandboxMode() {
-  return MERCADOPAGO_ACCESS_TOKEN.startsWith(MERCADOPAGO_TEST_ACCESS_TOKEN_PREFIX);
-}
-
-function buildSandboxShippingLabelUrl(orderId) {
-  const labelPath = `/api/shipping/label/${encodeURIComponent(String(orderId))}`;
-  return BACKEND_PUBLIC_URL ? `${BACKEND_PUBLIC_URL}${labelPath}` : labelPath;
 }
 
 const LOCALHOST_SIMULATED_SHIPMENT_ID_PREFIX = "localhost_simulated_";
@@ -2049,7 +1727,7 @@ function buildLocalhostSimulatedShippingUpdate(order) {
   }
 
   if (!shippingLabelUrl) {
-    updateData.shippingLabelUrl = buildSandboxShippingLabelUrl(order.id);
+    updateData.shippingLabelUrl = buildSandboxShippingLabelUrl(order.id, BACKEND_PUBLIC_URL);
   }
 
   if (!shipmentStatus) {
@@ -2720,8 +2398,8 @@ async function createShipment({ order, carrier = null, service = null, isSandbox
       shipmentId: `sandbox_${order.id}`,
       trackingNumber: `TRACK-${Date.now()}`,
       carrier: resolvedCarrier,
-      labelUrl: buildSandboxShippingLabelUrl(order.id),
-      label: buildSandboxShippingLabelUrl(order.id),
+      labelUrl: buildSandboxShippingLabelUrl(order.id, BACKEND_PUBLIC_URL),
+      label: buildSandboxShippingLabelUrl(order.id, BACKEND_PUBLIC_URL),
       status: "created",
     };
 
@@ -2804,7 +2482,7 @@ async function createOrderShipmentWithEffects(order, { carrier = null, service =
   }
 
   const resolvedService = resolveOrderShipmentService(order, service);
-  const isSandbox = isMercadoPagoSandboxMode();
+  const isSandbox = isMercadoPagoSandboxMode(MERCADOPAGO_ACCESS_TOKEN, MERCADOPAGO_TEST_ACCESS_TOKEN_PREFIX);
   const enviaPayload = buildEnviaShipmentPayloadLog(order, {
     carrier: normalizedCarrier,
     service: resolvedService,
@@ -4881,7 +4559,7 @@ async function prepareOrderForPreference(req, { orderId, userId }) {
 
   const exchangeRate = 1;
   const totalArs = formatCurrency(existingOrder.total);
-  const expiresAt = buildCheckoutExpirationDate();
+  const expiresAt = buildCheckoutExpirationDate(Date.now(), CHECKOUT_EXPIRATION_MINUTES);
 
   const preparedOrderResult = await prisma.$transaction(async (tx) => {
     await lockOrderForUpdate(tx, orderId);
@@ -5001,7 +4679,10 @@ async function prepareOrderForDirectPayment(req, { orderId, userId }) {
 
   const exchangeRate = existingOrder.exchange_rate || 1;
   const totalArs = formatCurrency(existingOrder.total_ars ?? existingOrder.total);
-  const expiresAt = existingOrder.expires_at || buildCheckoutExpirationDate(existingOrder.createdAt?.getTime?.() || Date.now());
+  const expiresAt = existingOrder.expires_at || buildCheckoutExpirationDate(
+    existingOrder.createdAt?.getTime?.() || Date.now(),
+    CHECKOUT_EXPIRATION_MINUTES
+  );
 
   const preparedOrderResult = await prisma.$transaction(async (tx) => {
     await lockOrderForUpdate(tx, orderId);
@@ -5239,86 +4920,6 @@ async function scheduleMercadoPagoReconciliation(req, { payment, paymentIdOverri
 
 export async function processQueuedMercadoPagoReconciliation(data = {}) {
   return processQueuedMercadoPagoReconciliationShared(data);
-}
-
-async function createCheckoutPreferenceForOrder(req, { orderId, userId }) {
-  assertMercadoPagoCheckoutConfigured();
-
-  const prepared = await prepareOrderForPreference(req, { orderId, userId });
-  const preferenceCardsById = await getOrderCardsMap([prepared.order]);
-  const mercadoPagoAccount = await getMercadoPagoAccountDetails();
-  const useSandboxCheckout = shouldUseMercadoPagoSandbox(mercadoPagoAccount);
-  const notificationUrl = buildMercadoPagoNotificationUrl({
-    useSandboxWebhook: shouldUseMercadoPagoSandboxWebhook(mercadoPagoAccount),
-  });
-  const preferenceItems = alignMercadoPagoItemsTotal(
-    buildMercadoPagoPreferenceItems(prepared.order, preferenceCardsById, prepared.exchangeRate),
-    prepared.totalArs
-  );
-  const backUrls = {
-    success: buildCheckoutBackUrl("success", prepared.order.id),
-    failure: buildCheckoutBackUrl("failure", prepared.order.id),
-    pending: buildCheckoutBackUrl("pending", prepared.order.id),
-  };
-  const enableAutoReturn = isMercadoPagoCheckoutAutoReturnAllowed(backUrls.success);
-  const preferencePayload = {
-    items: preferenceItems,
-    external_reference: String(prepared.order.id),
-    ...(notificationUrl ? { notification_url: notificationUrl } : {}),
-    back_urls: backUrls,
-    ...(enableAutoReturn ? { auto_return: "approved" } : {}),
-    statement_descriptor: "DUELVAULT",
-    expires: true,
-    expiration_date_from: new Date().toISOString(),
-    expiration_date_to: prepared.expiresAt.toISOString(),
-    payer: await resolveMercadoPagoPayer(prepared.order, { accountDetails: mercadoPagoAccount }),
-    metadata: {
-      order_id: prepared.order.id,
-      request_id: req.requestContext?.requestId || null,
-      checkout_mode: useSandboxCheckout ? "sandbox" : "production",
-    },
-  };
-
-  if (!enableAutoReturn) {
-    logEvent("PAYMENT_FLOW", "Mercado Pago auto_return disabled for non-public checkout URL", {
-      requestId: req.requestContext?.requestId || null,
-      orderId: prepared.order.id,
-      successBackUrl: backUrls.success,
-    });
-  }
-
-  const preferenceResponse = await mercadoPagoPreferenceClient.create({ body: preferencePayload });
-  const preference = unwrapMercadoPagoBody(preferenceResponse);
-  const initPoint = resolveMercadoPagoCheckoutUrl(preference, { useSandbox: useSandboxCheckout });
-
-  if (!initPoint) {
-    throw createAppError("Mercado Pago preference did not return init_point", {
-      statusCode: 502,
-      code: "CHECKOUT_PREFERENCE_INVALID",
-    });
-  }
-
-  const updatedOrder = await prisma.$transaction(async (tx) => {
-    await lockOrderForUpdate(tx, prepared.order.id);
-    return tx.order.update({
-      where: { id: prepared.order.id },
-      data: {
-        preference_id: preference?.id ? String(preference.id) : null,
-      },
-      include: { items: true, user: true, address: true },
-    });
-  });
-
-  const cardsById = await getOrderCardsMap([updatedOrder]);
-  return {
-    order: updatedOrder,
-    cardsById,
-    initPoint,
-    checkoutMode: useSandboxCheckout ? "sandbox" : "production",
-    exchangeRate: prepared.exchangeRate,
-    totalArs: prepared.totalArs,
-    expiresAt: prepared.expiresAt,
-  };
 }
 
 function assertCronAuthorized(req) {
@@ -6153,6 +5754,7 @@ async function getPublicStorefrontConfig() {
       const snapshot = {
         support_whatsapp_number: supportWhatsappNumber,
         support_email: supportEmail,
+        payment_mode: PAYMENT_MODE,
         storefront_url: FRONTEND_PUBLIC_URL || null,
         storefront_port: String(process.env.NEXT_STORE_PORT || 3005).trim() || "3005",
         admin_url: String(process.env.ADMIN_URL || "").trim().replace(/\/$/, "") || null,
@@ -6176,6 +5778,7 @@ async function getPublicStorefrontConfig() {
     const fallbackSnapshot = {
       support_whatsapp_number: String(process.env.SUPPORT_WHATSAPP_NUMBER || "").trim(),
       support_email: String(process.env.SUPPORT_EMAIL || "").trim().toLowerCase(),
+      payment_mode: PAYMENT_MODE,
       storefront_url: FRONTEND_PUBLIC_URL || null,
       storefront_port: String(process.env.NEXT_STORE_PORT || 3005).trim() || "3005",
       admin_url: String(process.env.ADMIN_URL || "").trim().replace(/\/$/, "") || null,
@@ -7430,149 +7033,59 @@ app.post("/api/checkout", requireAuth, checkoutRateLimit, async (req, res) => {
       return;
     }
 
-    const customerName = typeof req.body?.customer_name === "string" && req.body.customer_name.trim()
-      ? req.body.customer_name.trim()
-      : user.fullName;
-    const customerEmail = typeof req.body?.customer_email === "string" && req.body.customer_email.trim()
-      ? normalizeEmail(req.body.customer_email)
-      : user.email;
-    const fallbackPhone = typeof req.body?.phone === "string" && req.body.phone.trim()
-      ? req.body.phone.trim()
-      : user.phone;
+    const checkoutResult = await createCheckoutOrder({
+      userId,
+      payload: req.body || {},
+      user,
+      normalizedItems,
+      requestId: req.requestContext?.requestId || null,
+      dependencies: {
+        OrderStatus,
+        attachMetadata,
+        buildCheckoutAddress,
+        buildCheckoutExpirationDate: (baseTime = Date.now()) => buildCheckoutExpirationDate(baseTime, CHECKOUT_EXPIRATION_MINUTES),
+        createAppError,
+        formatCurrency,
+        normalizeEmail,
+        prisma,
+        resolveCheckoutShippingQuote,
+        toOrderResponse,
+        withDatabaseConnection,
+      },
+    });
 
-    const result = await withDatabaseConnection(() => prisma.$transaction(async (tx) => {
-      const cards = await tx.card.findMany({
-        where: { id: { in: normalizedItems.map((item) => item.cardId) } },
-      });
+    const responsePayload = checkoutResult.responsePayload;
 
-      const cardMap = new Map(cards.map((card) => [card.id, card]));
-      const cardsById = new Map(attachMetadata(cards).map((card) => [card.id, card]));
-      let subtotal = 0;
-
-      const unavailableItems = normalizedItems.filter((item) => {
-        const card = cardMap.get(item.cardId);
-        return !card || !card.isVisible;
-      });
-
-      if (unavailableItems.length > 0) {
-        throw createAppError("Hay cartas del carrito que ya no están disponibles", {
-          code: "CARD_UNAVAILABLE",
-          unavailableCardIds: unavailableItems.map((item) => item.cardId),
-        });
-      }
-
-      const insufficientStockItems = normalizedItems.filter((item) => {
-        const card = cardMap.get(item.cardId);
-        return !card || Number(card.stock) < item.quantity;
-      });
-
-      if (insufficientStockItems.length > 0) {
-        throw createAppError("Hay cartas del carrito sin stock suficiente", {
-          statusCode: 409,
-          code: "INSUFFICIENT_STOCK",
-          unavailableCardIds: insufficientStockItems.map((item) => item.cardId),
-        });
-      }
-
-      for (const item of normalizedItems) {
-        const card = cardMap.get(item.cardId);
-        subtotal += card.price * item.quantity;
-      }
-
-      const delivery = await buildCheckoutAddress(tx, userId, req.body || {}, fallbackPhone);
-      const shippingQuote = await resolveCheckoutShippingQuote({
-        userId,
-        payload: req.body || {},
-        delivery,
-        items: normalizedItems,
-        requestId: req.requestContext?.requestId || null,
-      });
-      const total = formatCurrency(subtotal + shippingQuote.cost);
-      const expiresAt = buildCheckoutExpirationDate();
-
-      const order = await tx.order.create({
-        data: {
-          userId,
-          addressId: delivery.addressId,
-          subtotal: formatCurrency(subtotal),
-          shippingCost: shippingQuote.cost,
-          total,
-          currency: "ARS",
-          exchange_rate: 1,
-          total_ars: total,
-          status: OrderStatus.PENDING_PAYMENT,
-          expires_at: expiresAt,
-          payment_status: null,
-          payment_status_detail: null,
-          shippingZone: delivery.shippingZone,
-          shippingLabel: shippingQuote.label,
-          carrier: shippingQuote.carrier,
-          customerName,
-          customerEmail,
-          customerPhone: delivery.snapshot.customerPhone,
-          shippingAddress: delivery.snapshot.shippingAddress,
-          shippingCity: delivery.snapshot.shippingCity,
-          shippingProvince: delivery.snapshot.shippingProvince,
-          shippingPostalCode: delivery.snapshot.shippingPostalCode,
-          notes: typeof req.body?.notes === "string" && req.body.notes.trim() ? req.body.notes.trim() : null,
-          items: {
-            create: normalizedItems.map((item) => {
-              const card = cardMap.get(item.cardId);
-              return {
-                cardId: item.cardId,
-                quantity: item.quantity,
-                price: card.price,
-              };
-            }),
-          },
-        },
-        include: { items: true, user: true, address: true },
-      });
-
-      return { order, cardsById, shippingQuote };
-    }), { maxWaitMs: 5000 });
-
-    const responseOrder = toOrderResponse(result.order, result.cardsById);
-
-    const responsePayload = {
-      order: responseOrder,
-      init_point: null,
-      exchange_rate: responseOrder.exchange_rate ?? null,
-      total_ars: responseOrder.total_ars ?? null,
-      expires_at: responseOrder.expires_at ?? null,
-      payment_redirect_available: false,
-    };
-
-    if (result.shippingQuote?.snapshotSource === "snapshot") {
+    if (checkoutResult.shippingQuote?.snapshotSource === "snapshot") {
       logEvent("SHIPPING_SNAPSHOT_USED", "Shipping snapshot used for checkout", {
         requestId: req.requestContext?.requestId || null,
-        orderId: result.order.id,
-        snapshotId: result.shippingQuote.snapshotId || null,
+        orderId: checkoutResult.order.id,
+        snapshotId: checkoutResult.shippingQuote.snapshotId || null,
       });
     }
 
     try {
       await recordActivity(userId, "CHECKOUT_CREATED", req, {
-        orderId: result.order.id,
+        orderId: checkoutResult.order.id,
         paymentFlow: "checkout_api",
       });
     } catch (activityError) {
       logEvent("SERVER_ERROR", "Failed to record checkout activity", {
         requestId: req.requestContext?.requestId || null,
-        orderId: result.order.id,
+        orderId: checkoutResult.order.id,
         error: activityError,
       });
     }
 
     logEvent("CHECKOUT_FLOW", "Checkout created", {
       requestId: req.requestContext?.requestId || null,
-      orderId: result.order.id,
-      subtotal: result.order.subtotal,
-      shipping: result.order.shippingCost,
-      total: result.order.total,
-      shippingZone: result.order.shippingZone,
-      carrier: result.order.carrier,
-      shippingLabel: result.order.shippingLabel,
+      orderId: checkoutResult.order.id,
+      subtotal: checkoutResult.order.subtotal,
+      shipping: checkoutResult.order.shippingCost,
+      total: checkoutResult.order.total,
+      shippingZone: checkoutResult.order.shippingZone,
+      carrier: checkoutResult.order.carrier,
+      shippingLabel: checkoutResult.order.shippingLabel,
       paymentRedirectAvailable: false,
     });
 
@@ -7581,12 +7094,12 @@ app.post("/api/checkout", requireAuth, checkoutRateLimit, async (req, res) => {
 
     /* ── Async post-checkout: cache invalidation + realtime event ── */
     enqueueJob("process-order-post-checkout", {
-      orderId: result.order.id,
+      orderId: checkoutResult.order.id,
       items: normalizedItems,
-    }, { jobId: `post-checkout-${result.order.id}` }).catch((postResponseError) => {
+    }, { jobId: `post-checkout-${checkoutResult.order.id}` }).catch((postResponseError) => {
       logEvent("JOB_FAILED", "Failed to enqueue post-checkout job", {
         requestId: req.requestContext?.requestId || null,
-        orderId: result.order.id,
+        orderId: checkoutResult.order.id,
         error: postResponseError,
       });
     });
@@ -7659,7 +7172,32 @@ app.post("/api/checkout/create-preference", requireAuth, checkoutRateLimit, asyn
       return;
     }
 
-    const preferenceResult = await createCheckoutPreferenceForOrder(req, { orderId, userId });
+    const preferenceResult = await createCheckoutPreference({
+      orderId,
+      userId,
+      requestId: req.requestContext?.requestId || null,
+      dependencies: {
+        alignMercadoPagoItemsTotal: (items, totalArs) => alignMercadoPagoItemsTotal(items, totalArs, formatCurrency),
+        assertMercadoPagoCheckoutConfigured,
+        buildCheckoutBackUrl: (statusPath, orderId) => buildCheckoutBackUrl(FRONTEND_PUBLIC_URL, statusPath, orderId),
+        buildMercadoPagoNotificationUrl: (options) => buildMercadoPagoNotificationUrl(BACKEND_PUBLIC_URL, MERCADOPAGO_WEBHOOK_PATHS, options),
+        buildMercadoPagoPreferenceItems: (order, cardsById, exchangeRate) => buildMercadoPagoPreferenceItems(order, cardsById, exchangeRate, formatCurrency),
+        createAppError,
+        getMercadoPagoAccountDetails,
+        getOrderCardsMap,
+        isMercadoPagoCheckoutAutoReturnAllowed: (value) => isMercadoPagoCheckoutAutoReturnAllowed(value, localHosts),
+        lockOrderForUpdate,
+        logEvent,
+        mercadoPagoPreferenceClient,
+        prepareOrderForPreference: (input) => prepareOrderForPreference(req, input),
+        prisma,
+        resolveMercadoPagoCheckoutUrl,
+        resolveMercadoPagoPayer,
+        shouldUseMercadoPagoSandbox,
+        shouldUseMercadoPagoSandboxWebhook: (accountDetails) => shouldUseMercadoPagoSandboxWebhook(accountDetails, MERCADOPAGO_ACCESS_TOKEN, MERCADOPAGO_TEST_ACCESS_TOKEN_PREFIX),
+        unwrapMercadoPagoBody,
+      },
+    });
     const responsePayload = {
       init_point: preferenceResult.initPoint,
       exchange_rate: preferenceResult.exchangeRate,
@@ -7736,69 +7274,6 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
 
   const getPreparedOrder = () => (prepared && prepared.order ? prepared.order : null);
 
-  const buildPaymentDebugOrder = (order) => {
-    if (!order) {
-      return null;
-    }
-
-    return {
-      id: order.id,
-      status: order.status || null,
-      subtotal: order.subtotal ?? null,
-      shippingCost: order.shippingCost ?? order.shipping_cost ?? null,
-      total: order.total ?? null,
-      totalArs: order.total_ars ?? null,
-      currency: order.currency || null,
-      paymentId: order.payment_id || null,
-      paymentStatus: order.payment_status || null,
-      paymentStatusDetail: order.payment_status_detail || null,
-      carrier: order.carrier || null,
-      shippingLabel: order.shippingLabel || order.shipping_label || null,
-      customerEmail: order.customerEmail || order.customer_email || null,
-      expiresAt: order.expires_at || null,
-      updatedAt: order.updatedAt || null,
-    };
-  };
-
-  const buildPaymentDebugValidation = (error) => {
-    const providerCause = Array.isArray(error?.providerPayload?.cause) ? error.providerPayload.cause[0] : null;
-    const preparedOrder = getPreparedOrder();
-
-    return {
-      hasOrderId: Number.isFinite(paymentDebugContext.orderId),
-      hasToken: Boolean(paymentDebugContext.token),
-      hasPaymentMethodId: Boolean(paymentDebugContext.paymentMethodId),
-      hasIssuerId: Boolean(paymentDebugContext.issuerId),
-      installmentsValid: Number.isInteger(paymentDebugContext.installments) && paymentDebugContext.installments > 0,
-      hasIdentification: Boolean(paymentDebugContext.identificationType && paymentDebugContext.identificationNumber),
-      orderPrepared: Boolean(preparedOrder?.id),
-      orderStatus: preparedOrder?.status || null,
-      orderPayable: Boolean(preparedOrder && isOrderPayableStatus(preparedOrder.status)),
-      paymentMode: paymentDebugContext.paymentMode,
-      testCard: paymentDebugContext.testCard,
-      totalPositive: Number(paymentDebugContext.amount.transactionAmount || 0) > 0,
-      notificationUrlConfigured: Boolean(paymentDebugContext.notificationUrl),
-      providerIdempotencyKey: paymentDebugContext.providerIdempotencyKey || null,
-      payerEmail: paymentDebugContext.paymentPayload?.payer?.email || null,
-      providerStatusCode: error?.statusCode || null,
-      providerReason: error?.reason || null,
-      providerMessage: error?.message || null,
-      providerCode: providerCause?.code || error?.providerPayload?.error || null,
-      providerType: error?.providerPayload?.type || null,
-    };
-  };
-
-  const buildPaymentDebugPayload = (error) => ({
-    order: buildPaymentDebugOrder(getPreparedOrder()),
-    amount: {
-      transactionAmount: paymentDebugContext.amount.transactionAmount,
-      orderTotal: paymentDebugContext.amount.orderTotal,
-      totalArs: paymentDebugContext.amount.totalArs,
-    },
-    token: paymentDebugContext.token || null,
-    validation: buildPaymentDebugValidation(error),
-  });
-
   try {
     assertMercadoPagoDirectPaymentsConfigured();
     await ensureOrderSchemaReady();
@@ -7827,6 +7302,7 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
 
     userId = Number(req.user.sub);
     const orderId = Number(req.body?.orderId);
+    const isFakePayment = PAYMENT_MODE === "fake";
     const token = String(req.body?.token || "").trim();
     const paymentMethodId = String(req.body?.payment_method_id || "").trim();
     const issuerId = String(req.body?.issuer_id || "").trim();
@@ -7834,20 +7310,25 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
     const identificationType = String(req.body?.identification?.type || "").trim();
     const identificationNumber = String(req.body?.identification?.number || "").trim();
     const testCard = normalizeFakePaymentStatus(req.body?.test_card);
+    const effectiveToken = token || (isFakePayment ? `fake_token_${orderId || Date.now()}` : "");
+    const effectivePaymentMethodId = paymentMethodId || (isFakePayment ? "visa" : "");
+    const effectiveInstallments = Number.isInteger(installments) && installments > 0
+      ? installments
+      : (isFakePayment ? 1 : installments);
 
     logger.info("TOKEN_RECEIVED", {
       requestId: req.requestContext?.requestId || null,
       orderId: Number.isFinite(orderId) ? orderId : null,
-      present: Boolean(token),
+      present: Boolean(effectiveToken),
     });
 
     paymentDebugContext = {
       ...paymentDebugContext,
       orderId,
-      token,
-      paymentMethodId,
+      token: effectiveToken,
+      paymentMethodId: effectivePaymentMethodId,
       issuerId,
-      installments,
+      installments: effectiveInstallments,
       identificationType,
       identificationNumber,
       testCard,
@@ -7858,69 +7339,62 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
       return;
     }
 
-    if (!token) {
+    if (!isFakePayment && !token) {
       res.status(400).json({ error: "Missing card token", code: "MISSING_CARD_TOKEN" });
       return;
     }
 
-    if (!paymentMethodId) {
+    if (!isFakePayment && !paymentMethodId) {
       res.status(400).json({ error: "Missing payment method", code: "MISSING_PAYMENT_METHOD" });
       return;
     }
 
-    if (!Number.isInteger(installments) || installments <= 0) {
+    if (!isFakePayment && (!Number.isInteger(installments) || installments <= 0)) {
       res.status(400).json({ error: "Invalid installments", code: "INVALID_INSTALLMENTS" });
       return;
     }
 
     prepared = await prepareOrderForDirectPayment(req, { orderId, userId });
-    const isFakePayment = PAYMENT_MODE === "fake";
-    const mercadoPagoAccount = isFakePayment ? null : await getMercadoPagoAccountDetails();
-    const notificationUrl = isFakePayment
-      ? null
-      : buildMercadoPagoNotificationUrl({
-          useSandboxWebhook: shouldUseMercadoPagoSandboxWebhook(mercadoPagoAccount),
-        });
-    const providerIdempotencyKey = String(idempotency.key || req.body?.mutation_id || `${orderId}-${Date.now()}`);
+    const directPaymentContext = await prepareDirectPaymentContext({
+      orderId,
+      isFakePayment,
+      idempotencyKey: idempotency.key,
+      mutationId: req.body?.mutation_id,
+      dependencies: {
+        buildMercadoPagoNotificationUrl: (options) => buildMercadoPagoNotificationUrl(BACKEND_PUBLIC_URL, MERCADOPAGO_WEBHOOK_PATHS, options),
+        getMercadoPagoAccountDetails,
+        shouldUseMercadoPagoSandboxWebhook: (accountDetails) => shouldUseMercadoPagoSandboxWebhook(accountDetails, MERCADOPAGO_ACCESS_TOKEN, MERCADOPAGO_TEST_ACCESS_TOKEN_PREFIX),
+      },
+    });
+    const {
+      mercadoPagoAccount,
+      notificationUrl,
+      providerIdempotencyKey,
+    } = directPaymentContext;
 
     logger.info("PAYMENT_PAYLOAD_BUILD_START", {
       requestId: req.requestContext?.requestId || null,
       orderId: prepared?.order?.id || null,
     });
 
-    const paymentPayload = {
-      transaction_amount: prepared.totalArs,
-      token,
-      payment_method_id: paymentMethodId,
-      installments,
-      description: `RareHunter order #${prepared.order.id}`,
-      external_reference: String(prepared.order.id),
-      ...(notificationUrl ? { notification_url: notificationUrl } : {}),
-      payer: isFakePayment
-        ? {
-            ...(identificationType && identificationNumber
-              ? {
-                  identification: {
-                    type: identificationType,
-                    number: identificationNumber,
-                  },
-                }
-              : {}),
-          }
-        : await resolveMercadoPagoPayer(prepared.order, {
-            accountDetails: mercadoPagoAccount,
-            identificationType,
-            identificationNumber,
-          }),
-      ...(issuerId ? { issuer_id: issuerId } : {}),
-      ...(isFakePayment ? { test_card: testCard } : {}),
-      metadata: {
-        order_id: prepared.order.id,
-        request_id: req.requestContext?.requestId || null,
-        user_id: prepared.order.userId ?? null,
-        payment_mode: PAYMENT_MODE,
+    const paymentPayload = await buildDirectPaymentPayload({
+      prepared,
+      token: effectiveToken,
+      paymentMethodId: effectivePaymentMethodId,
+      issuerId,
+      installments: effectiveInstallments,
+      identificationType,
+      identificationNumber,
+      testCard,
+      requestId: req.requestContext?.requestId || null,
+      paymentMode: PAYMENT_MODE,
+      isFakePayment,
+      mercadoPagoAccount,
+      notificationUrl,
+      dependencies: {
+        resolveMercadoPagoPayer,
       },
-    };
+    });
 
     paymentDebugContext = {
       ...paymentDebugContext,
@@ -7956,20 +7430,21 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
       amount: paymentPayload.transaction_amount,
     });
 
-    const payment = isFakePayment
-      ? await createFakeDirectPayment({
-          prepared,
-          idempotencyKey: providerIdempotencyKey,
-          paymentMethodId,
-          issuerId,
-          installments,
-          requestedStatus: testCard,
-        })
-      : await createRealMercadoPagoPayment({
-          paymentPayload,
-          providerIdempotencyKey,
-          requestSignal: req.requestContext?.signal,
-        });
+    const payment = await executeDirectPayment({
+      isFakePayment,
+      prepared,
+      providerIdempotencyKey,
+      paymentMethodId: effectivePaymentMethodId,
+      issuerId,
+      installments: effectiveInstallments,
+      requestedStatus: testCard,
+      paymentPayload,
+      requestSignal: req.requestContext?.signal,
+      dependencies: {
+        createFakeDirectPayment,
+        createRealMercadoPagoPayment,
+      },
+    });
 
     logger.info("PAYMENT_RESULT_RAW", {
       requestId: req.requestContext?.requestId || null,
@@ -8005,16 +7480,17 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
 
     const paymentStatus = normalizeMercadoPagoPaymentStatus(payment?.status);
     const paymentStatusDetail = normalizeMercadoPagoPaymentStatusDetail(payment?.status_detail);
-    let updatedOrder = await persistDirectPaymentAttempt(req, {
-      orderId: prepared.order.id,
-      userId,
-      paymentId: String(payment?.id || "").trim() || null,
-      paymentStatus,
-      paymentStatusDetail,
-      exchangeRate: prepared.exchangeRate,
-      totalArs: prepared.totalArs,
-      expiresAt: prepared.expiresAt,
-    });
+    let updatedOrder = await persistDirectPaymentAttempt(
+      req,
+      buildPersistDirectPaymentAttemptInput({
+        prepared,
+        orderId: prepared.order.id,
+        userId,
+        payment,
+        paymentStatus,
+        paymentStatusDetail,
+      })
+    );
 
     logDbUpdate("order", updatedOrder.id, [
       "payment_id",
@@ -8038,16 +7514,17 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
       });
 
       if (isFakePayment) {
-        updatedOrder = await finalizeApprovedFakePayment(req, {
-          orderId: updatedOrder.id,
-          userId,
-          paymentId: String(payment?.id || "").trim() || null,
-          paymentStatus,
-          paymentStatusDetail,
-          exchangeRate: prepared.exchangeRate,
-          totalArs: prepared.totalArs,
-          expiresAt: prepared.expiresAt,
-        });
+        updatedOrder = await finalizeApprovedFakePayment(
+          req,
+          buildFinalizeApprovedFakePaymentInput({
+            prepared,
+            orderId: updatedOrder.id,
+            userId,
+            payment,
+            paymentStatus,
+            paymentStatusDetail,
+          })
+        );
         webhookPending = false;
         logEvent("PAYMENT_FLOW", "Fake approved payment finalized", {
           requestId: req.requestContext?.requestId || null,
@@ -8055,19 +7532,13 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
           paymentId: String(payment?.id || "").trim() || null,
         });
       } else {
-        const simulatedPayment = {
-          id: payment?.id,
-          status: paymentStatus,
-          status_detail: paymentStatusDetail,
-          transaction_amount: Number(payment?.transaction_amount || prepared.totalArs),
-          transaction_details: {
-            total_paid_amount: Number(payment?.transaction_amount || prepared.totalArs),
-          },
-          metadata: {
-            order_id: updatedOrder.id,
-          },
-          external_reference: String(updatedOrder.id),
-        };
+        const simulatedPayment = buildApprovedReconciliationPayment({
+          payment,
+          paymentStatus,
+          paymentStatusDetail,
+          totalArs: prepared.totalArs,
+          orderId: updatedOrder.id,
+        });
 
         if (isSandbox) {
           logEvent("WEBHOOK_SIMULATION_START", "Sandbox webhook simulation start", {
@@ -8118,19 +7589,21 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
     }
 
     const cardsById = await getOrderCardsMap([updatedOrder]);
-    const responsePayload = {
-      order: toOrderResponse(updatedOrder, cardsById),
-      payment: {
-        id: payment?.id ? String(payment.id) : null,
-        provider: String(payment?.provider || (isFakePayment ? "fake" : "mercadopago")),
-        status: paymentStatus || null,
-        status_detail: paymentStatusDetail,
-        amount: Number(payment?.transaction_amount || prepared.totalArs),
-        installments: Number(payment?.installments || installments),
-        payment_method_id: String(payment?.payment_method_id || paymentMethodId),
+    const responsePayload = buildDirectPaymentResponse({
+      updatedOrder,
+      cardsById,
+      payment,
+      isFakePayment,
+      paymentStatus,
+      paymentStatusDetail,
+      totalArs: prepared.totalArs,
+      installments: effectiveInstallments,
+      paymentMethodId: effectivePaymentMethodId,
+      webhookPending,
+      dependencies: {
+        toOrderResponse,
       },
-      webhook_pending: webhookPending,
-    };
+    });
 
     logger.info("PAYMENT_RESPONSE", {
       requestId: req.requestContext?.requestId || null,
@@ -8181,14 +7654,15 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
           || error?.message
         );
 
-        await persistDirectPaymentProviderFailure(req, {
-          orderId: prepared.order.id,
-          userId,
-          paymentStatusDetail,
-          exchangeRate: prepared.exchangeRate,
-          totalArs: prepared.totalArs,
-          expiresAt: prepared.expiresAt,
-        });
+        await persistDirectPaymentProviderFailure(
+          req,
+          buildPersistDirectPaymentProviderFailureInput({
+            prepared,
+            orderId: prepared.order.id,
+            userId,
+            paymentStatusDetail,
+          })
+        );
 
         try {
           await recordActivity(userId, "PAYMENT_CREATE_REJECTED", req, {
@@ -8224,7 +7698,14 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
       },
     });
 
-    const paymentDebugPayload = buildPaymentDebugPayload(error || {});
+    const paymentDebugPayload = buildDirectPaymentDebugPayload({
+      error: error || {},
+      preparedOrder: getPreparedOrder(),
+      paymentDebugContext,
+      dependencies: {
+        isOrderPayableStatus,
+      },
+    });
     logEvent("PAYMENT_DEBUG_FULL", "Payment debug payload", {
       requestId: req.requestContext?.requestId || null,
       debug: paymentDebugPayload,
@@ -8263,48 +7744,27 @@ app.post("/api/payments/create", requireAuth, checkoutRateLimit, async (req, res
 
 app.post(MERCADOPAGO_WEBHOOK_PATHS, async (req, res) => {
   try {
-    assertMercadoPagoWebhookConfigured();
-
-    const notificationType = String(req.body?.type || req.query?.type || "payment").trim().toLowerCase();
-    if (notificationType && notificationType !== "payment") {
-      logEvent("MERCADOPAGO_WEBHOOK_IGNORED", "Ignoring unsupported Mercado Pago webhook", {
-        type: notificationType,
-        requestId: req.requestContext?.requestId || null,
-      });
-      res.status(200).json({ received: true, ignored: true });
-      return;
-    }
-
-    const paymentId = extractMercadoPagoPaymentId(req.body || {}, req.query || {});
-    if (!paymentId) {
-      res.status(200).json({ received: true, ignored: true, reason: "missing_payment_id" });
-      return;
-    }
-
-    const signatureMeta = validateMercadoPagoWebhookSignature(req, paymentId);
-
-    const paymentResponse = await mercadoPagoPaymentClient.get({ id: paymentId });
-    const payment = unwrapMercadoPagoBody(paymentResponse);
-    const reconciliationJob = await scheduleMercadoPagoReconciliation(req, {
-      payment,
-      paymentIdOverride: paymentId,
-      providerRequestId: signatureMeta.providerRequestId,
-      source: "mercadopago_webhook",
+    const webhookResult = await processMercadoPagoWebhook({
+      body: req.body,
+      query: req.query,
+      requestId: req.requestContext?.requestId || null,
+      dependencies: {
+        assertMercadoPagoWebhookConfigured,
+        extractMercadoPagoPaymentId,
+        logEvent,
+        mercadoPagoPaymentClient,
+        scheduleMercadoPagoReconciliation: (options) => scheduleMercadoPagoReconciliation(req, options),
+        unwrapMercadoPagoBody,
+        validateMercadoPagoWebhookSignature: (paymentId) => validateMercadoPagoWebhookSignature({
+          headers: req.headers,
+          paymentId,
+          webhookSecret: MERCADOPAGO_WEBHOOK_SECRET,
+          createAppError,
+        }),
+      },
     });
 
-    const reconciliation = reconciliationJob.result || {
-      received: true,
-      ignored: false,
-      reason: null,
-      order: null,
-      outcome: null,
-    };
-
-    return res.status(200).json({
-      received: true,
-      ...(reconciliationJob.queued ? { queued: true, jobId: reconciliationJob.jobId } : {}),
-      ...(reconciliation.ignored ? { ignored: true, reason: reconciliation.reason } : {}),
-    });
+    return res.status(webhookResult.statusCode).json(webhookResult.body);
   } catch (error) {
     logEvent("SERVER_ERROR", "Mercado Pago webhook failed", {
       requestId: req.requestContext?.requestId || null,
@@ -10915,83 +10375,35 @@ app.put("/api/admin/orders/:id/status", requireAdminAuth, async (req, res) => {
       requestId,
     });
 
-    const orderUpdateResult = await prisma.$transaction(async (tx) => {
-      assertRequestActive(req);
-
-      await lockOrderForUpdate(tx, orderId);
-
-      const order = await tx.order.findUnique({
-        where: { id: orderId },
-        include: { items: true, user: true, address: true },
-      });
-
-      if (!order) {
-        throw createAppError("Order not found", {
-          statusCode: 404,
-          code: "ORDER_NOT_FOUND",
-        });
-      }
-
-      if (order.status === nextStatus) {
-        return {
-          order,
-          postCommitEffect: null,
-          ignored: true,
-        };
-      }
-
-      assertExpectedUpdatedAt(order, expectedUpdatedAt);
-
-      const allowedNextStatuses = getAllowedOrderTransitions(order.status, req.user.role);
-      if (!allowedNextStatuses.includes(nextStatus)) {
-        throw createAppError("Invalid order transition for current role", {
-          statusCode: 409,
-          code: "INVALID_ORDER_TRANSITION",
-          details: {
-            current_status: order.status,
-            next_status: nextStatus,
-            allowed_next_statuses: allowedNextStatuses,
-          },
-        });
-      }
-
-      for (const _item of order.items) {
-        assertRequestActive(req);
-      }
-
-      const nextOrder = await updateOrderStatusWithEffects(tx, order, nextStatus);
-
-      await createAdminAuditLog(tx, {
-        actorId: req.user.id,
-        entityType: "order",
-        entityId: orderId,
-        action: "ADMIN_ORDER_STATUS_UPDATED",
-        req,
+    const orderUpdateResult = await updateAdminOrderStatus({
+      orderId,
+      nextStatus,
+      expectedUpdatedAt: (order) => assertExpectedUpdatedAt(order, expectedUpdatedAt),
+      actor: {
+        id: req.user.id,
+        role: req.user.role,
+      },
+      audit: {
+        mutationId: mutationMeta.mutationId,
+        requestId: mutationMeta.requestId,
         routeKey: idempotency.routeKey,
-        before: sanitizeOrderForAudit(order),
-        after: sanitizeOrderForAudit(nextOrder),
-        metadata: {
-          mutationId: mutationMeta.mutationId,
-          requestId: mutationMeta.requestId,
-          previousStatus: order.status,
-          nextStatus,
-        },
-      });
-
-      return {
-        order: nextOrder,
-        postCommitEffect: buildOrderStatusPostCommitEffect(order, nextStatus),
-        ignored: false,
-      };
+      },
+      dependencies: {
+        assertRequestActive: () => assertRequestActive(req),
+        buildOrderStatusPostCommitEffect,
+        createAppError,
+        getAllowedOrderTransitions,
+        getOrderCardsMap,
+        lockOrderForUpdate,
+        prisma,
+        safeJsonStringify,
+        sanitizeOrderForAudit,
+        toOrderResponse,
+        updateOrderStatusWithEffects,
+      },
     });
-
     const updatedOrder = orderUpdateResult.order;
-
-    const cardsById = await getOrderCardsMap([updatedOrder], { adminThumbnail: true });
-    const responsePayload = {
-      order: toOrderResponse(updatedOrder, cardsById, { includeAdminFields: true }),
-      ...(orderUpdateResult.ignored ? { ignored: true } : {}),
-    };
+    const responsePayload = orderUpdateResult.responsePayload;
 
     if (!orderUpdateResult.ignored && orderUpdateResult.postCommitEffect) {
       orderUpdateResult.postCommitEffect.orderSnapshot = buildPublicOrderEventData(updatedOrder);

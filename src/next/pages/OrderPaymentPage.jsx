@@ -8,19 +8,24 @@ import { motion } from "framer-motion";
 import { ArrowLeft, CheckCircle2, Clock3, Loader2, ShieldCheck, TriangleAlert, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
-import { createDirectPayment, createStoreMutationId, fetchMyOrder } from "@/api/store";
+import { createDirectPayment, createStoreMutationId, fetchMyOrder, fetchStorefrontConfig } from "@/api/store";
 import { ENV } from "@/config/env";
 import { useAuth } from "@/lib/auth";
-import { createMercadoPagoBrowserClient, createMercadoPagoCardForm, resolveMercadoPagoPayerEmail } from "@/lib/mercadopago";
+import {
+  createMercadoPagoBrowserClient,
+  createMercadoPagoCardForm,
+  formatMercadoPagoTokenizationError,
+  resolveMercadoPagoPayerEmail,
+} from "@/lib/mercadopago";
 import { orderStatusLabel } from "@/lib/shipping";
 import { getUsableStoredUserSession } from "@/lib/userSession";
 import { formatArgentinaDateTime } from "@/utils/dateTime";
 
-/** @typedef {{ unmount?: () => void, getCardFormData?: () => CardFormDataLike, createCardToken?: () => Promise<string | { id?: string | null, token?: string | null } | null> }} MercadoPagoCardFormLike */
+/** @typedef {{ unmount?: () => void, getCardFormData?: () => CardFormDataLike }} MercadoPagoCardFormLike */
 /** @typedef {{ token?: string, paymentMethodId?: string, issuerId?: string|number|null, installments?: string|number|null, identificationType?: string|null, identificationNumber?: string|null }} CardFormDataLike */
 /** @typedef {{ status?: string, status_detail?: string, order_id?: string|number|null }} PaymentAttemptLike */
 /** @typedef {{ id?: string|number|null }} PaymentOrderSummaryLike */
-/** @typedef {{ orderId: number, token: string, payment_method_id: string, issuer_id?: string|number|null, installments: number, identification?: { type: string, number: string } }} DirectPaymentPayload */
+/** @typedef {{ orderId: number, token?: string, payment_method_id?: string, issuer_id?: string|number|null, installments?: number, identification?: { type: string, number: string }, test_card?: string }} DirectPaymentPayload */
 /** @typedef {{ payment?: PaymentAttemptLike|null, order?: PaymentOrderSummaryLike|null }} DirectPaymentResult */
 /** @typedef {Error & { provider?: { cause?: Array<{ description?: string }> } }} ProviderErrorLike */
 /** @typedef {{ id: string|number, card_id?: string|number, quantity?: number, price?: number|string, subtotal?: number|string, card?: { name?: string|null }|null }} OrderItemLike */
@@ -141,24 +146,7 @@ function createCardFormIds(orderId) {
  * @param {CardFormDataLike | null | undefined} cardFormData
  */
 async function resolveCardFormToken(cardForm, cardFormData) {
-  if (typeof cardForm?.createCardToken === "function") {
-    try {
-      const createdToken = await cardForm.createCardToken();
-      if (typeof createdToken === "string" && createdToken.trim()) {
-        return createdToken.trim();
-      }
-
-      if (createdToken && typeof createdToken === "object") {
-        const nestedToken = String(createdToken.id || createdToken.token || "").trim();
-        if (nestedToken) {
-          return nestedToken;
-        }
-      }
-    } catch {
-      // Fallback al token disponible en getCardFormData.
-    }
-  }
-
+  void cardForm;
   return String(cardFormData?.token || "").trim();
 }
 
@@ -223,6 +211,11 @@ export default function OrderPaymentPage({ orderId }) {
   const authRedirectHref = isValidOrderId ? buildAuthRedirectPath(`/checkout/pay/${numericOrderId}`) : buildAuthRedirectPath("/orders");
   const isRestoringSession = !isBootstrapping && !isAuthenticated && hasPersistedSession === true && isValidOrderId;
   const shouldRedirectToAuth = !isBootstrapping && !isAuthenticated && hasPersistedSession === false && isValidOrderId;
+  const storefrontConfigQuery = useQuery({
+    queryKey: ["storefront-config"],
+    queryFn: fetchStorefrontConfig,
+    staleTime: 1000 * 60,
+  });
   const orderQuery = useQuery({
     queryKey: ["my-order", numericOrderId],
     queryFn: () => fetchMyOrder(numericOrderId),
@@ -251,6 +244,10 @@ export default function OrderPaymentPage({ orderId }) {
     return Number.isFinite(rawValue) ? rawValue.toFixed(2) : "0.00";
   }, [order?.total, order?.total_ars]);
   const currentOrderId = Number(order?.id || 0);
+  const runtimePaymentMode = String(storefrontConfigQuery.data?.storefront?.payment_mode || "")
+    .trim()
+    .toLowerCase();
+  const isFakePaymentMode = runtimePaymentMode === "fake";
   const payerEmail = resolveMercadoPagoPayerEmail({
     publicKey: ENV.MP_PUBLIC_KEY,
     preferredEmail: String(order?.customer_email || user?.email || "").trim(),
@@ -305,6 +302,22 @@ export default function OrderPaymentPage({ orderId }) {
     onError: handlePaymentError,
   }));
 
+  const submitFakePayment = async (requestedStatus) => {
+    if (!order) {
+      return;
+    }
+
+    setSdkError("");
+    setLastAttempt(null);
+
+    await paymentMutation.mutateAsync({
+      orderId: Number(order.id),
+      payment_method_id: "visa",
+      installments: 1,
+      test_card: requestedStatus,
+    });
+  };
+
   useEffect(() => {
     paymentMutationRef.current = paymentMutation;
   }, [paymentMutation]);
@@ -336,6 +349,18 @@ export default function OrderPaymentPage({ orderId }) {
   }, [orderQuery, shouldPollOrder]);
 
   useEffect(() => {
+    if (isFakePaymentMode) {
+      setSdkReady(false);
+      setSdkError("");
+      try {
+        cardFormRef.current?.unmount?.();
+      } catch {
+        // noop
+      }
+      cardFormRef.current = null;
+      return undefined;
+    }
+
     if (!isAuthenticated || !currentOrderId || !canPay || !ENV.MP_PUBLIC_KEY) {
       setSdkReady(false);
       return undefined;
@@ -448,10 +473,34 @@ export default function OrderPaymentPage({ orderId }) {
               setLastAttempt(null);
 
               const cardFormData = localCardForm?.getCardFormData?.() || {};
-              const token = await resolveCardFormToken(localCardForm, cardFormData);
-              if (!token) {
-                throw new Error("Mercado Pago no genero un token de tarjeta valido.");
+              let token = "";
+              try {
+                token = await resolveCardFormToken(localCardForm, cardFormData);
+              } catch (error) {
+                const message = formatMercadoPagoTokenizationError(error, {
+                  publicKey: ENV.MP_PUBLIC_KEY,
+                  origin: typeof window !== "undefined" ? window.location.origin : "",
+                });
+                setSdkError(message);
+                toast.error("No se pudo tokenizar la tarjeta", {
+                  description: message,
+                });
+                return;
               }
+
+              if (!token) {
+                const message = formatMercadoPagoTokenizationError("Mercado Pago no genero un token de tarjeta valido.", {
+                  publicKey: ENV.MP_PUBLIC_KEY,
+                  origin: typeof window !== "undefined" ? window.location.origin : "",
+                });
+                setSdkError(message);
+                toast.error("No se pudo tokenizar la tarjeta", {
+                  description: message,
+                });
+                return;
+              }
+
+              setSdkError("");
 
               const paymentMethodId = String(cardFormData.paymentMethodId || "").trim();
               if (!paymentMethodId) {
@@ -513,7 +562,7 @@ export default function OrderPaymentPage({ orderId }) {
         // noop
       }
     };
-  }, [amount, canPay, currentOrderId, isAuthenticated, ownsOrder, payerEmail, paymentFormIds, user?.full_name, user?.username]);
+  }, [amount, canPay, currentOrderId, isAuthenticated, isFakePaymentMode, ownsOrder, payerEmail, paymentFormIds, user?.full_name, user?.username]);
 
   if (!isValidOrderId) {
     return (
@@ -665,7 +714,7 @@ export default function OrderPaymentPage({ orderId }) {
               <div className="rounded-2xl border border-border bg-background/60 px-4 py-3 text-xs text-muted-foreground">Orden #{numericOrderId}</div>
             </div>
 
-            {!ENV.MP_PUBLIC_KEY ? (
+            {!ENV.MP_PUBLIC_KEY && !isFakePaymentMode ? (
               <div className="mt-6 rounded-2xl border border-rose-400/25 bg-rose-400/10 p-4 text-sm text-rose-200">Falta configurar NEXT_PUBLIC_MP_PUBLIC_KEY en el storefront.</div>
             ) : null}
 
@@ -703,13 +752,47 @@ export default function OrderPaymentPage({ orderId }) {
 
             {order && canPay ? (
               <div className="mt-6 space-y-4">
-                {!sdkReady ? (
+                {isFakePaymentMode ? (
+                  <>
+                    <div className="rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm text-amber-100">
+                      El backend está en PAYMENT_MODE=fake. Este flujo de prueba evita la tokenización de Mercado Pago y crea intentos simulados directo contra tu API.
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <button
+                        type="button"
+                        onClick={() => { void submitFakePayment("approved"); }}
+                        disabled={paymentMutation.isPending}
+                        className="inline-flex h-12 items-center justify-center rounded-2xl bg-emerald-400 px-5 text-sm font-bold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {paymentMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Aprobar fake"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { void submitFakePayment("pending"); }}
+                        disabled={paymentMutation.isPending}
+                        className="inline-flex h-12 items-center justify-center rounded-2xl bg-amber-300 px-5 text-sm font-bold text-slate-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {paymentMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Pendiente fake"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { void submitFakePayment("rejected"); }}
+                        disabled={paymentMutation.isPending}
+                        className="inline-flex h-12 items-center justify-center rounded-2xl bg-rose-400 px-5 text-sm font-bold text-white transition hover:bg-rose-300 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {paymentMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Rechazar fake"}
+                      </button>
+                    </div>
+                  </>
+                ) : !sdkReady ? (
                   <div className="flex items-center gap-2 rounded-2xl border border-border bg-background/50 px-4 py-3 text-sm text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Cargando formulario seguro de Mercado Pago...
                   </div>
                 ) : null}
 
+                {!isFakePaymentMode ? (
                 <div className="overflow-hidden rounded-[28px] border border-violet-500/20 bg-slate-950/90 p-3 shadow-[0_24px_60px_rgba(15,23,42,0.18),0_0_40px_rgba(139,92,246,0.12)] backdrop-blur-xl">
                   <form id={paymentFormIds.form} onSubmit={(event) => event.preventDefault()} className="grid gap-3 rounded-[24px] bg-slate-950/95 p-4 sm:grid-cols-2">
                     <div className="space-y-2 sm:col-span-2">
@@ -769,13 +852,14 @@ export default function OrderPaymentPage({ orderId }) {
                     </button>
                   </form>
                 </div>
+                ) : null}
 
                 <div className="rounded-2xl border border-violet-500/15 bg-violet-500/5 p-4 text-sm text-muted-foreground backdrop-blur-sm">
                   <div className="flex items-start gap-3">
                     <ShieldCheck className="mt-0.5 h-4 w-4 text-violet-400" />
                     <div>
-                      <p className="font-semibold text-violet-300">Pago seguro con Mercado Pago</p>
-                      <p className="mt-1 text-muted-foreground">Este checkout usa MercadoPago.js v2 con CardForm oficial. No se envian numero de tarjeta ni CVV al backend.</p>
+                      <p className="font-semibold text-violet-300">{isFakePaymentMode ? "Prueba fake de pagos" : "Pago seguro con Mercado Pago"}</p>
+                      <p className="mt-1 text-muted-foreground">{isFakePaymentMode ? "Este modo usa tu backend para simular aprobaciones, pendientes o rechazos sin pasar por Mercado Pago." : "Este checkout usa MercadoPago.js v2 con CardForm oficial. No se envian numero de tarjeta ni CVV al backend."}</p>
                     </div>
                   </div>
                 </div>

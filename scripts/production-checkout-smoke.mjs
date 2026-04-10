@@ -316,7 +316,7 @@ async function waitForOrderUpdate(accessToken, orderId, matcher, timeoutMs = 200
   return null;
 }
 
-async function runUiSmoke({ session, card, primaryAddressId, secondaryAddressId, primaryRate, secondaryRate, orderId }) {
+async function runUiSmoke({ session, card, carrier, primaryAddressId, secondaryAddressId, primaryRate, secondaryRate, orderId }) {
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
     extraHTTPHeaders: {
@@ -353,6 +353,24 @@ async function runUiSmoke({ session, card, primaryAddressId, secondaryAddressId,
   try {
     await page.goto(`${STOREFRONT_URL}/cart?ts=${timestamp}`, { waitUntil: "domcontentloaded" });
     await page.getByRole("heading", { name: "Tu Carrito" }).waitFor({ timeout: 20000 });
+    await page.waitForFunction(
+      ({ fullName }) => {
+        if (!fullName) {
+          return true;
+        }
+
+        return String(document.body?.textContent || "").includes(fullName);
+      },
+      { fullName: session?.user?.full_name || "" },
+      { timeout: 20000 }
+    );
+
+    const carrierButtonName = String(carrier || "").trim().toLowerCase() === "andreani"
+      ? /Andreani/i
+      : /Correo Arg\./i;
+
+    await page.getByRole("button", { name: carrierButtonName }).click();
+    await page.waitForTimeout(1000);
     await page.locator("select").waitFor({ timeout: 20000 });
 
     const addressSelect = page.locator("select").first();
@@ -552,6 +570,7 @@ async function main() {
   const ui = await runUiSmoke({
     session,
     card,
+    carrier: pair.carrier,
     primaryAddressId: pair.primary.quote.address.id,
     secondaryAddressId: pair.secondary.quote.address.id,
     primaryRate,
